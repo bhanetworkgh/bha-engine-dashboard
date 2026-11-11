@@ -366,6 +366,10 @@ export interface HoldRow {
   reason_tag: string | null;
   suggested: Obj | null;
   released_parts: string[];
+  /** When Jason decided the note (the day the share was held), ISO. */
+  decided_at?: string | null;
+  /** The earlier log's own date (its Timestamp), ISO, when the row is held. */
+  logged_at?: string | null;
 }
 export interface ReleasePart {
   what: string;
@@ -382,10 +386,14 @@ export interface ReleaseItem {
   release_share: number;
   parts: ReleasePart[];
   still_held: string[];
+  release_condition: string | null;
+  logged_at: string | null;
+  held_at: string | null;
+  link: string;
 }
 export interface Releases {
   items: ReleaseItem[];
-  open: { submission_id: string; codex_entry_id: string | null; held_share: number; release_condition: string | null }[];
+  open: { submission_id: string; codex_entry_id: string | null; held_share: number; release_condition: string | null; logged_at: string | null; held_at: string | null; link: string }[];
   total_share: number;
   line: string;
 }
@@ -440,6 +448,17 @@ export function heldParts(h: HoldRow): { what: string; held_for: string; share: 
   return list.map((p) => ({ what: p.what, held_for: p.held_for, share: r3(sum > 0 ? (p.raw / sum) * h.held_share : h.held_share / list.length) }));
 }
 
+/** The earlier log's page on the dashboard, so Jason can open what was held and why (11 Nov 2026, Destiny). */
+export function logLink(h: { codex_entry_id: string | null; submission_id: string }): string {
+  const base = (process.env.PUBLIC_DASHBOARD_URL || 'https://dashboard.bhanetwork.org').replace(/\/+$/, '');
+  return `${base}/codex/${encodeURIComponent(h.codex_entry_id || h.submission_id)}`;
+}
+const iso = (v: unknown): string | null => {
+  if (v == null || v === '') return null;
+  const d = new Date(v as string);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+};
+
 /** Matches what a log claims against the builder's open holds. Pure. */
 export function matchReleases(holds: HoldRow[], claims: ReleaseClaim[]): Releases {
   const items: ReleaseItem[] = [];
@@ -448,8 +467,9 @@ export function matchReleases(holds: HoldRow[], claims: ReleaseClaim[]): Release
     if (h.held_share <= 0) continue;
     const ids = [h.codex_entry_id, h.submission_id].filter((x): x is string => !!x).map((x) => x.toLowerCase());
     const claim = claims.find((c) => ids.some((id) => c.log.toLowerCase().includes(id) || id.includes(c.log.toLowerCase())));
+    const about = { release_condition: h.release_condition, logged_at: iso(h.logged_at), held_at: iso(h.decided_at), link: logLink(h) };
     if (!claim) {
-      open.push({ submission_id: h.submission_id, codex_entry_id: h.codex_entry_id, held_share: h.held_share, release_condition: h.release_condition });
+      open.push({ submission_id: h.submission_id, codex_entry_id: h.codex_entry_id, held_share: h.held_share, ...about });
       continue;
     }
     const parts: ReleasePart[] = heldParts(h).map((p) => {
@@ -474,7 +494,7 @@ export function matchReleases(holds: HoldRow[], claims: ReleaseClaim[]): Release
       return { ...p, ok: false, proof: best.proof, why: 'the proof named is narrative only' };
     });
     const release_share = r3(Math.min(h.held_share, parts.filter((p) => p.ok).reduce((a, p) => a + p.share, 0)));
-    items.push({ submission_id: h.submission_id, codex_entry_id: h.codex_entry_id, held_share: h.held_share, release_share, parts, still_held: parts.filter((p) => !p.ok).map((p) => p.what) });
+    items.push({ submission_id: h.submission_id, codex_entry_id: h.codex_entry_id, held_share: h.held_share, release_share, parts, still_held: parts.filter((p) => !p.ok).map((p) => p.what), ...about });
   }
   const total_share = r3(items.reduce((a, i) => a + i.release_share, 0));
   const ready = items.filter((i) => i.release_share > 0);
@@ -491,10 +511,12 @@ export async function releasesFor(fields: Obj, db: Queryable = { query } as Quer
   const builder = str(fields['Builder User ID'], 40);
   const self = str(fields['Submission ID'], 200);
   if (!builder) return null;
-  const r = await db.query<{ submission_id: string; codex_entry_id: string | null; held_share: number; release_condition: string | null; reason_tag: string | null; suggested: Obj | null; released_parts: string[] | null }>(
-    `SELECT submission_id, codex_entry_id, held_share::float8 AS held_share, release_condition, reason_tag, suggested, released_parts
-       FROM engine_pay_notes WHERE builder_slack_id = $1 AND held_share > 0 AND submission_id <> $2
-      ORDER BY decided_at DESC LIMIT 30`,
+  const r = await db.query<{ submission_id: string; codex_entry_id: string | null; held_share: number; release_condition: string | null; reason_tag: string | null; suggested: Obj | null; released_parts: string[] | null; decided_at: string | null; logged_at: string | null }>(
+    `SELECT n.submission_id, n.codex_entry_id, n.held_share::float8 AS held_share, n.release_condition, n.reason_tag, n.suggested, n.released_parts,
+            n.decided_at::text AS decided_at,
+            (SELECT c.fields->>'Timestamp' FROM engine_codex_submissions c WHERE c.fields->>'Submission ID' = n.submission_id ORDER BY c.id DESC LIMIT 1) AS logged_at
+       FROM engine_pay_notes n WHERE n.builder_slack_id = $1 AND n.held_share > 0 AND n.submission_id <> $2
+      ORDER BY n.decided_at DESC LIMIT 30`,
     [builder, self],
   );
   if (!r.rows.length) return null;

@@ -50,18 +50,34 @@ export function payBlocks(sug: ReturnType<typeof paySuggest.fromRow>, why: strin
 
 /**
  * Pay held on the builder's earlier logs (11 Nov 2026): what this log proves and Approve will release when
- * the box is left ticked, and every hold it does not address, so a held share is never forgotten. Pure.
+ * the box is left ticked, and every hold it does not address, so a held share is never forgotten. Each earlier
+ * log is its own bold block with its Codex ID, the day it was logged, the day the pay was held, a link to it
+ * on the dashboard and why it was held (Destiny, 11 Nov: "so he doesn't miss it at all"). The same shape is in
+ * n8n's Build Layer 1 Payload. Pure.
  */
 export function releaseBlocks(sug: ReturnType<typeof paySuggest.fromRow>): Block[] {
   const r = (sug?.releases ?? null) as paySuggest.Releases | null;
   if (!r || (!r.items.length && !r.open.length)) return [];
-  const lines: string[] = [];
+  const day = (v: string | null | undefined) => (v ? new Date(v).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Africa/Lagos' }) : '(no date recorded)');
+  const id = (x: { codex_entry_id: string | null; submission_id: string }) => x.codex_entry_id ?? x.submission_id;
+  const about = (x: { logged_at?: string | null; held_at?: string | null; link?: string }) => `*Logged ${day(x.logged_at)} · held ${day(x.held_at)} · <${x.link || paySuggest.logLink(x as never)}|Open the log on the dashboard>*`;
+  const why = (c: string | null | undefined) => (c ? `\n*Held because:* ${cap(c, 400)}` : '');
+  const out: Block[] = [
+    section(r.total_share > 0
+      ? `*:moneybag: Held pay on earlier logs: Approve releases ${paySuggest.pct(r.total_share)} of a day while the box is ticked.*`
+      : '*:hourglass_flowing_sand: Held pay on earlier logs: this log proves none of it yet.*'),
+  ];
   for (const i of r.items) {
-    for (const p of i.parts) lines.push(`${i.codex_entry_id ?? i.submission_id}: ${p.what}, ${paySuggest.pct(p.share)}: ${p.ok ? `proven (${p.proof}). ${p.why}` : `still held, ${p.why}`}`);
+    const head = i.release_share > 0
+      ? `*:white_check_mark: Release ${paySuggest.pct(i.release_share)} of a day held on ${id(i)}*` + (i.release_share < i.held_share ? `\n*${paySuggest.pct(i.held_share - i.release_share)} stays held: not proven by this log.*` : '')
+      : `*:hourglass_flowing_sand: Still held: ${paySuggest.pct(i.held_share)} of a day on ${id(i)}, not proven by this log*`;
+    out.push(section(cap(`${head}\n${about(i)}${why(i.release_condition)}`, 2900)));
+    out.push(list(i.parts.slice(0, 8).map((p) => `${p.what}, ${paySuggest.pct(p.share)}: ${p.ok ? `proven (${p.proof}). ${p.why}` : `still held, ${p.why}`}`)));
   }
-  for (const o of r.open) lines.push(`${o.codex_entry_id ?? o.submission_id}: ${paySuggest.pct(o.held_share)} still held, not addressed by this log${o.release_condition ? ` (held until: ${cap(o.release_condition, 200)})` : ''}`);
-  const head = r.total_share > 0 ? `*Release from earlier logs:* ${paySuggest.pct(r.total_share)} of a day, released on Approve while the box is ticked.` : '*Held pay on earlier logs:* nothing proven by this log yet.';
-  return [section(cap(head, 2900)), list(lines.slice(0, 12))];
+  for (const o of r.open.slice(0, 6)) {
+    out.push(section(cap(`*:hourglass_flowing_sand: Still held: ${paySuggest.pct(o.held_share)} of a day on ${id(o)}, not addressed by this log*\n${about(o)}${why(o.release_condition)}`, 2900)));
+  }
+  return out;
 }
 
 /** The fourth part of the button value: what the Approve pop-up opens on. Same shape as Build Layer 1 Payload. Pure. */
