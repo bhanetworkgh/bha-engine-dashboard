@@ -15090,3 +15090,10 @@ Files:      server/src/payNote.ts, server/src/migrations.ts (131), server/src/mc
 Problem:    delete_codex_log removed the log and its pay rows but not its pay note, and engine_pay_notes refuses every delete ("pay records are corrected forward, never removed or rewritten").
 Fix:        removeForDeletedLog: only a note whose log is gone and with nothing released; the note goes to record_deletions and a 'remove' line to the history first, in one transaction, then the delete under a transaction-local setting the new trigger checks. delete_codex_log removes the note with the log and refuses a log with released pay. delete_pay_note and POST /api/engine/pay-note-delete for a note already left behind. Trigger checked on a local Postgres 16: no setting, another id, a live log and a released share refused; the deleted log's note removed; the setting gone after commit; history still frozen. 4 pure checks pass.
 Decision:   The history line stays: Jason's rule that pay history is never removed holds; only the current note of a deleted log goes.
+
+## 2026-11-11 16:40 — Narration audio moved onto the dashboard
+Intent:     make one mp3 of a full 10,000-word narration for Otter.
+Files:      server/src/narrationAudio.ts (new), server/src/index.ts, CLAUDE.md
+Problem:    Engine — Narration To Audio execution 82975 crashed at Join Audio: "Workflow did not finish, possible out-of-memory issue". A full narration is 23 pieces and about 25 MB of mp3; arcs 1 to 4 alone were 5.7 MB (run 82013).
+Fix:        POST /api/engine/narration-audio does the split (the n8n node's own), speaks each piece through OpenRouter, joins the bytes and uploads one file as Bays to the requester's DM, in the background. Failures DM the requester with the step; narration_audio_sent / _failed events.
+Decision:   the join belongs where the memory is; n8n keeps only the trigger and the hand-over. Recipient limited to Destiny or Jason.

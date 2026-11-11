@@ -77,6 +77,7 @@ import * as systemFeeds from './systemFeeds';
 import * as genieBuilder from './genieBuilder';
 import * as mediaWeekly from './mediaWeekly';
 import * as payNote from './payNote';
+import * as narrationAudio from './narrationAudio';
 import * as reviewCard from './reviewCard';
 import * as paySuggest from './paySuggest';
 import * as logPrecheck from './logPrecheck';
@@ -917,6 +918,26 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         },
         describe: (r) => String(r.message ?? '').slice(0, 400),
         hint: 'POST { submission_id, removed_by (Destiny or Jason, Slack id), reason, confirm "DELETE <submission_id>", dry_run? }. Only the note of a log no longer on the Codex, with nothing released.',
+      },
+      /** Narration to one mp3 in Destiny's or Jason's DM, made here because n8n ran out of memory joining it (11 Nov 2026, narrationAudio.ts). */
+      '/api/engine/narration-audio': {
+        kind: 'codex',
+        store: async (b) => {
+          let job: narrationAudio.Job;
+          try {
+            job = narrationAudio.parse(b);
+          } catch (e) {
+            if (e instanceof narrationAudio.NarrationError) throw new systemFeeds.FeedError(422, `${e.reason}: ${e.message}`);
+            throw e;
+          }
+          const { chunks, characters } = narrationAudio.split(job.text);
+          if (b.dry_run !== true) {
+            void narrationAudio.run(job).catch((e) => console.error('[narration-audio] crashed:', e));
+          }
+          return { ok: true, started: b.dry_run !== true, dry_run: b.dry_run === true, title: job.title, deliver_to: job.deliver_to, pieces: chunks.length, characters, inserted: 0, updated: 0, unchanged: 1 };
+        },
+        describe: (r) => `${r.dry_run ? 'would make' : 'making'} narration audio "${r.title}": ${r.pieces} pieces, ${r.characters} characters, to ${r.deliver_to}`.slice(0, 400),
+        hint: 'POST { text or text_b64, title?, deliver_to? (Destiny or Jason), model?, voice?, dry_run? }. Answers at once; the mp3 arrives in the DM, or a DM saying where it stopped.',
       },
       /** The pay part of a log's review card, rewritten in place from its Pay Suggestion (10 Nov 2026, reviewCard.ts). */
       '/api/engine/review-card/refresh-pay': {
