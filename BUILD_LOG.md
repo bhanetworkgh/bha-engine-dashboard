@@ -15069,3 +15069,10 @@ Files:      server/src/systemFeeds.ts, server/test/vfarm-presence.test.cjs, docs
 Problem:    The 12:55 entry said vFarm never sent a going-silent frame. Wrong: vFarm's develop branch (alerts_pipeline/presence.py, envelope.presence) sends device_offline after the grace period and device_online on return, both with the OFFLINE event's id as devices[].event_id. Our upsert on event_id stored the back-online frame over the fire. engine_writes shows it: uno_board_01 inserted 08:20/08:22, updated 08:33/08:35 UTC.
 Fix:        alertEventKey: a device_online frame that carries vFarm's event_id is stored under `<event_id>:online`; the presence alert id stays the raw event id, so the fire opens it and the back-online frame closes it. Test 4 added (4 checks pass).
 Decision:   No change asked of Jegan; the proof is the next real drop-out. The draft to him corrects the earlier ask.
+
+## 2026-11-11 14:40 — delete_codex_doc: remove a test log's BHARAG copy
+Intent:     Prove the Codex write door on a real approval of a test log, and be able to clean up after.
+Files:      server/src/mcp/sopTools.ts, server/test/codex-doc-delete.test.cjs, package.json, CLAUDE.md
+Problem:    store.deleteCodex (the Codex page's delete) and delete_codex_log remove the dashboard row and pay rows only; nothing could remove the Codex document from BHARAG (delete_sop refuses a title not starting "SOP").
+Fix:        delete_codex_doc finds the documents by metadata codex_entry_id (edit_codex_doc's lookup), keeps each one's text on the audit line, deletes, and reads each id again. 7 pure checks pass.
+Decision:   Person-only, like edit_codex_doc: no agent scope, refused on any agent token.

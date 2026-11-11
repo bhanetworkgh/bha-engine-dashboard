@@ -481,6 +481,79 @@ export const editCodexDocTool: ToolDefinition = {
   },
 };
 
+/**
+ * delete_codex_doc (11 Nov 2026, Destiny). Remove a Codex entry's document from BHARAG. The Codex page's delete and
+ * delete_codex_log take the dashboard row and its pay rows only, so a test log approved to prove the write door left
+ * its BHARAG copy behind with nothing able to remove it. Finds every Codex-workspace document whose metadata
+ * codex_entry_id is the entry (edit_codex_doc's lookup), keeps each one's whole text on the audit line first, removes
+ * them and reads each id again to prove it is gone. A person's tool: Destiny or Jason, refused on any agent token,
+ * confirm "DELETE <Codex Entry ID>", a reason. Audited (kind bharag_codex).
+ */
+export const deleteCodexDocTool: ToolDefinition = {
+  name: 'delete_codex_doc',
+  description:
+    "Remove a Codex entry's document(s) from BHARAG's Codex workspace, for a test or duplicate log whose dashboard row is deleted (the Codex page's delete and delete_codex_log do not touch BHARAG). Finds every document whose metadata codex_entry_id is the entry. confirm must be exactly \"DELETE <Codex Entry ID>\"; reason required; requester_user_id Destiny or Jason; refused on any agent token. Each document's whole text is kept on the audit line before it is removed, and each id is read again to prove it is gone. dry_run lists what would be removed. Audited on engine_mcp_writes.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      codex_entry_id: { type: 'string', description: 'CODEX-...' },
+      confirm: { type: 'string', description: 'Exactly "DELETE <Codex Entry ID>".' },
+      reason: { type: 'string' },
+      requester_user_id: { type: 'string', description: 'Destiny or Jason.' },
+      dry_run: { type: 'boolean' },
+    },
+    required: ['codex_entry_id', 'reason', 'requester_user_id'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true, title: 'Remove a Codex document from BHARAG' },
+  handler: async (args, deps) => {
+    const entry = str(args.codex_entry_id);
+    const reason = str(args.reason).slice(0, 300);
+    const requester = str(args.requester_user_id) || null;
+    const dry = args.dry_run === true;
+    const audit = await auditOpen({ tool: 'delete_codex_doc', args, access: deps.access, kind: 'bharag_codex', requester, dry_run: dry });
+    const refuse = async (why: string, message: string) => {
+      await auditClose(audit, { outcome: 'refused', detail: `${why}: ${message}`, natural_id: entry || null, guard_result: { reason: why } });
+      return { ok: false, deleted: false, reason: why, message: `${message} Nothing was removed.`, audit_id: audit };
+    };
+    if (deps.agent) return refuse('agent_not_permitted', `An agent (${deps.agent}) may not remove a Codex document: Destiny or Jason does, through the connector.`);
+    if (!requester || !ADMIN_IDS.includes(requester)) return refuse('not_permitted', 'Only Destiny or Jason can remove a Codex document. Send requester_user_id.');
+    if (!reason) return refuse('reason_required', 'Send a reason.');
+    if (!/^CODEX-/.test(entry)) return refuse('bad_entry', 'codex_entry_id must be a CODEX-... id.');
+    const keyVar = bharag.ingestKeyVar('codex');
+    const found = await bharag.findByMetadata(keyVar, 'codex_entry_id', entry);
+    if (!found.ids.length) return refuse('not_found', `No document in the Codex workspace carries ${entry} (${found.scanned} read${found.complete ? '' : ', stopped at the page cap'}).`);
+    const docs: { id: string; title: string | null; content: string | null; metadata: unknown }[] = [];
+    for (const id of found.ids) {
+      const d = await bharag.getDocument('codex', id, keyVar);
+      docs.push({ id, title: d?.title ?? null, content: d?.raw_content ?? null, metadata: d?.metadata ?? null });
+    }
+    if (dry) {
+      await auditClose(audit, { outcome: 'dry_run', detail: `would remove ${docs.length} document(s) for ${entry}: ${docs.map((d) => d.id).join(', ')}`, natural_id: entry });
+      return { ok: true, deleted: false, dry_run: true, documents: docs.map((d) => ({ id: d.id, title: d.title, characters: d.content?.length ?? 0 })), message: 'Dry run: nothing was removed.', audit_id: audit };
+    }
+    if (str(args.confirm) !== `DELETE ${entry}`) return refuse('confirm_required', `confirm must be exactly "DELETE ${entry}".`);
+    const results: { id: string; removed: boolean; detail: string }[] = [];
+    for (const d of docs) {
+      const r = await bharag.deleteDocument(keyVar, d.id);
+      if (!r.ok) { results.push({ id: d.id, removed: false, detail: r.detail }); continue; }
+      const back = await bharag.getDocument('codex', d.id, keyVar);
+      results.push({ id: d.id, removed: back === null, detail: back === null ? 'gone' : 'still reads after the delete' });
+    }
+    const allGone = results.every((x) => x.removed);
+    await auditClose(audit, {
+      outcome: allGone ? 'deleted' : 'failed',
+      detail: `removed ${results.filter((x) => x.removed).length} of ${docs.length} document(s) for ${entry}: ${results.map((x) => `${x.id} ${x.detail}`).join('; ')} — ${reason}`,
+      natural_id: entry,
+      before: docs,
+      after: results,
+    });
+    return allGone
+      ? { ok: true, deleted: true, verified_gone: true, documents: results, message: `Removed ${results.length} document(s) for ${entry} from BHARAG. Their text is kept on audit line ${audit}.`, audit_id: audit }
+      : { ok: false, deleted: results.some((x) => x.removed), verified_gone: false, documents: results, reason: 'not_all_removed', raise: true, message: 'Not every document was removed.', audit_id: audit };
+  },
+};
+
 export const SOP_READ_TOOLS: ToolDefinition[] = [readSopTool];
 
-export const SOP_WRITE_TOOLS: ToolDefinition[] = [logSopTool, deleteSopTool, editSopTool, editCodexDocTool];
+export const SOP_WRITE_TOOLS: ToolDefinition[] = [logSopTool, deleteSopTool, editSopTool, editCodexDocTool, deleteCodexDocTool];
