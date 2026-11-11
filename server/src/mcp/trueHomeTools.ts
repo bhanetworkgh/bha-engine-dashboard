@@ -140,11 +140,15 @@ export const readRecordHistory: ToolDefinition = {
     await mirror
       .logWrite({ endpoint: 'mcp:read_record_history', kind, method: 'MCP', key_label: deps.access === 'write' ? 'MCP_WRITE_TOKEN' : 'MCP_SECRET', outcome: 'read', detail: `${id || natural} ${versions.length}`, ms: Date.now() - t0 })
       .catch(() => undefined);
+    // 11 Nov 2026: incidents and farm state are copies here (run 82148: North Star read an incident's history
+    // and called the dashboard's table the incidents' home). Their history says so, like every other copy read.
+    const copyOf = kind === 'incidents' ? await copyNote('read_self_healing') : kind.startsWith('vfarm') ? await copyNote('read_vfarm_history') : null;
     return {
       ok: true,
       kind,
       table,
       record: id || natural,
+      ...(copyOf ? { copy_of: copyOf, note_on_copy: 'This is the history of the dashboard\'s copy, not of the original. The true home is named in copy_of.' } : {}),
       versions,
       note: versions.length ? `${versions.length} earlier version(s), newest first. The current version is the record itself (find_records).` : 'No earlier version is held: the record has not changed since history began on 11 Nov 2026, or it is not held.',
     };

@@ -15041,3 +15041,10 @@ Files:      none in this repo. n8n: Bays — Guarded BHARAG Ingest (ydw7YTVyisvY
 Problem:    Pushing 8dab667 redeployed the dashboard at 09:12 and interrupted both running draft evals ("the server restarted during the run"); Destiny's Render change booted it again at 09:23.
 Fix:        Production proof: Destiny's real question to Research Twin ran as Research Twin — Agent Delivery 82088 (ask RT-1794389043410-2INZ): tool calls "load_skill > anthropic.tool_search > BHA_Dashboard_read_true_home" (engine_writes seq 288726), a correct answer (farm state lives in vFarm, the dashboard holds a copy), and Write Through Dashboard answered stored true, BHARAG document f261dd6b-67fa-4650-b50c-9310acadeadf, key BHARAG_RESEARCH_TWIN; Raise If Anything Failed "stored f261dd6b". The evals were restarted as DRAFT-202611110924-HZ13 (Bays) and DRAFT-202611110924-236Z (North Star), and nothing is pushed while they run. North Star's delivery and the Rotator got the same change as Research Twin's (one write call, stored === true, no retry, the ingest node removed); the register's SOPs row updated.
 Decision:   Only Commercial stays on n8n's own key. No push to the repo while an eval runs, since every push redeploys and kills the run.
+
+## 2026-11-11 11:50 — The history of a copy says it is a copy
+Intent:     Close the gap North Star's production run exposed.
+Files:      server/src/mcp/trueHomeTools.ts (read_record_history).
+Problem:    North Star — Agent Delivery run 82148 (ask NS-1794390304874-3O5H) read INC-BAYS.MONITORING-541's history correctly (engine_writes seq 288856), but called engine_incidents the incidents' home. It did not call read_true_home, and read_record_history carried no copy label, because COPY_TOOLS is per tool and the history tool reads every kind.
+Fix:        read_record_history adds copy_of (and a one-line note) when the kind is incidents or a vFarm kind, from the same copyNote the transport uses, so the history of a copy names its original.
+Decision:   A code label, not a stronger instruction: the agent already had the rule and skipped the register read, and a label on the answer cannot be skipped.
