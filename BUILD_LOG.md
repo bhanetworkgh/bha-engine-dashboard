@@ -15143,3 +15143,8 @@ Fix:        rewrite_approved_card (write connection, no agent's scope, refused o
 Intent:     Destiny's edits after seeing the four redone cards.
 Files:      server/src/reviewCard.ts, server/test/review-card.test.cjs
 Fix:        Header is just "✅ Approved" (no name). One section, in order, a blank line between each: Builder, Session title, Session date, Codex Entry ID (Submission ID before the Codex exists), Approved by. Approved at and the Open session link are gone (two dates confused it; the dashboard link in the footer covers the session). The footer links to the log on the dashboard by Codex ID or Submission ID. Today's four cards redone again through Engine — Approved Card Redo.
+
+## 2026-11-11 22:10 — Approved card: session link and approval time back, one section per item
+Intent:     Jason in the thread (1794414187.601659) confirmed the card he wants includes the session's open link and the approval time; Destiny: put them back, keep it clean, and no Slack "Show more".
+Files:      server/src/reviewCard.ts, server/test/review-card.test.cjs
+Fix:        Five short sections under the "✅ Approved" header: Builder; Session title with "Open session" under it; Session date; Codex Entry ID (or Submission ID); Approved by with the time beside it. Each section is capped at 600 characters, so Slack shows the card whole instead of folding one long section behind "Show more". Today's four cards redone again.

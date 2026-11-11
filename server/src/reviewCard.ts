@@ -196,20 +196,20 @@ export function approvedBlocks(f: Obj, submissionId: string, a: Approval): { tex
   const title = cap(flat(f['Session Description']) || 'Untitled session', 280);
   const url = flat(f['Session Url'] ?? f['Session URL']);
   const codexId = flat(f['Codex Entry ID']);
-  void url;
-  // 11 Nov 2026, Destiny: builder, session title, session date, Codex ID, approved by, in that order, each with
-  // space under it. No approved-at (two dates confused it) and no session link (the dashboard link is below).
+  // 11 Nov 2026 (Destiny, then Jason in the same thread): builder, session title with its link, session date,
+  // Codex ID, approved by with the time. One short section each, so the items stand apart and Slack never folds
+  // the card behind "Show more" (it folds one long section, not several short ones).
   const head = a.early_reason ? 'Approved early' : a.notes_added ? 'Approved with notes' : 'Approved';
   const items = [
     `*Builder*\n${builderId ? `<@${builderId}>` : name}`,
-    `*Session title*\n${title}`,
+    `*Session title*\n${title}${/^https?:\/\//.test(url) ? `\n<${url}|Open session>` : ''}`,
     `*Session date*\n${when(f['Timestamp'])}`,
     codexId ? `*Codex Entry ID*\n\`${codexId}\`` : `*Submission ID*\n\`${submissionId}\``,
-    `*Approved by*\n<@${a.approver_user_id}>`,
+    `*Approved by*\n<@${a.approver_user_id}>, ${when(a.approved_at)}`,
   ];
   const blocks: Block[] = [
     { type: 'header', text: { type: 'plain_text', text: `✅ ${head}` } },
-    section(cap(items.join('\n\n'), 2900)),
+    ...items.map((t) => section(cap(t, 600))),
   ];
   if (a.early_reason) blocks.push(section(cap(`:warning: *Codex incomplete when approved.*${a.missing ? `\n*Missing:* ${a.missing}` : ''}\n*Reason:* ${a.early_reason}`, 2900)));
   if (a.notes_added) blocks.push(section('📝 Notes were added and go into the Codex entry.'));
