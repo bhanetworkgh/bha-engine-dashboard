@@ -175,6 +175,7 @@ export async function sweep(): Promise<{ checked: number; flagged: number; asked
   );
   for (const r of fresh.rows) {
     const x = await checkOne(r.id, r.fields).catch((e) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }) as Obj);
+    if (x.error) console.error(`[sop-check] ${String(r.fields['Submission ID'] ?? r.id)} could not be checked: ${String(x.error)}`);
     if (x.ok) out.checked++;
     if (x.flagged) out.flagged++;
   }
