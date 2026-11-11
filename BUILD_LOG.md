@@ -15048,3 +15048,10 @@ Files:      server/src/mcp/trueHomeTools.ts (read_record_history).
 Problem:    North Star — Agent Delivery run 82148 (ask NS-1794390304874-3O5H) read INC-BAYS.MONITORING-541's history correctly (engine_writes seq 288856), but called engine_incidents the incidents' home. It did not call read_true_home, and read_record_history carried no copy label, because COPY_TOOLS is per tool and the history tool reads every kind.
 Fix:        read_record_history adds copy_of (and a one-line note) when the kind is incidents or a vFarm kind, from the same copyNote the transport uses, so the history of a copy names its original.
 Decision:   A code label, not a stronger instruction: the agent already had the rule and skipped the register read, and a label on the answer cannot be skipped.
+
+## 2026-11-11 12:10 — Narration cap raised to 10,000 words; loop match reads 80,000 characters
+Intent:     Destiny no longer reads the narration aloud (Engine — Narration To Audio voices it), so the 6,000-word cap that protected his reading goes to 10,000.
+Files:      none in this repo. n8n: Bays — Submit Actions (YTpezWSOIN6TNYcX) published 2261ab10, Build Loop Match Payload. Skill bha-helper-first-narration (proposed, v2.8).
+Problem:    Checked every step a log passes: Narration To Audio splits the text into 2,800-character pieces with no cap; Layer 1 — BHA Log Review receives the full transcript with no length rule. The one hard limit was Build Loop Match Payload, which read only the first 40,000 characters of the transcript, so a loop named later in a long log would never be advanced or closed.
+Fix:        The loop match reads up to 80,000 characters (10,000 words is about 65,000). The narration skill's section 2 says 3,000 to 10,000 words and names the 80,000-character limit.
+Decision:   The project instructions also state the 6,000 cap; Destiny edits those himself.
