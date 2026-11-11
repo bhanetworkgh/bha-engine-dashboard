@@ -15154,3 +15154,7 @@ Intent:     Jason in C0ASMPYQLG3 1794358900.575569 (DW-1794360920781-MZAJ): SOPs
 Files:      server/src/sopCheck.ts (new), server/src/index.ts, server/src/timers.ts, server/src/sources.ts, src/data/types.ts, src/screens/CodexEntryDialog.tsx, server/test/sop-check.test.cjs, package.json, CLAUDE.md
 Decision:   SOP d796bc63 (modularity), first must_have: every part swap has a service entry. Plain text matching rather than a model, so the exact trip is readable in code. Applies only from 11 Nov 2026, the SOP's own date: real older logs that would trip it (Jegan's 28 Oct "Uno's USB failure and replacement") were written before the rule and are not judged by it.
 Fix:        Flag first (SOP Conflict, SOP ID, Evidence), then the question in the author's log channel; first reply saved as SOP Deviation Reason; a refused question is raised and retried. Shown on the Codex entry and Pay Tracker's Open. test:sop-check passes 6, built on real sentences from Kavin's and Jegan's logs.
+
+## 2026-11-11 22:50 — SOP check: a mention of a service note is not a service entry
+Problem:    The first pass (21:30 UTC) checked the four real 11 Nov logs correctly (Kavin, Jegan, Destiny ok with no part swaps; Kaiqi not applicable), but passed TEST-SOP-CHECK-1794432600000, whose title said "arm service note missing": the SERVICE pattern matched the words "service note" alone.
+Fix:        A service entry is now a labelled "Service entry:" (or log/note followed by a colon or dash), or an old part named with its new part. test:sop-check passes 7.

@@ -26,6 +26,10 @@ v = s.evaluate(hw("The J2 elbow servo was swapped. Service entry: old part DS321
 assert.equal(v.result, 'ok');
 ok('a swap with a service entry passes');
 
+v = s.evaluate(hw('TEST: arm service note missing. I swapped the J2 elbow servo after it stalled.'));
+assert.equal(v.result, 'conflict');
+ok('a sentence that only mentions a service note is not a service entry');
+
 // Real lines that talk about a swap that has not happened: planned, ordered, or not done.
 for (const t of [
   'the soil sensor replacement and the remote restart path are both mapped with a clear next step each.',

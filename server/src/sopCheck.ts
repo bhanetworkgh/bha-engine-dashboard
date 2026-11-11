@@ -37,7 +37,9 @@ const SWAP = /\b(swap(?:ped|s|ping)?|replac(?:ed|ing|ement)|reprint(?:ed)?|chang
 const PART = /\b(servo|sensor|probe|bracket|motor|board|uno|arduino|relay|valve|pump|camera|cable|module|joint|gripper|nozzle|shell|mount|pi|wrist|elbow|end[- ]effector|actuator|coil|horn|bearing)s?\b/i;
 // A swap that is planned, ordered or not done is not a swap that happened.
 const NOT_DONE = /\b(will|ordered|order(?:ing)?|plan(?:ned)?|next step|to be|should|would|need(?:s)? to|not done|not yet|follows on|pending)\b/i;
-const SERVICE = /\bservice (entry|log|note)\b|\bold (part|id|version)\b[\s\S]{0,240}\bnew (part|id|version)\b/i;
+// A service entry is the entry itself: a labelled "Service entry:" line, or an old part named with its new part.
+// A sentence that only mentions a service note ("the service note is missing") is not one (11 Nov 2026, the test log).
+const SERVICE = /\bservice (entry|log|note)\s*[:\u2014-]|\bold (part|id|version)\b[\s\S]{0,240}\bnew (part|id|version)\b/i;
 
 const str = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v));
 
