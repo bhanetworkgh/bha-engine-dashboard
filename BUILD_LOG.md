@@ -15205,3 +15205,10 @@ Intent:     Destiny: list the apps the way the first read broke down, so BHA's o
 Files:      server/src/slackApps.ts, server/src/mcp/slackAppsTools.ts, src/data/index.ts, src/screens/Registry/index.tsx, CLAUDE.md, BUILD_LOG.md
 Fix:        groupOf puts each app in one of five groups: BHA's apps (Bays, CST Monitoring, Genie, Media Twin, North Star, Research Twin), check-in apps (morning and evening), custom team apps Destiny does not collaborate on (Vfarm-Alerts, Builder Twin, Demo App, GenieRAG, LinkedIn Twin, Vertical Farm), leftovers (8) and third-party tools (10). The tab draws each group under its own heading; read_slack_apps returns group on every app.
 Decision:   Kept as a standing tool, read daily: the configuration token renews itself on every rotation, so nothing needs a person every 12 hours.
+
+## 2026-11-12 21:35 — Pay cards redraw themselves after a Yes, Paid
+Intent:     Jason (#bha-pay-reviews 1794497464.865089) asked for a refresh, because Destiny's 12 Nov card still counted 11 Nov as owed after he had marked 11 Nov paid.
+Files:      server/src/payCard.ts, server/src/paySync.ts, server/src/index.ts, CLAUDE.md
+Problem:    The 12 Nov card was built at the Approve (15:27 UTC); 11 Nov was marked paid at 15:48 UTC. Nothing redraws a card after it is posted, so it showed "Owed from earlier days: 11 Nov · 95% · $420" and "All owed now $847.50". The $420 was right (95% of $350 = $332.50, plus $87.50 of releases the 11 Nov card paid out) but read as a sum error.
+Fix:        paySync, when a pay session turns paid, queues payCard.refreshUnpaidSoon(builder) after the commit: 8 s later every unpaid card of that builder is rewritten in place from the ledger. POST /api/engine/pay-card/refresh { builder_slack_id, dry_run? } does it on demand. Nothing owed from earlier days now draws no line at all (was "Earlier days · Nothing owed"). An earlier line with releases reads "95% · $332.50 + $87.50 released on that card = $420.00".
+Decision:   A refresh on its own, after every Yes, Paid, rather than a button: a button is a step somebody has to remember, and the card is only wrong after a payment.

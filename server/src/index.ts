@@ -1030,6 +1030,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         describe: (r) => `${r.dry_run ? 'dry run: ' : ''}${r.rewritten} card(s) rewritten`,
         hint: 'POST { submission_ids: [...], dry_run? }. Rewrites the pay review cards already posted, in place.',
       },
+      /** Redraws a builder's unpaid pay cards from the ledger as it stands (12 Nov 2026, Jason's refresh ask). Runs by itself after every Yes, Paid. */
+      '/api/engine/pay-card/refresh': {
+        kind: 'pay_sessions',
+        store: async (b) => ({ ...(await payCard.refreshUnpaid(String(b.builder_slack_id ?? '').trim(), b.dry_run === true || b.dry_run === 'true')), dry_run: b.dry_run === true || b.dry_run === 'true' }),
+        describe: (r) => `${r.dry_run ? 'dry run: ' : ''}${r.rewritten ?? 0} unpaid card(s) redrawn`,
+        hint: 'POST { builder_slack_id, dry_run? }. Redraws every unpaid pay review card of that builder in place.',
+      },
       '/api/engine/pay-statement-facts': {
         kind: 'pay_statements',
         store: async (b) => ({ ...(await payNote.statementFacts(b)), dry_run: true }),

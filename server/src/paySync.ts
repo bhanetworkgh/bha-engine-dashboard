@@ -51,7 +51,7 @@ import { nowIso } from './db';
 import * as events from './events';
 import * as mirror from './mirror';
 import * as payNote from './payNote';
-import { withTransaction, type Queryable } from './pg';
+import { afterCommit, withTransaction, type Queryable } from './pg';
 
 const SESSIONS = 'engine_pay_sessions';
 const STATEMENTS = 'engine_pay_statements';
@@ -209,6 +209,10 @@ async function syncWith(db: Queryable, fields: Record<string, unknown>): Promise
     if (r.rows[0]?.changed) {
       changedAny = true;
       events.changed('pay_sessions', Number(copy.id), db);
+      // A session just marked paid: redraw the builder's other open cards once this commits (payCard.refreshUnpaidSoon).
+      if (paid && copy.fields.Paid !== true && copy.fields.Paid !== 'true' && copy.fields.Paid !== 'Yes' && slackId) {
+        afterCommit(db, () => { void import('./payCard').then((pc) => pc.refreshUnpaidSoon(slackId)).catch(() => undefined); });
+      }
     }
   }
   if (changedAny) await closeSettledStatements(db, slackId, month);

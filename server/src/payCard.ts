@@ -333,12 +333,14 @@ export function blocks(f: Figures, opts: { paid?: boolean } = {}): Block[] {
     out.push(sec('released', `*Released from earlier logs*\n${lines.join('\n')}${f.releases.length > 10 ? `\n…and ${f.releases.length - 10} more` : ''}`));
   }
   if (!opts.paid && f.earlier.length) {
-    const lines = f.earlier.slice(0, 12).map((e) => `• ${day(e.session_date)}  ·  ${pct(e.credited)}${e.total_usd !== null ? `  ·  ${usd(e.total_usd)}` : ''}${e.note_found ? '' : '  _(no pay note)_'}`);
+    // A card's total includes the releases it paid out, so name them (12 Nov 2026: "95% · $420" read as a sum error).
+    const lines = f.earlier.slice(0, 12).map((e) => `• ${day(e.session_date)}  ·  ${pct(e.credited)}${e.credited_usd !== null ? `  ·  ${usd(e.credited_usd)}` : ''}${e.releases_usd > 0 ? `  +  ${usd(e.releases_usd)} released on that card` : ''}${e.total_usd !== null && e.releases_usd > 0 ? `  =  ${usd(e.total_usd)}` : ''}${e.note_found ? '' : '  _(no pay note)_'}`);
     out.push(sec('earlier', `*Owed from earlier days, not marked paid*\n${lines.join('\n')}${f.earlier.length > 12 ? `\n…and ${f.earlier.length - 12} more` : ''}`));
   }
   const missing = 'not worked out';
   const totals = [`*${opts.paid ? 'Paid on this card' : 'Pay for this card'}*\n*${f.pay_now_usd !== null ? usd(f.pay_now_usd) : missing}*`];
-  if (!opts.paid) totals.push(f.earlier.length ? `*All owed now*\n*${f.owed_total_usd !== null ? usd(f.owed_total_usd) : missing}*` : '*Earlier days*\nNothing owed');
+  // Nothing owed from earlier days draws nothing (12 Nov 2026, Destiny): a nought line is noise.
+  if (!opts.paid && f.earlier.length) totals.push(`*All owed now*\n*${f.owed_total_usd !== null ? usd(f.owed_total_usd) : missing}*`);
   out.push(fields('totals', totals));
   const otherHeld = f.still_held.filter((h) => h.codex_entry_id !== (f.codex_entry_id ?? f.submission_id));
   if (otherHeld.length) {
@@ -425,4 +427,41 @@ export async function rewrite(b: Obj): Promise<Obj> {
     }
   }
   return { ok: results.every((r) => r.ok), dry_run: dry, rewritten: results.filter((r) => r.ok && !r.dry_run).length, results };
+}
+
+/**
+ * Redraws a builder's unpaid pay review cards (12 Nov 2026, Jason in #bha-pay-reviews 1794497464.865089:
+ * a card built before an earlier log was marked Yes, Paid still counted that log as owed). Called after
+ * any pay session turns paid, so every open card reads the ledger as it now stands. Waits a few seconds
+ * so the copies of one payment land together, and runs once per builder at a time. Never throws.
+ */
+const pending = new Map<string, ReturnType<typeof setTimeout>>();
+export function refreshUnpaidSoon(builderSlackId: string, delayMs = 8000): void {
+  if (!builderSlackId) return;
+  const old = pending.get(builderSlackId);
+  if (old) clearTimeout(old);
+  const t = setTimeout(() => {
+    pending.delete(builderSlackId);
+    refreshUnpaid(builderSlackId).then(
+      (r) => console.log(`pay-card refresh ${builderSlackId}: ${JSON.stringify({ rewritten: r.rewritten, results: (r.results as Obj[] | undefined)?.map((x) => `${x.submission_id}:${x.ok ? 'ok' : x.reason}`) })}`),
+      (e) => console.error(`pay-card refresh ${builderSlackId} failed: ${e instanceof Error ? e.message : String(e)}`),
+    );
+  }, delayMs);
+  t.unref?.();
+  pending.set(builderSlackId, t);
+}
+
+export async function refreshUnpaid(builderSlackId: string, dryRun = false): Promise<Obj> {
+  if (!/^[UW][A-Z0-9]{6,}$/.test(builderSlackId)) throw new PayCardError('missing_builder', 'Name the builder: builder_slack_id (a Slack user id).');
+  const r = await query<{ sub: string }>(
+    `SELECT DISTINCT c.fields->>'Submission ID' AS sub
+       FROM engine_pay_sessions p
+       JOIN engine_codex_submissions c ON c.fields->>'Codex Entry ID' = p.fields->>'Codex Entry ID'
+      WHERE p.fields->>'Builder Slack ID' = $1 AND coalesce(p.fields->>'Paid', '') NOT IN ('true', 'Yes')
+        AND coalesce(c.fields->>'Submission ID', '') <> ''`,
+    [builderSlackId],
+  );
+  const ids = r.rows.map((x) => x.sub).slice(0, 30);
+  if (!ids.length) return { ok: true, rewritten: 0, results: [], note: 'No unpaid cards for this builder.' };
+  return rewrite({ submission_ids: ids, dry_run: dryRun });
 }
