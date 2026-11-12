@@ -37,6 +37,12 @@
  *     evidence_ref. Those legacy names are refused with `legacy_field_not_mapped`, never translated.
  *   - Nothing is inferred: no closure_state from a runtime status or a charge-gate pass, and no
  *     approver from an owner.
+ *
+ * Acceptance-State Contract v0 (SOP 2b794599, Jason, 10 Nov 2026) gives runtime_verification_status
+ * a different vocabulary: unresolved, contract_pass, implementation_pass, runtime_proof. This file
+ * still reads the 9 Nov vocabularies above, unchanged, until Jason says where they belong under v0.
+ * The v0 wording is held, separately and temporarily, in acceptanceStateV0.ts (C1, 11 Nov 2026).
+ * Neither file is called by anything, and which one survives is Jason's and Destiny's decision.
  */
 import { parseProofType, ProofTypeError, type ProofType } from './proofType';
 

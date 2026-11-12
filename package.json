@@ -67,6 +67,7 @@
     "test:help-pages": "node --no-warnings=ExperimentalWarning server/test/help-pages.test.cjs",
     "test:evidence": "node --no-warnings=ExperimentalWarning server/test/evidence.test.cjs",
     "test:acceptance-evidence": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/acceptance-evidence.test.cjs",
+    "test:acceptance-state-v0": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/acceptance-state-v0.test.cjs",
     "test:essence": "node --no-warnings=ExperimentalWarning server/test/essence.test.cjs",
     "test:pattern-reingest": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/pattern-reingest.test.cjs",
     "test:move-loop": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/move-loop.test.cjs",
