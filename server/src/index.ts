@@ -77,6 +77,7 @@ import * as systemFeeds from './systemFeeds';
 import * as genieBuilder from './genieBuilder';
 import * as mediaWeekly from './mediaWeekly';
 import * as payNote from './payNote';
+import * as payCard from './payCard';
 import * as narrationAudio from './narrationAudio';
 import * as reviewCard from './reviewCard';
 import * as paySuggest from './paySuggest';
@@ -1014,6 +1015,19 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         },
         describe: (r) => `pre-check: ${r.line}`,
         hint: 'POST { review (the Layer 1 answer), builder_user_id, transcript?, session_url? }. The pay the engine would suggest. Writes nothing.',
+      },
+      /** Pay figures on the pay review card (12 Nov 2026, Destiny; Jason on the 11 Nov card). */
+      '/api/engine/pay-card': {
+        kind: 'pay_sessions',
+        store: async (b) => ({ ...(await payCard.forCard(b)), dry_run: !(b.claim === true || b.claim === 'true') }),
+        describe: (r) => String(r.line),
+        hint: 'POST { submission_id, claim?: true when the card is being posted, paid?: true for the paid card, card?: the chat.postMessage/update body }. Answers the figures, the pay blocks and the card with them put in.',
+      },
+      '/api/engine/pay-card/rewrite': {
+        kind: 'pay_sessions',
+        store: async (b) => ({ ...(await payCard.rewrite(b)) }),
+        describe: (r) => `${r.dry_run ? 'dry run: ' : ''}${r.rewritten} card(s) rewritten`,
+        hint: 'POST { submission_ids: [...], dry_run? }. Rewrites the pay review cards already posted, in place.',
       },
       '/api/engine/pay-statement-facts': {
         kind: 'pay_statements',

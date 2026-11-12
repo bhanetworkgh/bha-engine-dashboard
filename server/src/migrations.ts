@@ -4604,6 +4604,45 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `CREATE TRIGGER engine_pay_notes_no_delete BEFORE DELETE ON engine_pay_notes FOR EACH ROW EXECUTE FUNCTION engine_pay_note_delete_guard()`,
     ],
   },
+  {
+    id: 132,
+    name: 'Pay figures on the pay review card: day rates by start date, and which card carries each release (12 Nov 2026, Destiny)',
+    statements: [
+      // One row per builder per start date. A rate change is a new row, so every past day keeps the rate it was
+      // worked at. Never edited or deleted (engine_pay_note_frozen), like the pay note history.
+      `CREATE TABLE IF NOT EXISTS engine_pay_rates (
+        id bigserial PRIMARY KEY,
+        builder_slack_id text NOT NULL,
+        builder text NOT NULL,
+        day_rate_usd numeric(10,2) NOT NULL CHECK (day_rate_usd >= 0),
+        effective_from date NOT NULL,
+        set_by text NOT NULL,
+        note text,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        UNIQUE (builder_slack_id, effective_from)
+      )`,
+      `DROP TRIGGER IF EXISTS engine_pay_rates_frozen ON engine_pay_rates`,
+      `CREATE TRIGGER engine_pay_rates_frozen BEFORE UPDATE OR DELETE ON engine_pay_rates FOR EACH ROW EXECUTE FUNCTION engine_pay_note_frozen()`,
+      // Destiny, 12 Nov 2026: his rate is $410 from today ($350 before, Jason's approval in DM 1794418940.384079);
+      // Ahad's is $185 until his Stage 1 rate of $111 (60%) starts on 19 Nov (his agreement, D0AEW3THD4K 1793640028.879889);
+      // Kaiqi's was $200 (Jason, DM 1792858587.663209), kept for his past days.
+      `INSERT INTO engine_pay_rates (builder_slack_id, builder, day_rate_usd, effective_from, set_by, note) VALUES
+        ('U0AEW3TBYH1', 'Destiny Arupi', 350, '2026-09-01', 'U0AEW3TBYH1', 'Rate before the Genie lane'),
+        ('U0AEW3TBYH1', 'Destiny Arupi', 410, '2026-11-12', 'U0AEW3TBYH1', 'Genie lane added, approved by Jason (DM 1794418940.384079)'),
+        ('U0AC6RFNP3P', 'Ahad', 185, '2026-09-01', 'U0AEW3TBYH1', 'Rate before Stage 1'),
+        ('U0AC6RFNP3P', 'Ahad', 111, '2026-11-19', 'U0AEW3TBYH1', 'Stage 1: 60% of $185 (his agreement)'),
+        ('U0AD1V1D65N', 'Kaiqi Yang', 200, '2026-09-01', 'U0AEW3TBYH1', 'Rate given by Jason (DM 1792858587.663209)')
+       ON CONFLICT (builder_slack_id, effective_from) DO NOTHING`,
+      // A release is paid on one card only: the first card built after it takes it.
+      `CREATE TABLE IF NOT EXISTS engine_pay_card_claims (
+        history_id bigint PRIMARY KEY REFERENCES engine_pay_note_history (id),
+        card_submission_id text NOT NULL,
+        card_codex_entry_id text,
+        claimed_at timestamptz NOT NULL DEFAULT now()
+      )`,
+      `CREATE INDEX IF NOT EXISTS engine_pay_card_claims_card ON engine_pay_card_claims (card_submission_id)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
