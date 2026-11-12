@@ -3220,7 +3220,10 @@ rotates**: `SLACK_CONFIG_REFRESH_TOKEN` (no default) seeds once, `tooling.tokens
 and the live pair is kept in `meta` `slack_config.tokens`; a new value on Render reseeds. Neither token is returned
 anywhere. A manifest's URLs lose their query string and the whole manifest goes through `redactSecrets`. One row per app;
 one not found again is marked gone, never deleted. `shared_commands` names a command two installed apps both claim. Read
-once a day by the timer and at most once a minute on demand; each read is one `slack_apps_read` event.
+once a day by the timer and at most once a minute on demand; each read is one `slack_apps_read` event. **The tab is in five groups** (`groupOf`, 13 Nov 2026, Destiny): BHA's apps (manifest read), the check-in apps,
+custom apps someone on the team built that Destiny does not collaborate on, leftovers of deleted or rebuilt apps
+(`app_not_found`), and third-party tools (`THIRD_PARTY_APPS`, by app id, because nothing Slack hands a bot tells a
+marketplace app from a custom one; add a new one there).
 
 **The System Registry over MCP** (2026-10-30, Destiny: "when we're talking about new tools, we can
 immediately tell it from Slack to register it in the dashboard"). `server/src/mcp/registryTools.ts`.

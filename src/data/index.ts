@@ -678,6 +678,7 @@ export interface SlackApp {
   listed_at: string | null;
   read_at: string | null;
   gone_at: string | null;
+  group?: 'bha' | 'checkin' | 'team' | 'leftover' | 'third_party';
 }
 
 export interface SlackAppsData {

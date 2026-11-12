@@ -357,6 +357,35 @@ async function doRead(opts: { extra?: string[]; by?: string }): Promise<ReadResu
   return result;
 }
 
+/**
+ * Which kind of app a row is (13 Nov 2026, Destiny). Worked out from what Slack said, plus one list of the
+ * marketplace tools the team installed, which nothing Slack returns to a bot can tell apart from a custom app.
+ *   bha         an app Destiny collaborates on (its manifest was read)
+ *   checkin     the morning and evening check-in apps, which post the check-in prompts and carry no commands
+ *   team        a custom app somebody on the team built, that Destiny is not a collaborator on
+ *   leftover    a bot user whose app Slack no longer has (deleted or rebuilt)
+ *   third_party a marketplace tool
+ */
+export type AppGroup = 'bha' | 'checkin' | 'team' | 'leftover' | 'third_party';
+export const THIRD_PARTY_APPS: Record<string, string> = {
+  A097V82EGG2: 'ChatGPT',
+  A08SF47R6P4: 'Claude',
+  A08SKDT6QUW: 'Cursor',
+  A01BP7R4KNY: 'GitHub',
+  A09K54AJYMT: 'LangSmith Fleet',
+  A077GAL0CMA: 'Latenode',
+  A049JV0H0KC: 'Notion',
+  A04ULDS8UFN: 'Otter.ai',
+  ASCEKRJF6: 'Render',
+  A024R9PQM: 'Zapier',
+};
+export function groupOf(a: { app_id: string; name: string | null; readable: boolean; read_error: string | null }): AppGroup {
+  if (THIRD_PARTY_APPS[a.app_id]) return 'third_party';
+  if (a.readable) return /check-?in/i.test(a.name ?? '') ? 'checkin' : 'bha';
+  if (/app_not_found|invalid_app/.test(a.read_error ?? '')) return 'leftover';
+  return 'team';
+}
+
 export type AppRow = {
   app_id: string;
   name: string | null;
@@ -378,6 +407,7 @@ export type AppRow = {
   listed_at: string | null;
   read_at: string | null;
   gone_at: string | null;
+  group?: AppGroup;
 };
 
 /** What the page and the tool show: every app held, every command flat, and commands two apps both claim. */
@@ -394,7 +424,7 @@ export async function show(): Promise<{
             interactivity_url, bot_scopes, user_scopes, bot_events, first_seen_at, listed_at, read_at, gone_at
        FROM engine_slack_apps ORDER BY (gone_at IS NOT NULL), deleted, lower(COALESCE(name, app_id))`,
   );
-  const apps = r.rows;
+  const apps = r.rows.map((a) => ({ ...a, group: groupOf(a) }));
   const commands = apps.flatMap((a) => (a.commands ?? []).map((c) => ({ ...c, app_id: a.app_id, app: a.name, engine_bot: a.engine_bot, installed: a.listed && !a.deleted && !a.gone_at })));
   const byName = new Map<string, string[]>();
   for (const c of commands.filter((c) => c.installed)) byName.set(c.command.toLowerCase(), [...(byName.get(c.command.toLowerCase()) ?? []), c.app ?? c.app_id]);

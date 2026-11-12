@@ -434,6 +434,14 @@ const TRUTH_RELATION = ['true home', 'copy', 'read live'] as const;
  * The Slack apps on the workspace, read from Slack by the server (13 Nov 2026). Unlike every other tab here this one
  * is not typed: nothing on it is editable, because Slack is where an app is changed. A row says what Slack said.
  */
+const GROUPS: Array<[NonNullable<SlackApp['group']>, string, string]> = [
+  ['bha', "BHA's apps", 'The apps the engine runs on, with their commands.'],
+  ['checkin', 'Check-in apps', 'Post the morning and evening check-in prompts. No commands.'],
+  ['team', 'Custom apps built by someone on the team', 'Not BHA apps of record. Destiny is not a collaborator, so Slack will not show their commands.'],
+  ['leftover', 'Leftovers of deleted or rebuilt apps', 'Slack has no app under these ids any more; only the bot user is left.'],
+  ['third_party', 'Third-party tools', 'Marketplace apps the team installed.'],
+];
+
 function SlackAppsTab({ fail, ok }: { fail: (m: string) => void; ok: (m: string) => void }) {
   const load = useCallback(() => getSlackApps(), []);
   const { status, data, error } = useData(load, [], { kinds: ['slack_apps'] });
@@ -471,44 +479,7 @@ function SlackAppsTab({ fail, ok }: { fail: (m: string) => void; ok: (m: string)
   const status_ = (a: SlackApp) =>
     a.gone_at ? <Pill>no longer installed</Pill> : a.deleted ? <Pill>bot deleted</Pill> : a.readable ? <Pill tone="accent">read</Pill> : <Pill tone="degraded">not readable</Pill>;
   const where = (c: SlackApp['commands'][number]) => (c.delivery === 'request_url' ? c.url : c.delivery === 'socket_mode' ? "socket mode (the app's own process)" : 'nowhere (no URL, no socket mode)');
-  return (
-    <>
-      <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
-        <div className="max-w-[104ch] text-[11.5px] leading-snug text-faint">
-          Every app on the workspace, read from Slack, with its slash commands and where each one is answered. Read only: an app is changed in Slack, not here. {d.note}
-        </div>
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-[12px] text-dim">
-          <span>{installed.length} installed</span>
-          <span>{installed.filter((a) => a.readable).length} with a manifest read</span>
-          <span>{cmdCount} slash commands</span>
-          {d.shared_commands.length > 0 && <span className="text-[var(--degraded)]">{d.shared_commands.length} claimed by two apps: {d.shared_commands.map((c) => c.command).join(', ')}</span>}
-          <span>Last read {d.last_read?.at ? when(d.last_read.at) : 'never'}</span>
-          {!d.token.configured && <span className="text-[var(--degraded)]">No app configuration token on the server, so no manifest can be read.</span>}
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <SearchBox value={q} onChange={setQ} placeholder="Search apps or commands" />
-          <Button onClick={readNow} loading={busy}>
-            Read from Slack now
-          </Button>
-        </div>
-      </div>
-      <Grid
-        label="Slack apps"
-        min={1100}
-        cols={6}
-        empty={d.last_read ? 'Slack listed no app.' : 'Slack has not been read yet. Read from Slack now takes the first read.'}
-        head={
-          <>
-            <Th width="20%">app</Th>
-            <Th>engine bot</Th>
-            <Th width="36%">slash commands</Th>
-            <Th>events</Th>
-            <Th>status</Th>
-            <Th>read</Th>
-          </>
-        }
-      >
-        {shown.map((a) => (
+  const row = (a: SlackApp) => (
           <React.Fragment key={a.app_id}>
             <tr className="cursor-pointer" onClick={() => setOpen(open === a.app_id ? null : a.app_id)}>
               <td className="td card-title">
@@ -559,7 +530,59 @@ function SlackAppsTab({ fail, ok }: { fail: (m: string) => void; ok: (m: string)
               </tr>
             )}
           </React.Fragment>
-        ))}
+  );
+  return (
+    <>
+      <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
+        <div className="max-w-[104ch] text-[11.5px] leading-snug text-faint">
+          Every app on the workspace, read from Slack, with its slash commands and where each one is answered. Read only: an app is changed in Slack, not here. {d.note}
+        </div>
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-[12px] text-dim">
+          <span>{installed.length} installed</span>
+          <span>{installed.filter((a) => a.readable).length} with a manifest read</span>
+          <span>{cmdCount} slash commands</span>
+          {d.shared_commands.length > 0 && <span className="text-[var(--degraded)]">{d.shared_commands.length} claimed by two apps: {d.shared_commands.map((c) => c.command).join(', ')}</span>}
+          <span>Last read {d.last_read?.at ? when(d.last_read.at) : 'never'}</span>
+          {!d.token.configured && <span className="text-[var(--degraded)]">No app configuration token on the server, so no manifest can be read.</span>}
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <SearchBox value={q} onChange={setQ} placeholder="Search apps or commands" />
+          <Button onClick={readNow} loading={busy}>
+            Read from Slack now
+          </Button>
+        </div>
+      </div>
+      <Grid
+        label="Slack apps"
+        min={1100}
+        cols={6}
+        empty={d.last_read ? 'Slack listed no app.' : 'Slack has not been read yet. Read from Slack now takes the first read.'}
+        head={
+          <>
+            <Th width="20%">app</Th>
+            <Th>engine bot</Th>
+            <Th width="36%">slash commands</Th>
+            <Th>events</Th>
+            <Th>status</Th>
+            <Th>read</Th>
+          </>
+        }
+      >
+        {GROUPS.flatMap(([g, title, line]) => {
+          const inGroup = shown.filter((a) => (a.group ?? 'team') === g);
+          if (!inGroup.length) return [];
+          return [
+            <tr key={`h-${g}`}>
+              <td colSpan={6} className="td pt-4">
+                <div className="text-[12.5px] font-medium text-ink">
+                  {title} <span className="text-faint">· {inGroup.length}</span>
+                </div>
+                <div className="text-[11.5px] text-faint">{line}</div>
+              </td>
+            </tr>,
+            ...inGroup.map((a) => row(a)),
+          ];
+        })}
       </Grid>
     </>
   );

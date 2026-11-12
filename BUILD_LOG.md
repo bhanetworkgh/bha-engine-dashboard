@@ -15199,3 +15199,9 @@ Intent:     Prove the registry on the live workspace and read what it says about
 Files:      server/src/slackApps.ts, BUILD_LOG.md
 Problem:    The first read (timer, 19:39:53 UTC) listed 32 apps and read 8 manifests (Bays, CST Monitoring, Genie, Media Twin, North Star, Research Twin and the two check-in apps), 9 commands. /sample-command is on none of the 8. Slack refused the other 24 two ways: no_permission (Destiny is not a collaborator, Vfarm-Alerts among them) and app_not_found (a bot user whose app was deleted or rebuilt: an older Bays, Research Twin, Process Twin and the BHA Log, Slack and LogStream engines). The hint said "collaborator" for both.
 Fix:        Each refusal now says which of the two it is.
+
+## 2026-11-13 21:55 — Slack apps tab in five groups
+Intent:     Destiny: list the apps the way the first read broke down, so BHA's own are plain and the rest are named for what they are.
+Files:      server/src/slackApps.ts, server/src/mcp/slackAppsTools.ts, src/data/index.ts, src/screens/Registry/index.tsx, CLAUDE.md, BUILD_LOG.md
+Fix:        groupOf puts each app in one of five groups: BHA's apps (Bays, CST Monitoring, Genie, Media Twin, North Star, Research Twin), check-in apps (morning and evening), custom team apps Destiny does not collaborate on (Vfarm-Alerts, Builder Twin, Demo App, GenieRAG, LinkedIn Twin, Vertical Farm), leftovers (8) and third-party tools (10). The tab draws each group under its own heading; read_slack_apps returns group on every app.
+Decision:   Kept as a standing tool, read daily: the configuration token renews itself on every rotation, so nothing needs a person every 12 hours.
