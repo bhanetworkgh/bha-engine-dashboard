@@ -314,13 +314,13 @@ export function blocks(f: Figures, opts: { paid?: boolean } = {}): Block[] {
   if (f.pay_mode === 'Monthly') {
     out.push(sec('title', '*:moneybag: Pay*  ·  monthly builder'));
     const thisLog = [`${pct(t.credited)} credited`, ...(t.held > 0 ? [`${pct(t.held)} held`] : []), ...(t.docked > 0 ? [`${pct(t.docked)} docked`] : [])].join('  ·  ');
-    const cells = [`*This log*\n${thisLog}${noNote}`];
+    // Stacked, the month under this log (Destiny, 12 Nov): two columns read as two separate things.
+    out.push(sec('monthly', `*This log*\n${thisLog}${noNote}`));
     if (f.month) {
       const m = f.month;
       const parts = [`${share(m.credited_shares, m.sessions)} credited`, ...(m.released_shares ? [`${share(m.released_shares, m.sessions)} released`] : []), `${share(m.held_shares, m.sessions)} held`];
-      cells.push(`*${monthName(m.month)} so far*\n${m.sessions} log(s)  ·  ${m.credited_shares} day(s)\n${parts.join('  ·  ')}`);
+      out.push(sec('month', `*${monthName(m.month)} so far*\n${m.sessions} log(s)  ·  ${m.credited_shares} day(s)\n${parts.join('  ·  ')}`));
     }
-    out.push(fields('monthly', cells));
     return out;
   }
   out.push(sec('title', `*:moneybag: Pay*  ·  ${f.rate ? `${usd(f.rate.day_rate_usd)} a day` : 'no day rate on record'}`));
