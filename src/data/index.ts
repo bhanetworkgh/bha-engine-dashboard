@@ -647,6 +647,58 @@ export function restoreRegistryRow<K extends RegistryKind>(kind: K, id: string):
   return api<RegistryRowOf[K]>(`/api/registry/${kind}/${encodeURIComponent(id)}`, { method: 'POST', body: { restore: true } });
 }
 
+/* ------------------------------------------------------------ slack apps */
+
+export interface SlackCommand {
+  command: string;
+  description: string | null;
+  usage_hint: string | null;
+  url: string | null;
+  delivery: 'request_url' | 'socket_mode' | 'none';
+}
+
+export interface SlackApp {
+  app_id: string;
+  name: string | null;
+  description: string | null;
+  bot_user_id: string | null;
+  engine_bot: string | null;
+  listed: boolean;
+  deleted: boolean;
+  readable: boolean;
+  read_error: string | null;
+  commands: SlackCommand[];
+  socket_mode: boolean | null;
+  event_url: string | null;
+  interactivity_url: string | null;
+  bot_scopes: string[];
+  user_scopes: string[];
+  bot_events: string[];
+  first_seen_at: string;
+  listed_at: string | null;
+  read_at: string | null;
+  gone_at: string | null;
+}
+
+export interface SlackAppsData {
+  apps: SlackApp[];
+  shared_commands: Array<{ command: string; apps: string[] }>;
+  last_read: { at?: string; ok?: boolean; reason?: string; message?: string; apps?: number; readable?: number; commands?: number } | null;
+  token: { configured: boolean; rotated_at: string | null; expires_at: string | null };
+  note: string;
+  result?: { ok: boolean; reason?: string; message?: string; apps: number; readable: number; commands: number };
+}
+
+/** The Slack apps, read from Slack by the server. Read only. */
+export function getSlackApps(): Promise<SlackAppsData> {
+  return api<SlackAppsData>('/api/slack-apps');
+}
+
+/** Reads Slack again now. Changes nothing in Slack. */
+export function readSlackAppsNow(appIds: string[] = []): Promise<SlackAppsData> {
+  return api<SlackAppsData>('/api/slack-apps', { method: 'POST', body: { app_ids: appIds } });
+}
+
 /* --------------------------------------------------------- engine writes */
 
 

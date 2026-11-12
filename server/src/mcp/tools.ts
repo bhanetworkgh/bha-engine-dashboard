@@ -74,6 +74,7 @@ import { EVIDENCE_READ_TOOLS, EVIDENCE_WRITE_TOOLS } from './evidenceTools';
 import { REGISTRY_READ_TOOLS, REGISTRY_WRITE_TOOLS } from './registryTools';
 import { TRUE_HOME_READ_TOOLS } from './trueHomeTools';
 import { BALANCE_READ_TOOLS } from './balanceTools';
+import { SLACK_APPS_READ_TOOLS } from './slackAppsTools';
 import { SERVICE_READ_TOOLS, SERVICE_WRITE_TOOLS } from './serviceTools';
 import { CODE_CHECK_READ_TOOLS, CODE_CHECK_WRITE_TOOLS } from './codeCheckTools';
 import { REVIEW_CARD_WRITE_TOOLS } from './reviewCardTools';
@@ -1143,6 +1144,7 @@ export const TOOLS: ToolDefinition[] = [
   // 2026-11-11: the Sovereign Context Layer's reads: where a fact lives, and a record's earlier versions.
   ...TRUE_HOME_READ_TOOLS,
   ...BALANCE_READ_TOOLS,
+  ...SLACK_APPS_READ_TOOLS,
   ...SERVICE_READ_TOOLS,
   ...CODE_CHECK_READ_TOOLS,
   // The one that is not a read.

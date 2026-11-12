@@ -4643,6 +4643,39 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `CREATE INDEX IF NOT EXISTS engine_pay_card_claims_card ON engine_pay_card_claims (card_submission_id)`,
     ],
   },
+  {
+    id: 133,
+    name: 'Slack apps, their commands and their bots, read from Slack (13 Nov 2026, Destiny)',
+    statements: [
+      // One row per app, written only by slackApps.read. An app a later read does not find is marked gone, never
+      // deleted. The manifest is stored cleaned: URLs lose their query string, and the secret redactor runs over it.
+      `CREATE TABLE IF NOT EXISTS engine_slack_apps (
+        app_id text PRIMARY KEY,
+        name text,
+        description text,
+        bot_user_id text,
+        bot_id text,
+        engine_bot text,
+        listed boolean NOT NULL DEFAULT false,
+        deleted boolean NOT NULL DEFAULT false,
+        readable boolean NOT NULL DEFAULT false,
+        read_error text,
+        manifest jsonb,
+        commands jsonb NOT NULL DEFAULT '[]'::jsonb,
+        socket_mode boolean,
+        event_url text,
+        interactivity_url text,
+        bot_scopes jsonb NOT NULL DEFAULT '[]'::jsonb,
+        user_scopes jsonb NOT NULL DEFAULT '[]'::jsonb,
+        bot_events jsonb NOT NULL DEFAULT '[]'::jsonb,
+        first_seen_at timestamptz NOT NULL DEFAULT now(),
+        listed_at timestamptz,
+        read_at timestamptz,
+        gone_at timestamptz,
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

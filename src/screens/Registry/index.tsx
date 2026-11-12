@@ -5,6 +5,9 @@ import {
   createRegistryRow,
   deleteRegistryRow,
   getRegistry,
+  getSlackApps,
+  readSlackAppsNow,
+  type SlackApp,
   restoreRegistryRow,
   updateRegistryRow,
   type DigestHealth,
@@ -29,6 +32,7 @@ import {
   StatStrip,
   Tabs,
   Toast,
+  Button,
   relativeTime,
   usePaged,
   useToast,
@@ -77,7 +81,7 @@ import { DASH, EditableCell, NewRow, type CellType } from './Editable';
  * compared against nothing. The write log itself (`engine_writes`) is kept and
  * still read — by the Clients and Pay pages and by the MCP tools.
  */
-const TABS = ['Builders', 'Tools', 'Keys', 'True homes', 'Endpoint', 'Workflow'] as const;
+const TABS = ['Builders', 'Tools', 'Keys', 'True homes', 'Slack apps', 'Endpoint', 'Workflow'] as const;
 type Tab = (typeof TABS)[number];
 
 const KEY_STATUS = ['active', 'not in Bitwarden', 'not issued', 'retired'] as const;
@@ -175,7 +179,11 @@ export default function Registry() {
   }, [loaded]);
 
   // ?tab=true-homes opens the true-home register (the link read_true_home hands back).
-  const [tab, setTab] = useState<Tab>(() => (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('tab') === 'true-homes' ? 'True homes' : 'Builders'));
+  // ?tab=slack-apps opens the Slack apps (the link read_slack_apps hands back).
+  const [tab, setTab] = useState<Tab>(() => {
+    const t = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('tab') : null;
+    return t === 'true-homes' ? 'True homes' : t === 'slack-apps' ? 'Slack apps' : 'Builders';
+  });
   const { toast, setToast } = useToast();
   const fail = useCallback((message: string) => setToast({ text: message, tone: 'failing' }), [setToast]);
 
@@ -285,6 +293,7 @@ export default function Registry() {
         {tab === 'Tools' && <ServicesTab rows={d.services} spend={d.spend} admin={d.admin} {...shared} />}
         {tab === 'Keys' && <KeysTab rows={d.keys} {...shared} />}
         {tab === 'True homes' && <TruthTab rows={d.truth ?? []} {...shared} />}
+        {tab === 'Slack apps' && <SlackAppsTab fail={fail} ok={(text) => setToast({ text, tone: 'ok' })} />}
         {tab === 'Endpoint' && <EndpointsTab rows={d.endpoints} bases={d.bases} digests={d.digest_health} {...shared} />}
         {tab === 'Workflow' && <WorkflowsTab rows={d.workflows} {...shared} />}
       </div>
@@ -421,6 +430,141 @@ const TRUTH_RELATION = ['true home', 'copy', 'read live'] as const;
  * fact, the one store that holds it, the door every change goes through, and which places only read it.
  * Agents read the same rows with read_true_home before they act.
  */
+/**
+ * The Slack apps on the workspace, read from Slack by the server (13 Nov 2026). Unlike every other tab here this one
+ * is not typed: nothing on it is editable, because Slack is where an app is changed. A row says what Slack said.
+ */
+function SlackAppsTab({ fail, ok }: { fail: (m: string) => void; ok: (m: string) => void }) {
+  const load = useCallback(() => getSlackApps(), []);
+  const { status, data, error } = useData(load, [], { kinds: ['slack_apps'] });
+  const [d, setD] = useState<typeof data>(null);
+  useEffect(() => {
+    if (data) setD(data);
+  }, [data]);
+  const [q, setQ] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState<string | null>(null);
+  if (status === 'loading' && !d) return <Loading />;
+  if (!d) return <LoadFailed error={error ?? 'The Slack apps could not be read.'} />;
+  const term = q.trim().toLowerCase();
+  const shown = d.apps.filter(
+    (a) => !term || [a.name, a.app_id, a.engine_bot, a.description, ...a.commands.map((c) => c.command)].some((v) => v && v.toLowerCase().includes(term)),
+  );
+  const installed = d.apps.filter((a) => a.listed && !a.deleted && !a.gone_at);
+  const cmdCount = installed.reduce((n, a) => n + a.commands.length, 0);
+  const shared = new Set(d.shared_commands.map((c) => c.command));
+  const readNow = async () => {
+    setBusy(true);
+    try {
+      const r = await readSlackAppsNow();
+      setD(r);
+      if (r.result && !r.result.ok) fail(r.result.message ?? 'Slack was not read.');
+      else if (r.result?.message) fail(r.result.message);
+      else ok(`Read ${r.result?.apps ?? 0} apps from Slack, ${r.result?.readable ?? 0} with a manifest.`);
+    } catch (e) {
+      fail(e instanceof Error ? e.message : 'Slack was not read.');
+      setD(await getSlackApps().catch(() => d));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const status_ = (a: SlackApp) =>
+    a.gone_at ? <Pill>no longer installed</Pill> : a.deleted ? <Pill>bot deleted</Pill> : a.readable ? <Pill tone="accent">read</Pill> : <Pill tone="degraded">not readable</Pill>;
+  const where = (c: SlackApp['commands'][number]) => (c.delivery === 'request_url' ? c.url : c.delivery === 'socket_mode' ? "socket mode (the app's own process)" : 'nowhere (no URL, no socket mode)');
+  return (
+    <>
+      <div className="shrink-0 space-y-3 px-6 pb-3 md:px-8">
+        <div className="max-w-[104ch] text-[11.5px] leading-snug text-faint">
+          Every app on the workspace, read from Slack, with its slash commands and where each one is answered. Read only: an app is changed in Slack, not here. {d.note}
+        </div>
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-[12px] text-dim">
+          <span>{installed.length} installed</span>
+          <span>{installed.filter((a) => a.readable).length} with a manifest read</span>
+          <span>{cmdCount} slash commands</span>
+          {d.shared_commands.length > 0 && <span className="text-[var(--degraded)]">{d.shared_commands.length} claimed by two apps: {d.shared_commands.map((c) => c.command).join(', ')}</span>}
+          <span>Last read {d.last_read?.at ? when(d.last_read.at) : 'never'}</span>
+          {!d.token.configured && <span className="text-[var(--degraded)]">No app configuration token on the server, so no manifest can be read.</span>}
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <SearchBox value={q} onChange={setQ} placeholder="Search apps or commands" />
+          <Button onClick={readNow} loading={busy}>
+            Read from Slack now
+          </Button>
+        </div>
+      </div>
+      <Grid
+        label="Slack apps"
+        min={1100}
+        cols={6}
+        empty={d.last_read ? 'Slack listed no app.' : 'Slack has not been read yet. Read from Slack now takes the first read.'}
+        head={
+          <>
+            <Th width="20%">app</Th>
+            <Th>engine bot</Th>
+            <Th width="36%">slash commands</Th>
+            <Th>events</Th>
+            <Th>status</Th>
+            <Th>read</Th>
+          </>
+        }
+      >
+        {shown.map((a) => (
+          <React.Fragment key={a.app_id}>
+            <tr className="cursor-pointer" onClick={() => setOpen(open === a.app_id ? null : a.app_id)}>
+              <td className="td card-title">
+                {a.name ?? a.app_id}
+                <div className="text-[11px] text-faint">{a.app_id}</div>
+              </td>
+              <td className="td text-dim">{a.engine_bot ?? DASH}</td>
+              <td className="td text-dim">
+                {a.commands.length === 0
+                  ? a.readable
+                    ? 'none'
+                    : DASH
+                  : a.commands.map((c) => (
+                      <span key={c.command} className="mr-2 inline-block">
+                        <code className={shared.has(c.command.toLowerCase()) ? 'text-[var(--degraded)]' : ''}>{c.command}</code>
+                      </span>
+                    ))}
+              </td>
+              <td className="td text-dim">{a.socket_mode ? 'socket mode' : a.event_url ? 'request URL' : a.readable ? 'none' : DASH}</td>
+              <td className="td">{status_(a)}</td>
+              <td className="td text-dim">{when(a.read_at)}</td>
+            </tr>
+            {open === a.app_id && (
+              <tr>
+                <td colSpan={6} className="td bg-[var(--surface-2,transparent)]">
+                  <div className="space-y-2 py-1 text-[12px] leading-snug">
+                    {a.description && <div className="text-dim">{a.description}</div>}
+                    {a.read_error && <div className="text-[var(--degraded)]">{a.read_error}</div>}
+                    {a.commands.map((c) => (
+                      <div key={c.command}>
+                        <code>{c.command}</code> {c.description ? `: ${c.description}` : ''} <span className="text-faint">answered at {where(c)}</span>
+                      </div>
+                    ))}
+                    {a.event_url && <div className="text-faint">Events go to {a.event_url}</div>}
+                    {a.interactivity_url && <div className="text-faint">Buttons go to {a.interactivity_url}</div>}
+                    {a.readable && (
+                      <div className="text-faint">
+                        {a.bot_scopes.length} bot scopes{a.bot_scopes.length ? `: ${a.bot_scopes.join(', ')}` : ''}
+                        {a.user_scopes.length ? `; ${a.user_scopes.length} user scopes: ${a.user_scopes.join(', ')}` : ''}
+                      </div>
+                    )}
+                    <div className="text-faint">
+                      Bot user {a.bot_user_id ?? 'none'} · first seen {when(a.first_seen_at)}
+                      {a.gone_at ? ` · not found since ${when(a.gone_at)}` : ''}
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            )}
+          </React.Fragment>
+        ))}
+      </Grid>
+    </>
+  );
+}
+
 function TruthTab({ rows, ...p }: TabProps & { rows: RegistryData['truth'] }) {
   const [q, setQ] = useState('');
   const term = q.trim().toLowerCase();

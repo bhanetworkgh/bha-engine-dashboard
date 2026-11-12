@@ -3208,6 +3208,20 @@ reason, never a guessed number; a balance in another currency is not judged. One
 `engine_writes`. It tops nothing up. The hourly alerts (`Engine — OpenRouter Credit Alert`, `Engine — Twilio
 Credit Alert`) are separate. `npm run test:service-balances`.
 
+**The Slack apps, read from Slack** (13 Nov 2026, Destiny — LOOP-1793822283669-V8QY: `/sample-command` answered
+"app did not respond" in Kavin's log channel and nobody could say which app owned it). `server/src/slackApps.ts`,
+migration 133, `engine_slack_apps`, the System Registry's **Slack apps** tab (`?tab=slack-apps`), `GET /api/slack-apps`
+and `POST /api/slack-apps` (a fresh read), and `read_slack_apps` (read, both connections, in no agent's scope). **Read
+only**: nothing here creates, changes or removes an app or a command; an app is changed in Slack. Which apps exist is
+`users.list` with the Bays bot token (every app with a bot user); what each does is `apps.manifest.export` with an app
+configuration token, which Slack answers only for an app Destiny collaborates on, so any other app is kept with Slack's
+refusal in `read_error`. An app with no bot user is named by its id (`app_ids`) and then kept. **The configuration token
+rotates**: `SLACK_CONFIG_REFRESH_TOKEN` (no default) seeds once, `tooling.tokens.rotate` is called under an advisory lock,
+and the live pair is kept in `meta` `slack_config.tokens`; a new value on Render reseeds. Neither token is returned
+anywhere. A manifest's URLs lose their query string and the whole manifest goes through `redactSecrets`. One row per app;
+one not found again is marked gone, never deleted. `shared_commands` names a command two installed apps both claim. Read
+once a day by the timer and at most once a minute on demand; each read is one `slack_apps_read` event.
+
 **The System Registry over MCP** (2026-10-30, Destiny: "when we're talking about new tools, we can
 immediately tell it from Slack to register it in the dashboard"). `server/src/mcp/registryTools.ts`.
 `read_registry` (read, both connections, Bays' scope) lists services, endpoints or workflows, searched by

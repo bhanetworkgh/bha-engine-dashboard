@@ -128,6 +128,7 @@ import * as publicationDecision from './publicationDecision';
 import * as doctrineGap from './doctrineGap';
 import * as approvals from './approvals';
 import * as agentInventory from './agentInventory';
+import * as slackApps from './slackApps';
 import * as candidateActions from './candidateActions';
 import * as patternDraft from './patternDraft';
 import type { Freshness, NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
@@ -2109,6 +2110,14 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
     return;
   }
 
+  // A fresh read of the Slack apps from Slack (13 Nov 2026). It changes nothing in Slack.
+  if (p === '/api/slack-apps' && method === 'POST') {
+    const body = (await readJson(req).catch(() => ({}))) as { app_ids?: unknown };
+    const extra = Array.isArray(body.app_ids) ? body.app_ids.map(String) : [];
+    const r = await slackApps.read({ extra, by: 'page' });
+    return send(res, r.ok || r.reason === 'too_soon' ? 200 : 502, { result: r, ...(await slackApps.show()) });
+  }
+
   if (method === 'GET') {
     switch (p) {
       case '/api/status': {
@@ -2350,6 +2359,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         return send(res, 200, await earlyAccess.leads());
       case '/api/ask-bays':
         return send(res, 200, engine.getAskBays(q));
+      // The Slack apps on the workspace, their commands and bots, read from Slack (13 Nov 2026). Read only:
+      // the POST takes a fresh read from Slack and changes nothing in Slack.
+      case '/api/slack-apps':
+        return send(res, 200, await slackApps.show());
       case '/api/registry': {
         // Everything the page shows, in one response. Five small tables; a
         // request per tab would only make the age of each one harder to state.
@@ -3513,6 +3526,7 @@ async function boot(): Promise<void> {
     codexGap.startSweeping();
     renewalReminder.startSweeping();
     codeCheckWatch.startSweeping();
+    slackApps.startReading();
     sopCheck.startSweeping();
     intake2.startSweeping();
     void layer0Notice.sweepRecent().then((r) => { if (r.checked) console.log(`[layer0-notice] boot sweep: ${r.checked} completed log(s) checked, ${r.deleted} notice(s) deleted, ${r.failed} failed`); }).catch((e) => console.error(`[layer0-notice] boot sweep failed: ${e instanceof Error ? e.message : String(e)}`));
