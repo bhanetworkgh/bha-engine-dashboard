@@ -20,6 +20,7 @@
  */
 import { query } from './pg';
 import { record } from './engineEvents';
+import { isFormerBuilder } from './sources';
 import * as slack from './slack';
 import * as timers from './timers';
 
@@ -49,6 +50,7 @@ export interface Gap extends Builder {
 export function findGaps(builders: Builder[], now: Date): Gap[] {
   return builders
     .filter((b) => !RULE.never_flag.includes(b.user_id as (typeof RULE.never_flag)[number]))
+    .filter((b) => !isFormerBuilder(b.user_id))
     .filter((b) => b.days_logged >= RULE.regular_days)
     .map((b) => ({ ...b, hours_since: (now.getTime() - new Date(b.last_log_at).getTime()) / 3_600_000, dedupe_key: `codex_gap:${b.user_id}:${new Date(b.last_log_at).toISOString()}` }))
     .filter((g) => g.hours_since >= RULE.gap_hours)

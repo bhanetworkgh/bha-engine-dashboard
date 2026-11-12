@@ -167,6 +167,16 @@ export const SLACK_TO_BUILDER: Record<string, string> = {
   U0BNQGG020Y: 'kavin',
 };
 
+/**
+ * Builders who have left BHA (12 Nov 2026, Destiny; Jason in DM D0AF0DG8ZPY 1794437105.218789: Kaiqi is
+ * out of BHA and holds no lane). Their past loops, logs and pay stay on record under their names; nothing
+ * the engine starts on its own may notify them: no lane defaults to them, the missing-log check never DMs
+ * them, no Decision Watch can be opened on them, and an agent's DM to them waits for Destiny's or Jason's
+ * approval. Kept here, the one place the roster lives, so every check reads the same list.
+ */
+export const FORMER_BUILDERS: readonly string[] = ['U0AD1V1D65N'];
+export const isFormerBuilder = (id: string | null | undefined): boolean => !!id && FORMER_BUILDERS.includes(id);
+
 /** Display names as the Codex Log's builder_name select spells them, lower-cased. */
 const NAME_TO_BUILDER: Record<string, string> = {
   'destiny arupi': 'destiny',

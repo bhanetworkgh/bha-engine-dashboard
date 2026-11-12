@@ -23,6 +23,7 @@
 import * as slack from '../slack';
 import { query } from '../pg';
 import * as approvals from '../approvals';
+import { isFormerBuilder } from '../sources';
 import { auditClose, auditOpen } from './writeTools';
 import type { ToolDefinition, ToolDeps } from './tools';
 
@@ -70,7 +71,8 @@ export async function unknownRecipients(ids: string[]): Promise<string[]> {
   const want = [...new Set(ids)].filter((u) => !approvals.APPROVERS.includes(u));
   if (!want.length) return [];
   const r = await query<{ natural_id: string }>(`SELECT natural_id FROM engine_builder_profiles WHERE natural_id = ANY($1)`, [want]);
-  const known = new Set(r.rows.map((x) => x.natural_id));
+  // A builder who has left BHA still has a profile on record, but is never a destination an agent may DM unasked.
+  const known = new Set(r.rows.map((x) => x.natural_id).filter((u) => !isFormerBuilder(u)));
   return want.filter((u) => !known.has(u));
 }
 

@@ -15179,3 +15179,10 @@ Files:      server/src/payCard.ts, server/test/pay-card.test.cjs, CLAUDE.md, BUI
 Problem:    The card printed the hold's release condition on daily and monthly cards, and the monthly month-so-far line was days and shares ("6.7 day(s) credited across 7 log(s), 0.3 still held").
 Fix:        Blocks rebuilt as a title line and two-column section fields. No hold reason anywhere. Daily: this session, held, docked, releases (date, percent, dollars, proof), earlier owed, pay for this card and all owed. Monthly: this log as percentages, and the month so far as logs, days and percent of the month's logs credited, released and held.
 Decision:   Release and earlier lines drop the long Codex id; the date and the proof link identify them.
+
+## 2026-11-12 13:05 — Kaiqi cleared from everything that would notify him
+Intent:     Jason approved the Genie takeover (DM D0AF0DG8ZPY 1794437105.218789); stop every engine path that would still reach Kaiqi.
+Files:      server/src/sources.ts, server/src/writeGuards.ts, server/src/codexGap.ts, server/src/decisionWatch.ts, server/src/mcp/slackTools.ts, server/test/codex-gap.test.cjs, CLAUDE.md
+Problem:    Kaiqi still owned 7 open Decision Watches (digest DM sent 12 Nov 00:04), 12 open loops on his table, the GENIE lane default, Bays' daily open-loops reminder and the every-3-days check-in, and the missing-log DM (sent 11 Nov 23:34).
+Fix:        Closed the 7 watches with Jason's approval as proof (audits 5960-5966); moved the 12 loops to Destiny's table with move_loop (5968-5979); deleted Bays' task "Open loops reminder -- Kaiqi" and took his line out of the in-progress check-in, published Bays d1a3a44f and recorded the inventory (5980). In code: FORMER_BUILDERS, GENIE owner to Destiny, the gap check skips former builders, open_decision_watch refuses them (owner_former), and an agent DM to them is held for approval.
+Decision:   One list in sources.ts rather than deleting his profile, so his history keeps its name and every check reads the same roster.

@@ -20,6 +20,8 @@ const H = 3_600_000;
   assert.equal(gaps[0].dedupe_key, `codex_gap:UREG:${new Date(now.getTime() - 19 * H).toISOString()}`);
   assert.match(gap.builderText(gaps[0]), /no Codex log from you has reached the engine since .* \(19 hours ago\)/);
   ok('the gap is keyed on the builder and their newest log, and the DM says how long');
+  assert.deepEqual(gap.findGaps([b('U0AD1V1D65N', 9, 40)], now), []);
+  ok('a builder who has left BHA (Kaiqi) is never flagged, however long since their last log');
 
   const url = process.env.DATABASE_URL || '';
   if (!/@(localhost|127\.0\.0\.1)[:/]/.test(url) || !/_test(\?|$)/.test(url)) {

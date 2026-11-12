@@ -46,6 +46,7 @@ import { query } from './pg';
 import * as quota from './quota';
 import * as slack from './slack';
 import * as timers from './timers';
+import { isFormerBuilder } from './sources';
 
 export const RULE = {
   wait_hours: 24,
@@ -266,6 +267,7 @@ export async function open(input: OpenInput): Promise<OpenResult> {
   const decision = input.decision.trim();
   if (decision.length < 8) return { ok: false, reason: 'decision_required', message: 'Say what is being waited on, in a sentence.' };
   if (!/^[UW][A-Z0-9]{6,}$/.test(input.owner_user_id)) return { ok: false, reason: 'owner_required', message: `"${input.owner_user_id}" is not a Slack user id (U…). A watch needs the person who owes the answer.` };
+  if (isFormerBuilder(input.owner_user_id)) return { ok: false, reason: 'owner_former', message: `<@${input.owner_user_id}> has left BHA, so nothing can be waited on from them. Open the watch on whoever owns the work now (their lane went to Destiny).` };
   const hasThread = Boolean(input.channel_id && input.thread_ts);
   const hasRecord = Boolean(input.record_kind && input.record_id);
   if (!hasThread && !hasRecord) return { ok: false, reason: 'nothing_to_watch', message: 'A watch needs a Slack thread, a loop or a backlog task to watch.' };

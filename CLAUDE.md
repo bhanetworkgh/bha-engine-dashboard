@@ -686,6 +686,11 @@ explicitly for this. Therefore:
   a location. The profile lookup is only reached when the name is not one of
   the seven and no `table_id` was sent, so a resync of nine hundred loops costs
   no extra round trip.
+- **A builder who has left BHA is notified by nothing the engine starts** (12 Nov 2026, Destiny; Jason in
+  DM D0AF0DG8ZPY 1794437105.218789: Kaiqi is out). `FORMER_BUILDERS` in `server/src/sources.ts` is the one
+  list: no lane defaults to them (GENIE's owner is Destiny), the missing-log check never DMs them, a Decision
+  Watch cannot be opened on them (`owner_former`), and an agent's DM to them waits for Destiny's or Jason's
+  approval. Their loops moved to Destiny's table; their past loops, logs and pay stay on record under their name.
 - **`GET /api/engine/loops` and `/codex` return `builder_id` and `table_id` on
   every row**, and that is pinned by a test (`npm run test:lookup`) rather than
   left as a comment. n8n's update-a-loop path reads them to find the owner — the
