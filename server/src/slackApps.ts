@@ -294,7 +294,7 @@ async function doRead(opts: { extra?: string[]; by?: string }): Promise<ReadResu
     else {
       const r = await call('apps.manifest.export', { app_id: t.app_id }, token);
       if (r.ok === true && r.manifest && typeof r.manifest === 'object') manifest = cleanManifest(r.manifest) as Record<string, any>;
-      else readErr = `Slack would not export this app's manifest: ${String(r.error ?? 'no reason given')}${r.error === 'invalid_app' || r.error === 'app_not_found' || r.error === 'not_allowed' ? ' (only an app Destiny is a collaborator on can be read)' : ''}`;
+      else readErr = `Slack would not export this app's manifest: ${String(r.error ?? 'no reason given')}${r.error === 'no_permission' || r.error === 'not_allowed' ? ' (Destiny is not a collaborator on this app, so only its owner can read it)' : r.error === 'app_not_found' || r.error === 'invalid_app' ? ' (Slack has no app under this id: its bot user is left over from an app that was deleted or rebuilt)' : ''}`;
     }
     const s = manifest ? summarise(manifest) : null;
     if (s) {

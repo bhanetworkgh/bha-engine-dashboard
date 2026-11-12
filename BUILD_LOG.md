@@ -15193,3 +15193,9 @@ Files:      server/src/slackApps.ts (new), server/src/mcp/slackAppsTools.ts (new
 Problem:    /sample-command answered "app did not respond" in Kavin's log channel. The command lives in an app's manifest, which only api.slack.com shows, one app at a time, to a collaborator. Nothing in the engine listed the apps at all.
 Fix:        users.list (Bays bot) lists every app with a bot user; apps.manifest.export (app configuration token) reads each manifest; the commands, request URLs, socket mode, scopes and events land in engine_slack_apps and on a Slack apps tab. The configuration token rotates every 12 hours, so the refresh token on Render seeds once and the live pair is kept in meta, rotated under an advisory lock so two instances during a deploy cannot spend the same refresh token. read_slack_apps answers the same from MCP.
 Decision:   No write path to Slack at all: retiring vFarm-Alerts and /sample-command stays a person's step in api.slack.com once the registry shows who owns them. An app Slack will not export is kept with its refusal rather than left out, and an app not found again is marked gone, never deleted.
+
+## 2026-11-13 21:25 — Slack apps: first live read, and the refusal reasons worded right
+Intent:     Prove the registry on the live workspace and read what it says about /sample-command.
+Files:      server/src/slackApps.ts, BUILD_LOG.md
+Problem:    The first read (timer, 19:39:53 UTC) listed 32 apps and read 8 manifests (Bays, CST Monitoring, Genie, Media Twin, North Star, Research Twin and the two check-in apps), 9 commands. /sample-command is on none of the 8. Slack refused the other 24 two ways: no_permission (Destiny is not a collaborator, Vfarm-Alerts among them) and app_not_found (a bot user whose app was deleted or rebuilt: an older Bays, Research Twin, Process Twin and the BHA Log, Slack and LogStream engines). The hint said "collaborator" for both.
+Fix:        Each refusal now says which of the two it is.
