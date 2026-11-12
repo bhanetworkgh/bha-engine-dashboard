@@ -102,6 +102,23 @@ function paidAtFor(copies: Held[], incoming: unknown): string {
   return set[0] || pick(incoming).trim() || nowIso();
 }
 
+
+/**
+ * Who marked a log paid (12 Nov 2026): the Yes, Paid click writes `Paid By Slack ID` on the log, and the
+ * name is read from Builder Profiles (Jason has none, so he is named here). A log paid before that carries
+ * no id and keeps what its pay rows already say, else "Jason", who pressed every Yes, Paid until then.
+ */
+const KNOWN_PAYERS: Record<string, string> = { U0A9V97949F: 'Jason', U0AEW3TBYH1: 'Destiny Arupi' };
+async function paidByName(db: Queryable, logFields: Record<string, unknown>, existing: unknown): Promise<string> {
+  const id = pick(logFields['Paid By Slack ID']).trim();
+  if (id) {
+    if (KNOWN_PAYERS[id]) return KNOWN_PAYERS[id];
+    const r = await db.query<{ name: string | null }>(`SELECT fields->>'name' AS name FROM engine_builder_profiles WHERE natural_id = $1 LIMIT 1`, [id]).catch(() => ({ rows: [] as Array<{ name: string | null }> }));
+    return r.rows[0]?.name || id;
+  }
+  return pick(existing).trim() || 'Jason';
+}
+
 /**
  * What the log says about Paid, laid over an incoming pay_sessions row.
  *
@@ -123,7 +140,7 @@ export async function applyLogPaid(db: Queryable, fields: Record<string, unknown
     ...fields,
     Paid: paid,
     'Paid At': paid ? paidAtFor(copies, fields['Paid At']) : null,
-    'Paid By': paid ? 'Jason' : null,
+    'Paid By': paid ? await paidByName(db, log.rows[0].fields, fields['Paid By'] ?? copies[0]?.fields['Paid By']) : null,
     // A late post of the session from n8n must not drop the pay note either.
     ...payNote.ledgerFields(await payNote.forEntry(db, entryId)),
   };
@@ -177,7 +194,7 @@ async function syncWith(db: Queryable, fields: Record<string, unknown>): Promise
     Month: month,
     Paid: paid,
     'Paid At': paidAt,
-    'Paid By': paid ? 'Jason' : null,
+    'Paid By': paid ? await paidByName(db, fields, first['Paid By']) : null,
     'Codex Link': pick(fields['Session Url']),
     // The pay note (9 Nov 2026, payNote.ts): shares credited, held and docked, laid onto every copy.
     ...payNote.ledgerFields(await payNote.forEntry(db, entryId)),

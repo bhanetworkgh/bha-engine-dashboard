@@ -15212,3 +15212,9 @@ Files:      server/src/payCard.ts, server/src/paySync.ts, server/src/index.ts, C
 Problem:    The 12 Nov card was built at the Approve (15:27 UTC); 11 Nov was marked paid at 15:48 UTC. Nothing redraws a card after it is posted, so it showed "Owed from earlier days: 11 Nov · 95% · $420" and "All owed now $847.50". The $420 was right (95% of $350 = $332.50, plus $87.50 of releases the 11 Nov card paid out) but read as a sum error.
 Fix:        paySync, when a pay session turns paid, queues payCard.refreshUnpaidSoon(builder) after the commit: 8 s later every unpaid card of that builder is rewritten in place from the ledger. POST /api/engine/pay-card/refresh { builder_slack_id, dry_run? } does it on demand. Nothing owed from earlier days now draws no line at all (was "Earlier days · Nothing owed"). An earlier line with releases reads "95% · $332.50 + $87.50 released on that card = $420.00".
 Decision:   A refresh on its own, after every Yes, Paid, rather than a button: a button is a step somebody has to remember, and the card is only wrong after a payment.
+
+## 2026-11-12 21:40 — Paid By names who pressed Yes, Paid
+Intent:     The pay record said "Paid By: Jason" for Destiny's 12 Nov card, which Destiny pressed (the card itself said "marked by Destiny").
+Files:      server/src/paySync.ts, CLAUDE.md; n8n Bays — Submit Actions, node "Mark Log Paid (Airtable) · PATCH"
+Problem:    paySync wrote 'Paid By': 'Jason' whenever the log said Paid, because the log never carried who pressed it.
+Fix:        The click's PATCH now also sends `Paid By Slack ID` (the clicker, from Prepare Paid Click). paidByName reads that id (Jason and Destiny by id, else Builder Profiles, else the id itself); with no id it keeps the row's Paid By, else Jason, so past rows do not move.
