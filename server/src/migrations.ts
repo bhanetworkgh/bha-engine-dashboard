@@ -4676,6 +4676,37 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       )`,
     ],
   },
+  {
+    id: 134,
+    name: 'The founder comp snapshot: sections Destiny keeps, and the text each change replaced (12 Nov 2026, Destiny)',
+    statements: [
+      // Jason, DM D0AF0DG8ZPY 1794498144.803619: one current snapshot of equity, stages and pay, the waterfall,
+      // knowledge capture and production income. Behind the admin login; written only by write_comp_snapshot.
+      `CREATE TABLE IF NOT EXISTS engine_comp_snapshot (
+        section_id text PRIMARY KEY,
+        position integer NOT NULL DEFAULT 100,
+        title text NOT NULL,
+        body text NOT NULL,
+        updated_at timestamptz NOT NULL DEFAULT now(),
+        updated_by text NOT NULL CHECK (updated_by IN ('U0AEW3TBYH1', 'U0A9V97949F'))
+      )`,
+      // Every change keeps what it replaced. Never edited or deleted, like the pay note history.
+      `CREATE TABLE IF NOT EXISTS engine_comp_snapshot_history (
+        id bigserial PRIMARY KEY,
+        section_id text NOT NULL,
+        title text NOT NULL,
+        body text NOT NULL,
+        position integer NOT NULL,
+        written_at timestamptz NOT NULL,
+        written_by text NOT NULL,
+        replaced_at timestamptz NOT NULL DEFAULT now(),
+        replaced_by text NOT NULL,
+        reason text
+      )`,
+      `DROP TRIGGER IF EXISTS engine_comp_snapshot_history_frozen ON engine_comp_snapshot_history`,
+      `CREATE TRIGGER engine_comp_snapshot_history_frozen BEFORE UPDATE OR DELETE ON engine_comp_snapshot_history FOR EACH ROW EXECUTE FUNCTION engine_pay_note_frozen()`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

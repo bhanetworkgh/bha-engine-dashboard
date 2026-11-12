@@ -40,6 +40,7 @@ export function gated(path: string, method: string, agentLoopback: boolean): boo
   if (path === '/api/pay' || path.startsWith('/api/pay/')) return true;
   if (path === '/api/code-checks' || path.startsWith('/api/code-checks/')) return true;
   if (path === '/api/agreements' || path.startsWith('/api/agreements/')) return true;
+  if (path === '/api/comp-snapshot') return true;
   if (agentLoopback && (path === '/api/vfarm/leads' || path.startsWith('/api/vfarm/leads/'))) return true;
   if (method === 'POST' && /^\/api\/codex\/[^/]+\/reject$/.test(path)) return true;
   if ((method === 'PATCH' || method === 'DELETE') && /^\/api\/codex\/[^/]+$/.test(path)) return true;

@@ -66,6 +66,7 @@ import { handleMcp, mcpConfigured, mcpMountPath, mcpWriteConfigured, agentTokens
 import * as mcpLogs from './mcp/logs';
 import * as adminAuth from './adminAuth';
 import * as agreements from './agreements';
+import * as compSnapshot from './compSnapshot';
 import { extractFileText } from './mcp/docTools';
 import * as earlyAccess from './earlyAccess';
 import * as stripeLedger from './stripeLedger';
@@ -2036,6 +2037,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
     adminAuth.logout(req, res);
     return send(res, 200, { ok: true });
   }
+  if (p === '/api/comp-snapshot' && method === 'GET') return send(res, 200, await compSnapshot.read());
   if (p === '/api/agreements' && method === 'GET') return send(res, 200, await agreements.list());
   if (p === '/api/agreements' && method === 'POST') {
     const body = await readJson(req, 22 * 1024 * 1024);

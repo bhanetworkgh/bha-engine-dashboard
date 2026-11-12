@@ -805,6 +805,15 @@ export interface Agreement {
   uploaded_by: string;
   uploaded_at: string;
 }
+/** The founder comp snapshot (12 Nov 2026), behind the admin login: server/src/compSnapshot.ts. */
+export interface CompSection { section_id: string; position: number; title: string; body: string; updated_at: string; updated_by: string }
+export interface CompSnapshot {
+  sections: CompSection[];
+  rates: { builder: string; builder_slack_id: string; day_rate_usd: string; effective_from: string; note: string | null }[];
+  stage1: { id: string; name: string; lane: string | null; plan_status: string | null; agreement_sent: string | null; signed: string | null; countersigned: string | null; knowledge_capture: string | null; updated_at: string }[];
+  updated_at: string | null;
+}
+export const getCompSnapshot = () => api<CompSnapshot>('/api/comp-snapshot');
 export const getAgreements = () => api<{ agreements: Agreement[]; key_configured: boolean }>('/api/agreements');
 export const getAgreementText = (id: string) => api<{ text: string }>(`/api/agreements/${id}/text`);
 export const uploadAgreement = (body: { person_id: string; person_name: string; status: string; filename: string; content_type: string; base64: string; note?: string }) =>

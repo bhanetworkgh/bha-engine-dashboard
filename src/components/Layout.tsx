@@ -79,6 +79,8 @@ const GROUPS: { group: string | null; items: { to: string; label: string; icon: 
     items: [
       { to: '/registry', label: 'System registry', icon: 'book' },
       { to: '/stage-1', label: 'Stage 1 status', icon: 'shield' },
+      // Equity, stages and pay, the waterfall and production income, behind the admin login (12 Nov 2026).
+      { to: '/comp-snapshot', label: 'Comp snapshot', icon: 'shield' },
       // The agent maturity scorecard (2026-09-28): 12 dimensions, scored, with the live metrics behind them.
       { to: '/agent-maturity', label: 'Agent maturity', icon: 'shield' },
     ],
