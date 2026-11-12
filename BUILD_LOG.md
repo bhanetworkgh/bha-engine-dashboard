@@ -15172,3 +15172,10 @@ Files:      server/src/payCard.ts, BUILD_LOG.md
 Problem:    releasesFor only read unclaimed releases when claiming, so a dry run never showed them; and a rewrite of an old card would have taken any unclaimed release, including one a later approval made.
 Fix:        Unclaimed releases are always read (claimed only when claim is set). A rewrite (rewrite: true) takes only releases made within 10 minutes of this log's pay note being set, which is when its approval releases earlier holds. A paid card rewritten now claims too, since that money went out on it.
 Decision:   Destiny marked his four unpaid October and November logs as paid ("you just forgot to pay them"), so the earlier-owed line on his card goes back to nought.
+
+## 2026-11-12 12:05 — Pay card made readable
+Intent:     Destiny on the rewritten cards: too packed, the hold reason repeats what the review says, and Jegan's "0.3 held" should be a percentage.
+Files:      server/src/payCard.ts, server/test/pay-card.test.cjs, CLAUDE.md, BUILD_LOG.md
+Problem:    The card printed the hold's release condition on daily and monthly cards, and the monthly month-so-far line was days and shares ("6.7 day(s) credited across 7 log(s), 0.3 still held").
+Fix:        Blocks rebuilt as a title line and two-column section fields. No hold reason anywhere. Daily: this session, held, docked, releases (date, percent, dollars, proof), earlier owed, pay for this card and all owed. Monthly: this log as percentages, and the month so far as logs, days and percent of the month's logs credited, released and held.
+Decision:   Release and earlier lines drop the long Codex id; the date and the proof link identify them.

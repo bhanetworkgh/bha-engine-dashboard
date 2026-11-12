@@ -9,7 +9,7 @@ const pc = require(path.join(dist, 'payCard.js'));
 
 let n = 0;
 const ok = (name, fn) => { fn(); n++; console.log(`ok ${n} ${name}`); };
-const text = (bs) => bs.map((b) => (b.text && b.text.text) || (b.elements || []).map((e) => e.text).join(' ')).join('\n');
+const text = (bs) => bs.map((b) => (b.text && b.text.text) || (b.fields || []).map((e) => e.text).join('\n') || (b.elements || []).map((e) => e.text).join(' ')).join('\n');
 
 const base = {
   submission_id: 'U0AEW3TBYH1_1', codex_entry_id: 'CODEX-20261111-destiny-arupi-write-door-proof', builder_slack_id: 'U0AEW3TBYH1', builder: 'Destiny Arupi',
@@ -28,19 +28,20 @@ ok('usd and pct format', () => {
 
 ok('daily card shows this session, the release, pay for the card, earlier and all owed in dollars', () => {
   const t = text(pc.blocks(base));
-  assert.match(t, /95% of a day = \*\$332\.50\*/);
-  assert.match(t, /Held:\* 5% \(\$17\.50\) until a real presence alert/);
-  assert.match(t, /25% of a day held on `CODEX-20261110-destiny-arupi-pay-proof-levels` \(10 Nov, \$350\.00\/day\) = \*\$87\.50\*/);
-  assert.match(t, /Pay for this card: \$420\.00/);
-  assert.match(t, /20 Oct `CODEX-20261020-a`: 100% of a day \(no pay note, full day\) = \$350\.00/);
-  assert.match(t, /All owed now: \$770\.00/);
-  // The held 5% of this log is in "Held", not repeated as an earlier hold.
+  assert.match(t, /\$350\.00 a day/);
+  assert.match(t, /This session \(11 Nov\)\*\n95%  ·  \$332\.50/);
+  assert.match(t, /\*Held\*\n5%  ·  \$17\.50/);
+  assert.match(t, /10 Nov  ·  25%  ·  \$87\.50  ·  <https:\/\/dashboard\.bhanetwork\.org\/codex\/x\|proof>/);
+  assert.match(t, /Pay for this card\*\n\*\$420\.00\*/);
+  assert.match(t, /20 Oct  ·  100%  ·  \$350\.00  _\(no pay note\)_/);
+  assert.match(t, /All owed now\*\n\*\$770\.00\*/);
+  assert.doesNotMatch(t, /presence alert|until/, 'no reason for a hold on the card');
   assert.doesNotMatch(t, /Still held on earlier logs/);
 });
 
 ok('a paid card shows what it paid and nothing owed from earlier', () => {
   const t = text(pc.blocks(base, { paid: true }));
-  assert.match(t, /Paid on this card: \$420\.00/);
+  assert.match(t, /Paid on this card\*\n\*\$420\.00\*/);
   assert.doesNotMatch(t, /Owed from earlier days|All owed now/);
 });
 
@@ -48,17 +49,18 @@ ok('a missing rate is said, never guessed', () => {
   const f = { ...base, rate: null, today: { ...base.today, credited_usd: null, held_usd: null, docked_usd: null }, pay_now_usd: null, owed_total_usd: null, missing_rates: ['2026-11-11'] };
   const t = text(pc.blocks(f));
   assert.match(t, /no day rate on record/);
-  assert.match(t, /not worked out \(a day rate is missing\)/);
+  assert.match(t, /not worked out/);
   assert.match(t, /No day rate on record for: 2026-11-11/);
-  assert.match(t, /This session \(11 Nov\):\* 95% of a day\n/, 'no dollar figure for a session with no rate');
+  assert.match(t, /This session \(11 Nov\)\*\n95%\n/, 'no dollar figure for a session with no rate');
 });
 
-ok('monthly card is shares only, with the month so far', () => {
-  const f = { ...base, pay_mode: 'Monthly', rate: null, releases: [], earlier: [], earlier_total_usd: null, owed_total_usd: null, pay_now_usd: null, month: { month: '2026-11', credited_shares: 6.5, released_shares: 0.2, held_shares: 0.3, sessions: 8 } };
+ok('monthly card is percentages only, with the month so far', () => {
+  const f = { ...base, pay_mode: 'Monthly', rate: null, today: { ...base.today, credited: 0.9, held: 0.1 }, releases: [], earlier: [], earlier_total_usd: null, owed_total_usd: null, pay_now_usd: null, month: { month: '2026-11', credited_shares: 6.7, released_shares: 0, held_shares: 0.3, sessions: 7 } };
   const t = text(pc.blocks(f));
-  assert.match(t, /monthly builder, shares of a day/);
-  assert.match(t, /2026-11 so far:\* 6\.5 day\(s\) credited across 8 log\(s\), 0\.2 released, 0\.3 still held/);
-  assert.doesNotMatch(t, /\$/);
+  assert.match(t, /monthly builder, settled on the statement on the 1st/);
+  assert.match(t, /This log\*\n90% credited  ·  10% held/);
+  assert.match(t, /November so far\*\n7 log\(s\)  ·  6\.7 day\(s\)\n95\.7% credited  ·  4\.3% held/);
+  assert.doesNotMatch(t, /\$|until/);
 });
 
 ok('merge puts the pay blocks before the buttons and replaces old ones', () => {

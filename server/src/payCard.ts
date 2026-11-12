@@ -297,49 +297,58 @@ async function claimedUsd(q: Queryable, builder: string, cardSub: string): Promi
 const sec = (id: string, text: string): Block => ({ type: 'section', block_id: `${FIG}${id}`, text: { type: 'mrkdwn', text: cap(text, 2900) } });
 
 /** The card's pay blocks for a set of figures. Pure. */
+const fields = (id: string, cells: string[]): Block => ({ type: 'section', block_id: `${FIG}${id}`, fields: cells.slice(0, 10).map((c) => ({ type: 'mrkdwn', text: cap(c, 1900) })) });
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const monthName = (m: string): string => { const i = Number(m.slice(5, 7)) - 1; return MONTHS[i] ?? m; };
+const share = (x: number, of: number): string => (of > 0 ? pct(x / of) : '0%');
+
+/**
+ * The pay blocks (12 Nov 2026, Destiny: readable, not packed). No reason for a hold: the review above the
+ * card already says why. Daily builders get dollars in two columns; monthly builders get this log and the
+ * month so far as percentages of the month's logs.
+ */
 export function blocks(f: Figures, opts: { paid?: boolean } = {}): Block[] {
   const out: Block[] = [{ type: 'divider', block_id: `${FIG}div` }];
   const t = f.today;
-  const why = [t.reason_tag, t.release_condition ? `held until ${t.release_condition}` : null].filter(Boolean).join(', ');
+  const noNote = t.note_found ? '' : '\n_no pay note, counted as a full day_';
   if (f.pay_mode === 'Monthly') {
-    const lines = [
-      `*This log:* ${pct(t.credited)} of a day credited${t.held > 0 ? `, ${pct(t.held)} held` : ''}${t.docked > 0 ? `, ${pct(t.docked)} docked` : ''}${t.note_found ? '' : ' (no pay note, counted as a full day)'}`,
-      ...(why ? [`_${cap(why, 400)}_`] : []),
-      f.month ? `*${f.month.month} so far:* ${f.month.credited_shares} day(s) credited across ${f.month.sessions} log(s)${f.month.released_shares ? `, ${f.month.released_shares} released` : ''}${f.month.held_shares ? `, ${f.month.held_shares} still held` : ''}` : '',
-    ].filter(Boolean);
-    out.push(sec('monthly', `*:moneybag: Pay (monthly builder, shares of a day)*\n${lines.join('\n')}\nSettled once, on the statement on the 1st.`));
+    out.push(sec('title', '*:moneybag: Pay*  ·  monthly builder, settled on the statement on the 1st'));
+    const thisLog = [`${pct(t.credited)} credited`, ...(t.held > 0 ? [`${pct(t.held)} held`] : []), ...(t.docked > 0 ? [`${pct(t.docked)} docked`] : [])].join('  ·  ');
+    const cells = [`*This log*\n${thisLog}${noNote}`];
+    if (f.month) {
+      const m = f.month;
+      const parts = [`${share(m.credited_shares, m.sessions)} credited`, ...(m.released_shares ? [`${share(m.released_shares, m.sessions)} released`] : []), `${share(m.held_shares, m.sessions)} held`];
+      cells.push(`*${monthName(m.month)} so far*\n${m.sessions} log(s)  ·  ${m.credited_shares} day(s)\n${parts.join('  ·  ')}`);
+    }
+    out.push(fields('monthly', cells));
     return out;
   }
-  const rateLine = f.rate ? `day rate ${usd(f.rate.day_rate_usd)}, from ${day(f.rate.effective_from)}` : 'no day rate on record';
-  const todayLines = [
-    `*This session (${day(f.session_date)}):* ${pct(t.credited)} of a day${t.credited_usd !== null ? ` = *${usd(t.credited_usd)}*` : ''}${t.note_found ? '' : ' (no pay note, counted as a full day)'}`,
-    ...(t.held > 0 ? [`*Held:* ${pct(t.held)}${t.held_usd !== null ? ` (${usd(t.held_usd)})` : ''}${t.release_condition ? ` until ${cap(t.release_condition, 300)}` : ''}`] : []),
-    ...(t.docked > 0 ? [`*Docked:* ${pct(t.docked)}${t.docked_usd !== null ? ` (${usd(t.docked_usd)})` : ''}, never paid`] : []),
-  ];
-  out.push(sec('today', `*:moneybag: Pay for this log* (${rateLine})\n${todayLines.join('\n')}`));
+  out.push(sec('title', `*:moneybag: Pay*  ·  ${f.rate ? `${usd(f.rate.day_rate_usd)} a day` : 'no day rate on record'}`));
+  const cells = [`*This session (${day(f.session_date)})*\n${pct(t.credited)}${t.credited_usd !== null ? `  ·  ${usd(t.credited_usd)}` : ''}${noNote}`];
+  if (t.held > 0) cells.push(`*Held*\n${pct(t.held)}${t.held_usd !== null ? `  ·  ${usd(t.held_usd)}` : ''}`);
+  if (t.docked > 0) cells.push(`*Docked*\n${pct(t.docked)}${t.docked_usd !== null ? `  ·  ${usd(t.docked_usd)}` : ''}`);
+  out.push(fields('today', cells));
   if (f.releases.length) {
-    const lines = f.releases.slice(0, 10).map((r) => `• ${pct(r.share)} of a day held on \`${r.codex_entry_id}\` (${day(r.session_date)}${r.rate ? `, ${usd(r.rate.day_rate_usd)}/day` : ''})${r.usd !== null ? ` = *${usd(r.usd)}*` : ''}${r.proof_link ? ` · <${r.proof_link}|proof>` : ''}`);
-    out.push(sec('released', `*Released from earlier logs, proof now in*\n${lines.join('\n')}${f.releases.length > 10 ? `\n…and ${f.releases.length - 10} more` : ''}`));
+    const lines = f.releases.slice(0, 10).map((r) => `• ${day(r.session_date)}  ·  ${pct(r.share)}${r.usd !== null ? `  ·  ${usd(r.usd)}` : ''}${r.proof_link ? `  ·  <${r.proof_link}|proof>` : ''}`);
+    out.push(sec('released', `*Released from earlier logs*\n${lines.join('\n')}${f.releases.length > 10 ? `\n…and ${f.releases.length - 10} more` : ''}`));
   }
-  out.push(sec('paynow', `*${opts.paid ? 'Paid on this card' : 'Pay for this card'}: ${f.pay_now_usd !== null ? usd(f.pay_now_usd) : 'not worked out (a day rate is missing)'}*`));
-  if (!opts.paid) {
-    if (f.earlier.length) {
-      const lines = f.earlier.slice(0, 12).map((e) => `• ${day(e.session_date)} \`${e.codex_entry_id}\`: ${pct(e.credited)} of a day${e.note_found ? '' : ' (no pay note, full day)'}${e.total_usd !== null ? ` = ${usd(e.total_usd)}` : ''}${e.releases_usd ? ` (incl. ${usd(e.releases_usd)} released)` : ''}`);
-      out.push(sec('earlier', `*Owed from earlier days, not yet marked paid*\n${lines.join('\n')}${f.earlier.length > 12 ? `\n…and ${f.earlier.length - 12} more` : ''}\n*Earlier total: ${f.earlier_total_usd !== null ? usd(f.earlier_total_usd) : 'not worked out'}*`));
-      out.push(sec('owed', `*All owed now: ${f.owed_total_usd !== null ? usd(f.owed_total_usd) : 'not worked out'}*`));
-    } else {
-      out.push(sec('owed', '*Nothing owed from earlier days.*'));
-    }
+  if (!opts.paid && f.earlier.length) {
+    const lines = f.earlier.slice(0, 12).map((e) => `• ${day(e.session_date)}  ·  ${pct(e.credited)}${e.total_usd !== null ? `  ·  ${usd(e.total_usd)}` : ''}${e.note_found ? '' : '  _(no pay note)_'}`);
+    out.push(sec('earlier', `*Owed from earlier days, not marked paid*\n${lines.join('\n')}${f.earlier.length > 12 ? `\n…and ${f.earlier.length - 12} more` : ''}`));
   }
+  const missing = 'not worked out';
+  const totals = [`*${opts.paid ? 'Paid on this card' : 'Pay for this card'}*\n*${f.pay_now_usd !== null ? usd(f.pay_now_usd) : missing}*`];
+  if (!opts.paid) totals.push(f.earlier.length ? `*All owed now*\n*${f.owed_total_usd !== null ? usd(f.owed_total_usd) : missing}*` : '*Earlier days*\nNothing owed');
+  out.push(fields('totals', totals));
   const otherHeld = f.still_held.filter((h) => h.codex_entry_id !== (f.codex_entry_id ?? f.submission_id));
   if (otherHeld.length) {
-    const lines = otherHeld.slice(0, 8).map((h) => `• ${pct(h.share)} on \`${h.codex_entry_id}\` (${day(h.session_date)})${h.usd !== null ? `, ${usd(h.usd)}` : ''}${h.condition ? `: ${cap(h.condition, 200)}` : ''}`);
-    out.push(sec('held', `*Still held on earlier logs (not in any total above)*\n${lines.join('\n')}`));
+    const lines = otherHeld.slice(0, 8).map((h) => `• ${day(h.session_date)}  ·  ${pct(h.share)}${h.usd !== null ? `  ·  ${usd(h.usd)}` : ''}`);
+    out.push(sec('held', `*Still held on earlier logs* (in no total above)\n${lines.join('\n')}`));
   }
   out.push({
     type: 'context',
     block_id: `${FIG}how`,
-    elements: [{ type: 'mrkdwn', text: cap(`Shares come from the pay note set on Approve; dollars are the share times the day rate on the day the work was done. A release is paid on one card only.${f.missing_rates.length ? ` No day rate on record for: ${f.missing_rates.join(', ')}.` : ''}`, 2900) }],
+    elements: [{ type: 'mrkdwn', text: cap(`Share of a day × the day rate on the day worked. A release is paid on one card only.${f.missing_rates.length ? ` No day rate on record for: ${f.missing_rates.join(', ')}.` : ''}`, 2900) }],
   });
   return out;
 }
