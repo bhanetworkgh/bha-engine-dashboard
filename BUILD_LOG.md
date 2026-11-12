@@ -15165,3 +15165,10 @@ Files:      server/src/payCard.ts (new), server/src/migrations.ts (132), server/
 Problem:    The card said "Paid: No" and nothing else. The pay notes hold shares of a day and the dashboard held no day rates, so the number Jason pays was never on screen.
 Fix:        engine_pay_rates (rate by start date, frozen: Destiny 350 then 410 from 12 Nov, Ahad 185 then 111 from 19 Nov, Kaiqi 200) and engine_pay_card_claims (a release goes on one card only). payCard.figures works the card out from the pay note, the rates and the ledger; payCard.blocks draws it; POST /api/engine/pay-card hands n8n the card with the pay blocks in; POST /api/engine/pay-card/rewrite rebuilds posted cards in place.
 Decision:   Releases are priced at the rate of the day the work was done, not the day of release. Earlier owed lists approved logs not yet marked paid, a log with no pay note counted as a full day, as the pay note rule already says. Monthly builders get no dollars on the card; their statement settles them.
+
+## 2026-11-12 11:55 — Pay card: a release shows on a dry run and on a rewritten card
+Intent:     The dry run of Destiny's 11 Nov card showed no release, though approving that log released the 25% held on his 10 Nov log (history 17), so the card read $332.50 instead of $420.00.
+Files:      server/src/payCard.ts, BUILD_LOG.md
+Problem:    releasesFor only read unclaimed releases when claiming, so a dry run never showed them; and a rewrite of an old card would have taken any unclaimed release, including one a later approval made.
+Fix:        Unclaimed releases are always read (claimed only when claim is set). A rewrite (rewrite: true) takes only releases made within 10 minutes of this log's pay note being set, which is when its approval releases earlier holds. A paid card rewritten now claims too, since that money went out on it.
+Decision:   Destiny marked his four unpaid October and November logs as paid ("you just forgot to pay them"), so the earlier-owed line on his card goes back to nought.

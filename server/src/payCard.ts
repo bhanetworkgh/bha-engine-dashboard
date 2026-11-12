@@ -128,8 +128,12 @@ async function payMode(db: Queryable, builder: string): Promise<'Daily' | 'Month
   return r.rows[0]?.m === 'Monthly' ? 'Monthly' : 'Daily';
 }
 
-/** Release lines for a builder: those this card already holds, then (when claiming) every release no card holds yet. */
-async function releasesFor(db: Queryable, log: LogRow, claim: boolean): Promise<Release[]> {
+/**
+ * Release lines for a builder: those this card already holds, then every release no card holds yet (taken by
+ * this card only when claiming; a dry run shows what claiming would take). `upto` limits the unclaimed ones to
+ * releases made by the time this log was approved, so a card rewritten later never takes a newer card's release.
+ */
+async function releasesFor(db: Queryable, log: LogRow, claim: boolean, upto: string | null = null): Promise<Release[]> {
   const rows = await db.query<{ id: string; codex_entry_id: string | null; submission_id: string; share: string; proof: string | null; at: string; card: string | null }>(
     `SELECT h.id::text, h.codex_entry_id, h.submission_id,
             ((h.after->>'released_share')::numeric - coalesce((h.before->>'released_share')::numeric, 0))::text AS share,
@@ -139,9 +143,9 @@ async function releasesFor(db: Queryable, log: LogRow, claim: boolean): Promise<
        JOIN engine_pay_notes n ON n.submission_id = h.submission_id
        LEFT JOIN engine_pay_card_claims c ON c.history_id = h.id
       WHERE h.action = 'release' AND n.builder_slack_id = $1 AND h.submission_id <> $2
-        AND (c.card_submission_id = $2 OR ($3 AND c.history_id IS NULL))
+        AND (c.card_submission_id = $2 OR (c.history_id IS NULL AND ($3::timestamptz IS NULL OR h.at <= $3::timestamptz)))
       ORDER BY h.id`,
-    [log.builder_slack_id, log.submission_id, claim],
+    [log.builder_slack_id, log.submission_id, upto],
   );
   const out: Release[] = [];
   for (const r of rows.rows) {
@@ -181,7 +185,14 @@ export async function figures(b: Obj, db?: Queryable): Promise<Figures> {
     const rate = mode === 'Daily' ? await rateFor(q, log.builder_slack_id, log.session_date) : null;
     if (mode === 'Daily' && !rate) missing.add(log.session_date ?? 'this session');
     const money = (share: number, r: Rate | null): number | null => (r ? round2(share * r.day_rate_usd) : null);
-    const releases = mode === 'Daily' ? await releasesFor(q, log, claim) : [];
+    // A card rewritten after the fact takes only the releases made when this log was approved (they are
+    // written seconds after its pay note), never one a later approval made.
+    let upto: string | null = null;
+    if (b.rewrite === true) {
+      const set = await q.query<{ at: string }>(`SELECT (min(at) + interval '10 minutes')::text AS at FROM engine_pay_note_history WHERE submission_id = $1 AND action IN ('set', 'correct')`, [sub]);
+      upto = set.rows[0]?.at ?? new Date(0).toISOString();
+    }
+    const releases = mode === 'Daily' ? await releasesFor(q, log, claim, upto) : [];
     for (const r of releases) if (!r.rate) missing.add(r.session_date ?? r.codex_entry_id);
     const sum = (xs: (number | null)[]): number | null => (xs.some((x) => x === null) ? null : round2(xs.reduce<number>((a, x) => a + (x ?? 0), 0)));
     const payNow = mode === 'Daily' ? sum([money(credited, rate), ...releases.map((r) => r.usd)]) : null;
@@ -393,7 +404,7 @@ export async function rewrite(b: Obj): Promise<Obj> {
     const card = (msg.blocks as Block[]) ?? [];
     const paid = JSON.stringify(card).includes('Pay Review \\u2014 Paid') || card.some((x) => x.type === 'header' && /Paid$/.test(String(x.text?.text ?? '')));
     try {
-      const out = await forCard({ submission_id: sub, claim: !dry && !paid, paid, card: { blocks: card } });
+      const out = await forCard({ submission_id: sub, claim: !dry, rewrite: true, paid, card: { blocks: card } });
       if (dry) {
         results.push({ submission_id: sub, ok: true, dry_run: true, ts: msg.ts, line: out.line });
         continue;
