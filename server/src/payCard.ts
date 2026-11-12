@@ -312,7 +312,7 @@ export function blocks(f: Figures, opts: { paid?: boolean } = {}): Block[] {
   const t = f.today;
   const noNote = t.note_found ? '' : '\n_no pay note, counted as a full day_';
   if (f.pay_mode === 'Monthly') {
-    out.push(sec('title', '*:moneybag: Pay*  ·  monthly builder, settled on the statement on the 1st'));
+    out.push(sec('title', '*:moneybag: Pay*  ·  monthly builder'));
     const thisLog = [`${pct(t.credited)} credited`, ...(t.held > 0 ? [`${pct(t.held)} held`] : []), ...(t.docked > 0 ? [`${pct(t.docked)} docked`] : [])].join('  ·  ');
     const cells = [`*This log*\n${thisLog}${noNote}`];
     if (f.month) {

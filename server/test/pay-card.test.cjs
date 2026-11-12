@@ -57,7 +57,7 @@ ok('a missing rate is said, never guessed', () => {
 ok('monthly card is percentages only, with the month so far', () => {
   const f = { ...base, pay_mode: 'Monthly', rate: null, today: { ...base.today, credited: 0.9, held: 0.1 }, releases: [], earlier: [], earlier_total_usd: null, owed_total_usd: null, pay_now_usd: null, month: { month: '2026-11', credited_shares: 6.7, released_shares: 0, held_shares: 0.3, sessions: 7 } };
   const t = text(pc.blocks(f));
-  assert.match(t, /monthly builder, settled on the statement on the 1st/);
+  assert.match(t, /monthly builder/);
   assert.match(t, /This log\*\n90% credited  ·  10% held/);
   assert.match(t, /November so far\*\n7 log\(s\)  ·  6\.7 day\(s\)\n95\.7% credited  ·  4\.3% held/);
   assert.doesNotMatch(t, /\$|until/);
