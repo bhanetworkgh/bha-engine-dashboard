@@ -15218,3 +15218,9 @@ Intent:     The pay record said "Paid By: Jason" for Destiny's 12 Nov card, whic
 Files:      server/src/paySync.ts, CLAUDE.md; n8n Bays — Submit Actions, node "Mark Log Paid (Airtable) · PATCH"
 Problem:    paySync wrote 'Paid By': 'Jason' whenever the log said Paid, because the log never carried who pressed it.
 Fix:        The click's PATCH now also sends `Paid By Slack ID` (the clicker, from Prepare Paid Click). paidByName reads that id (Jason and Destiny by id, else Builder Profiles, else the id itself); with no id it keeps the row's Paid By, else Jason, so past rows do not move.
+
+## 2026-11-12 21:45 — The boot pay reconcile undid a Yes, Paid
+Intent:     Check the Paid By fix on Destiny's 12 Nov session.
+Files:      server/src/paySync.ts
+Problem:    engine_record_history on pay row 381 shows Paid true at 20:26:20 (the click), Paid false at 20:27:29, Paid true again at 20:33:14. The 20:27:29 write is the boot reconcile ("reconcile: 315 checked, 1 updated", engine_writes seq 292483): it read every Codex row once when the 0e1f047 instance booted (~20:24, log still Paid No), then synced them one by one over three minutes and wrote the stale "No" back. Any Yes, Paid pressed during a boot pass could be undone with nothing said.
+Fix:        reconcile reads the ids first and each log's fields fresh just before syncing it. The 12 Nov row is paid again (re-synced by the Paid By Slack ID write at 20:33); its Paid At now reads 20:33:14 rather than the click's 20:26:21, because the false in between cleared it.

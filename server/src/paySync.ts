@@ -335,12 +335,17 @@ export interface ReconcileResult {
  */
 export async function reconcile(): Promise<ReconcileResult> {
   const t0 = Date.now();
+  // Ids first, then each log read fresh just before it is synced (12 Nov 2026): the pass takes minutes, and
+  // syncing from a copy read at the start undid a Yes, Paid pressed while it ran (CODEX-20261112-destiny-…,
+  // paid 20:26:21, set unpaid by the boot pass at 20:27:29 from its 20:24 copy).
   const r = await withTransaction((db) =>
-    db.query<{ fields: Record<string, unknown> }>(`SELECT fields FROM engine_codex_submissions WHERE fields ? 'Codex Entry ID' ORDER BY id`),
+    db.query<{ id: string }>(`SELECT id::text AS id FROM engine_codex_submissions WHERE fields ? 'Codex Entry ID' ORDER BY id`),
   );
   const out: ReconcileResult = { checked: 0, created: 0, updated: 0, unchanged: 0, statements_closed: 0, failed: [], ms: 0 };
-  for (const row of r.rows) {
-    if (!entryIdOf(row.fields) || isReport(row.fields)) continue;
+  for (const { id } of r.rows) {
+    const fresh = await withTransaction((db) => db.query<{ fields: Record<string, unknown> }>(`SELECT fields FROM engine_codex_submissions WHERE id = $1::bigint`, [id]));
+    const row = fresh.rows[0];
+    if (!row || !entryIdOf(row.fields) || isReport(row.fields)) continue;
     out.checked++;
     try {
       const o = await syncPayFromCodex(row);
