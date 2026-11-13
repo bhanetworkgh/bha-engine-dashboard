@@ -1,0 +1,41 @@
+/**
+ * The intent check on Bays' writes (13 Nov 2026, Destiny; SOPs 4c413e97, 05ccd8ab): the pure parts.
+ * The model call and the Slack read are proved live on Bays' token; this pins the parsing, the
+ * refusal for a missing ask, which tools are covered and what Bays is shown.
+ * Run with: npm run test:intent-check
+ */
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const DIST = process.env.SERVER_DIST || path.join(__dirname, '../../server-dist');
+const ic = require(path.join(DIST, 'server/src/intentCheck'));
+let n = 0;
+const ok = (m) => { n += 1; console.log('  ok  ' + m); };
+
+(async () => {
+  assert.deepEqual(ic.parseVerdict('{"match": false, "reason": "wrong loop", "asked": "close 6I62"}'), { match: false, reason: 'wrong loop', asked: 'close 6I62' }); ok('a bare JSON verdict is read');
+  assert.equal(ic.parseVerdict('Sure.\n```json\n{"match": true, "reason": "x", "asked": "y"}\n```').match, true); ok('a fenced verdict is read');
+  assert.equal(ic.parseVerdict('I think it matches.'), null); ok('prose is never read as a verdict');
+  assert.equal(ic.parseVerdict('{"match": "yes"}'), null); ok('a verdict whose match is not a boolean is refused');
+
+  for (const t of ['update_record', 'create_record', 'archive_record', 'move_loop', 'open_decision_watch', 'close_decision_watch', 'send_nudge', 'edit_sop']) assert.ok(ic.CHECKED.includes(t), t);
+  ok('loop moves, watch openings and closes, nudges and SOP edits are all checked');
+  assert.ok(ic.CHECKED_AGENTS.has('bays') && !ic.CHECKED_AGENTS.has('research_twin')); ok('only Bays is checked');
+
+  assert.equal(await ic.describe('update_record', { kind: 'patterns', fields: {} }), null); ok('a write to another kind is not checked');
+  assert.equal(await ic.describe('create_record', { kind: 'loops', fields: { What: 'x' }, dry_run: true }), null); ok('a dry run is not checked');
+  const nudge = await ic.describe('send_nudge', { recipients: ['U0AEW3TBYH1'], text: 'Is the summary broken?', cc: 'U0A9V97949F' });
+  assert.match(nudge, /Destiny/); assert.match(nudge, /Jason/); assert.match(nudge, /Is the summary broken\?/); ok('a nudge is described by who it goes to and what it says');
+  const watch = await ic.describe('open_decision_watch', { owner_user_id: 'U0BKT6MAW2Y', decision: 'Update 6I62 with PR #24 state' });
+  assert.match(watch, /Hardik/); assert.match(watch, /6I62/); ok('a watch is described by its owner and what they owe');
+
+  const r = await ic.resolveAsk('update_record', { kind: 'loops', fields: {} });
+  assert.equal(r.ok, false); assert.equal(r.reason, 'ask_required'); assert.match(r.message, /Nothing was written/); assert.match(r.message, /message_ts/);
+  ok('a loop change with no ask is refused and told exactly what to send');
+  const stated = await ic.resolveAsk('send_nudge', { ask: { text: 'nudge Destiny about the summary' } });
+  assert.equal(stated.ok, true); assert.equal(stated.ask.source, 'agent_stated'); assert.match(stated.ask.key, /^text:/); ok('a non-Slack ask is taken as stated and marked so');
+
+  const p = ic.prompt({ key: 'k', source: 'slack', text: 'Jason: close 6I62', context: '- Hardik: done', asker: null }, 'Close loop X', 'archive_record');
+  assert.match(p, /The message that asked:/); assert.match(p, /for context only/); assert.match(p, /archive_record/); ok('the model is given the ask, the thread and the action');
+  assert.equal(ic.ASK_PROPERTY.additionalProperties, false); assert.ok(ic.ASK_PROPERTY.properties.message_ts); ok('Bays is shown the ask argument with its shape');
+  console.log(`intent-check: ${n} passed`);
+})().catch((e) => { console.error(e); process.exit(1); });

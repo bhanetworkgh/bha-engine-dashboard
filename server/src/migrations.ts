@@ -4707,6 +4707,33 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `CREATE TRIGGER engine_comp_snapshot_history_frozen BEFORE UPDATE OR DELETE ON engine_comp_snapshot_history FOR EACH ROW EXECUTE FUNCTION engine_pay_note_frozen()`,
     ],
   },
+  {
+    id: 135,
+    name: "The intent check on Bays' writes: one row per check (13 Nov 2026, Destiny; SOPs 4c413e97, 05ccd8ab)",
+    statements: [
+      // Jason, C0AF7AGC2UV 1794497180.571389: read back, validate, retry once, then an incident, for every Bays
+      // step that turns an ask into a decision or a loop move. Written only by intentCheck.ts; append-only.
+      `CREATE TABLE IF NOT EXISTS engine_intent_checks (
+        id bigserial PRIMARY KEY,
+        check_id text NOT NULL UNIQUE,
+        at timestamptz NOT NULL DEFAULT now(),
+        agent text NOT NULL,
+        tool text NOT NULL,
+        ask_key text,
+        ask_source text,
+        ask_excerpt text,
+        action text NOT NULL,
+        verdict text NOT NULL CHECK (verdict IN ('match', 'mismatch', 'unchecked', 'ask_required', 'ask_not_found')),
+        reason text,
+        asked text,
+        provider text,
+        attempt integer NOT NULL DEFAULT 0,
+        incident_id text
+      )`,
+      `CREATE INDEX IF NOT EXISTS engine_intent_checks_key ON engine_intent_checks (agent, tool, ask_key, at DESC)`,
+      `CREATE INDEX IF NOT EXISTS engine_intent_checks_at ON engine_intent_checks (at DESC)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

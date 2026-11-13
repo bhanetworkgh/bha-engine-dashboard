@@ -79,6 +79,7 @@ import { AGENT_DESCRIPTIONS } from './agentDescriptions';
 import { callerStore, currentAgent } from './caller';
 import { auditOpen, auditClose } from './writeTools';
 import { COPY_TOOLS, copyNote } from './trueHomeTools';
+import * as intentCheck from '../intentCheck';
 
 /** The protocol revisions this server knows how to speak. Newest first. */
 const SUPPORTED_PROTOCOLS = ['2025-06-18', '2025-03-26', '2024-11-05'];
@@ -446,7 +447,14 @@ function catalogueFor(deps: ToolDeps): ReturnType<typeof toolCatalogue> {
   const scoped = deps.scope ? all.filter((t) => deps.scope!.has(t.name)) : all;
   // 2 Nov 2026 (token cost): an agent token is served the shorter descriptions in
   // agentDescriptions.ts; every other caller keeps the full ones.
-  return deps.agent ? scoped.map((t) => (AGENT_DESCRIPTIONS[t.name] ? { ...t, description: AGENT_DESCRIPTIONS[t.name] } : t)) : scoped;
+  if (!deps.agent) return scoped;
+  return scoped.map((t) => {
+    const short = AGENT_DESCRIPTIONS[t.name] ? { ...t, description: AGENT_DESCRIPTIONS[t.name] } : t;
+    // 13 Nov 2026 (the intent check): a checked agent is shown the `ask` argument on every checked tool.
+    if (!intentCheck.CHECKED_AGENTS.has(deps.agent!) || !intentCheck.CHECKED.includes(t.name)) return short;
+    const schema = (short.inputSchema ?? {}) as { properties?: Record<string, unknown> };
+    return { ...short, inputSchema: { ...schema, properties: { ...(schema.properties ?? {}), ask: intentCheck.ASK_PROPERTY } } } as typeof short;
+  });
 }
 
 /* -------------------------------------------------------------- the methods */
@@ -526,7 +534,25 @@ async function handleRpc(req: RpcRequest, deps: ToolDeps): Promise<Record<string
         return failure(req.id, INVALID_PARAMS, `There is no tool called "${name}". This server offers: ${catalogueFor(deps).map((t) => t.name).join(', ')}.`);
       }
       try {
-        let value = await tool.handler(args, deps);
+        // 13 Nov 2026 (SOPs 4c413e97, 05ccd8ab): Bays' writes are checked against the ask before they run.
+        // A miss answers here and the tool is never called; `ask` is taken out before the tool sees it.
+        let callArgs = args;
+        if (deps.agent && intentCheck.CHECKED_AGENTS.has(deps.agent) && intentCheck.CHECKED.includes(name)) {
+          const g = await intentCheck.gate(deps.agent, name, args);
+          if (g.refusal) {
+            try {
+              const id = await auditOpen({ tool: name, args, access: deps.access, kind: typeof args.kind === 'string' ? args.kind : null, requester: typeof args.requester_user_id === 'string' ? args.requester_user_id : null, dry_run: false });
+              await auditClose(id, { outcome: 'refused', detail: `${String(g.refusal.reason)}: ${String(g.refusal.message).slice(0, 900)}` });
+            } catch (e) {
+              console.error('[mcp] could not record an intent-check refusal', e);
+            }
+            const text = JSON.stringify(g.refusal, null, 2);
+            logCall(mcpAccess(deps.access), name, args, `refused (${String(g.refusal.reason)})`, Date.now() - t0, Buffer.byteLength(text));
+            return result(req.id, { content: [{ type: 'text', text }], isError: false });
+          }
+          callArgs = g.args;
+        }
+        let value = await tool.handler(callArgs, deps);
         // 2026-11-11 (Sovereign Context Layer): an answer built from a copy says so: which store is the
         // original, when the dashboard last copied it, and that the original wins.
         if (value && typeof value === 'object' && !Array.isArray(value) && COPY_TOOLS[name]) {

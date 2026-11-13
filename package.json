@@ -116,6 +116,7 @@
     "test:agent-descriptions": "node server/test/agent-descriptions.test.cjs",
     "test:find-records-builder": "npm run build:server --silent && node server/test/find-records-builder.test.cjs",
     "test:layer0-notice": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/layer0-notice.test.cjs",
+    "test:intent-check": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/intent-check.test.cjs",
     "test:stored-text": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/stored-text.test.cjs",
     "test:media-weekly": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/media-weekly.test.cjs",
     "test:genie-builder": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/genie-builder.test.cjs",
