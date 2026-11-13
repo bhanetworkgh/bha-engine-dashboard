@@ -83,6 +83,7 @@ import * as narrationAudio from './narrationAudio';
 import * as reviewCard from './reviewCard';
 import * as paySuggest from './paySuggest';
 import * as logPrecheck from './logPrecheck';
+import * as intentCheck from './intentCheck';
 import * as layer0Notice from './layer0Notice';
 import * as baysAsks from './baysAsks';
 import * as scheduledRuns from './scheduledRuns';
@@ -990,6 +991,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         store: async (b) => ({ ...(await paySuggest.relogCheck(b)), dry_run: true }),
         describe: (r) => `${(r.matches as unknown[]).length} earlier approved log(s) matched${r.unread ? ` (${r.unread})` : ''}`,
         hint: 'POST { builder_user_id, session_url?, transcript?, submission_id? }. Reads the builder\'s approved logs; writes nothing.',
+      },
+      /** The reply check (13 Nov 2026, intentCheck.ts; SOP 4c413e97): does Bays' reply answer the message? Agent Delivery asks before posting. Reads; writes nothing. */
+      '/api/engine/answer-check': {
+        kind: 'bays-asks',
+        store: async (b) => ({ ...(await intentCheck.answerCheck(b)), dry_run: true }),
+        describe: (r) => `reply ${r.answers ? 'answers' : 'does not answer'} (${r.checked}): ${String(r.reason ?? '')}`.slice(0, 400),
+        hint: 'POST { ask, reply } (or body_b64). Answers { answers, reason, checked: model | phrase | unchecked }. Writes nothing.',
       },
       /** The log pre-check (10 Nov 2026, logPrecheck.ts): the exact Layer 1 review, read live, and the pay it would give. Both read; neither writes. */
       '/api/engine/log-precheck/prompt': {

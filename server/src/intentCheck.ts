@@ -466,3 +466,88 @@ export async function gate(agent: string, tool: string, rawArgs: Args): Promise<
     args,
   };
 }
+
+/* ------------------------------------------------- the reply check (Agent Delivery) */
+
+export const ANSWER_SYSTEM = `You check one reply an AI assistant called Bays wrote to a message at Bays Horizon Advisory (BHA). Answer one question: does the reply respond to what the message asked?
+
+It answers when it does what was asked, gives the information asked for, says it did the action, refuses with a reason, or asks a question it genuinely needs answered before it can act. Partial answers count. A short "Done" for a request to do something counts.
+
+It does not answer when it says there is no request or question when the message plainly has one, asks the person what they want when the message already said, answers a different question from the one asked, or only describes an error or missing input instead of the message.
+
+Return exactly one JSON object and nothing else: {"answers": true or false, "reason": "one short sentence"}.`;
+
+/** Phrases that are a non-answer whatever the model says, the summary chain's own list (12 Nov 2026). */
+const NON_ANSWER = /(i (do not|don't|don’t) have (a |any )?(new |pending )?(request|question)|nothing (new )?to act on|no (new |pending |actual )?(request|question) (in|to|here)|what would you like me to (pick up|do)|error payload)/i;
+
+export interface AnswerVerdict { answers: boolean; reason: string; checked: 'model' | 'phrase' | 'unchecked'; provider: string | null; error: string | null }
+
+/**
+ * POST /api/engine/answer-check { ask, reply }: does Bays' reply answer the message? Called by
+ * `Bays — Agent Delivery` before a reply is posted. The phrase list decides first; then the model.
+ * A model that cannot be reached answers `answers: true, checked: 'unchecked'` with the error, so a
+ * model outage never stops replies, and the caller records it.
+ */
+export async function answerCheck(b: Record<string, unknown>): Promise<AnswerVerdict> {
+  const ask = clip(b.ask, 6000);
+  const reply = clip(b.reply, 8000);
+  if (!reply.trim()) return { answers: false, reason: 'The reply is empty.', checked: 'phrase', provider: null, error: null };
+  if (NON_ANSWER.test(reply.slice(0, 400))) return { answers: false, reason: `The reply opens by saying there is nothing to answer: "${clip(reply.replace(/\s+/g, ' '), 160)}"`, checked: 'phrase', provider: null, error: null };
+  if (!ask.trim()) return { answers: true, reason: 'No message was given to check against.', checked: 'unchecked', provider: null, error: 'no ask' };
+  const v = await askAnswerModel(`The message:\n${ask}\n\nBays' reply:\n${reply}`);
+  return v;
+}
+
+async function askAnswerModel(user: string): Promise<AnswerVerdict> {
+  const errors: string[] = [];
+  const routes = [
+    { provider: 'anthropic', key: process.env.ANTHROPIC_API_KEY?.trim(), url: `${(process.env.ANTHROPIC_API_URL || 'https://api.anthropic.com/v1').replace(/\/+$/, '')}/messages` },
+    { provider: 'openrouter', key: process.env.OPENROUTER_API_KEY?.trim(), url: `${(process.env.OPENROUTER_API_URL || 'https://openrouter.ai/api/v1').replace(/\/+$/, '')}/chat/completions` },
+  ];
+  for (const r of routes) {
+    if (!r.key) { errors.push(`${r.provider}: not configured`); continue; }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), MODEL_TIMEOUT_MS);
+    try {
+      const anthropic = r.provider === 'anthropic';
+      const res = await fetch(r.url, {
+        method: 'POST',
+        headers: anthropic ? { 'x-api-key': r.key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' } : { Authorization: `Bearer ${r.key}`, 'content-type': 'application/json', 'X-Title': 'BHA Engine Dashboard - answer check' },
+        body: JSON.stringify(
+          anthropic
+            ? { model: 'claude-haiku-5-5', max_tokens: 200, system: ANSWER_SYSTEM, messages: [{ role: 'user', content: user }] }
+            : { model: 'anthropic/claude-haiku-5.5', max_tokens: 200, messages: [{ role: 'system', content: ANSWER_SYSTEM }, { role: 'user', content: user }] },
+        ),
+        signal: controller.signal,
+      });
+      const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!res.ok || json.error) throw new Error(`HTTP ${res.status}: ${clip((json.error as { message?: string })?.message ?? json.error ?? '', 200)}`);
+      const text = anthropic
+        ? ((json.content as { type?: string; text?: string }[]) || []).filter((x) => x.type === 'text').map((x) => x.text || '').join('')
+        : String(((json.choices as { message?: { content?: string } }[]) || [])[0]?.message?.content ?? '');
+      const v = parseAnswer(text);
+      if (!v) throw new Error(`answer was not the JSON asked for: ${clip(text, 160)}`);
+      return { ...v, checked: 'model', provider: r.provider, error: null };
+    } catch (e) {
+      errors.push(`${r.provider}: ${e instanceof Error ? (e.name === 'AbortError' ? 'timed out' : e.message) : String(e)}`);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return { answers: true, reason: 'No model could be reached, so the reply was not checked.', checked: 'unchecked', provider: null, error: errors.join('; ') };
+}
+
+export function parseAnswer(raw: string): { answers: boolean; reason: string } | null {
+  const brace = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  for (const t of [brace >= 0 && end > brace ? raw.slice(brace, end + 1) : '', raw]) {
+    if (!t) continue;
+    try {
+      const j = JSON.parse(t.trim()) as Record<string, unknown>;
+      if (typeof j.answers === 'boolean') return { answers: j.answers, reason: String(j.reason ?? '').slice(0, 500) };
+    } catch {
+      /* next */
+    }
+  }
+  return null;
+}
