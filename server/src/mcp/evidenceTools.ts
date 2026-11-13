@@ -127,6 +127,7 @@ export const saveEvidence: ToolDefinition = {
       slack_file_id: { type: 'string', description: 'The Slack file id, F…' },
       slack_file_url: { type: 'string', description: 'Or the file\'s url_private.' },
       text: { type: 'string', description: 'Or the text itself.' },
+      text_b64: { type: 'string', description: 'Or the text as base64 of its UTF-8, for a document that quotes a shell command: Render\'s firewall refuses such a call before it reaches this server. Not with text.' },
       file_name: { type: 'string', description: 'With text: the file name to store it under, e.g. E01.md.' },
       supersedes: { type: 'string', description: 'The EV- id of the newest version this one replaces.' },
       notes: { type: 'string' },
@@ -142,6 +143,15 @@ export const saveEvidence: ToolDefinition = {
   handler: async (args, deps) => {
     const requester = str(args, 'requester_user_id') || null;
     const dry = args.dry_run === true;
+    // 13 Nov 2026: a handoff quoting `curl …` was refused by Render's firewall before it reached here, so the
+    // text may come as base64. Decoded first; both at once is refused rather than one quietly winning.
+    if (typeof args.text_b64 === 'string') {
+      if (typeof args.text === 'string') return { ok: false, written: false, reason: 'text_and_text_b64', message: 'Send text or text_b64, not both. Nothing was saved.' };
+      const decoded = Buffer.from(args.text_b64 as string, 'base64').toString('utf8');
+      if (!decoded.trim() || Buffer.from(decoded, 'utf8').toString('base64').replace(/=+$/, '') !== (args.text_b64 as string).replace(/\s+/g, '').replace(/=+$/, '')) return { ok: false, written: false, reason: 'text_b64_unreadable', message: 'text_b64 is not base64 of UTF-8 text. Nothing was saved.' };
+      args = { ...args, text: decoded };
+      delete (args as Record<string, unknown>).text_b64;
+    }
     const audit = await auditOpen({ tool: 'save_evidence', args: { ...args, text: typeof args.text === 'string' ? `${(args.text as string).length} characters` : undefined }, access: deps.access, kind: 'evidence', requester, dry_run: dry });
     try {
       const r = await ev.save(

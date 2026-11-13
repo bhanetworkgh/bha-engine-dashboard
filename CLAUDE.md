@@ -1528,6 +1528,7 @@ dashboard, not in a Drive folder). `server/src/evidence.ts`, migration 103, `eng
 - **The charge gate rests on it**: a real green acceptance pass names its bundle as an `EV-` id that is
   held and not a test (`bundle_not_evidence`, `bundle_not_found`, `bundle_is_test`); a pass on an older
   version is recorded and names the newer one. A test pass may name anything.
+- **The text may come as `text_b64`** (13 Nov 2026): base64 of its UTF-8, for a document that quotes a shell command, which Render's firewall refuses before it reaches this server (Kaiqi's handoff quotes `curl`). Both at once is refused.
 - **Not Codex**: nothing here feeds review or pay. `npm run test:evidence`.
 
 **Buyer flow v2: five stages and the Stage 3 proposal page** (2026-10-17, Destiny — Jason in
