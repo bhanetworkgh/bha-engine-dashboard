@@ -1835,6 +1835,7 @@ where an agent turns an ask into a decision, a loop move or a reply. `server/src
   platform against Jason's note; a miss is asked once more on a fresh memory; a second miss saves nothing and
   raises.
 Add a new intent-driven write tool to `intentCheck.CHECKED` with its `describe` line, or it is not checked.
+**A loop the action names is shown to the check as the dashboard holds it** (13 Nov 2026, Destiny — audit 6314: a nudge naming LOOP-1793620799001-3NBE by its own title was refused because the title was not in the thread). `recordsFor` reads each LOOP- id in the action (title, status, lane, owner) from `engine_loops`, never from Bays; a fact that matches is supported, one that neither the thread nor a record shows is still a miss.
 `npm run test:intent-check`.
 
 **Outbound Slack has a destination guard** (2026-10-10, Destiny — agent maturity

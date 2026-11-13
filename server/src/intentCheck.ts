@@ -289,7 +289,7 @@ Rules:
 - The action matches when the message asked for it, or it plainly follows from the message (the person asked for the result and this is how it is done). The person need not use the tool's words.
 - Loops: the loop must be the one the message means (by id, short code or what it is), and what is done to it must be what was asked: open, close, hold, reassign, update. Closing a loop the message did not ask to close, or did not say was done, is a miss. Changing a loop's wording to say something the message did not say is a miss.
 - Decision Watches: the owner must be the person the message puts the decision or reply on, never the person asking for it unless they asked to be watched themselves. The watch's wording must say what that person owes as the message states it, not more and not something else. A watch opened when the message asked for no follow-up is a miss.
-- Messages sent for someone (a DM or a post): the recipients must be who the message asked to reach, and the text must say only what the message or the thread supports. A message that states facts about a thread or a record that the thread does not show is a miss.
+- Messages sent for someone (a DM or a post): the recipients must be who the message asked to reach, and the text must say only what the message, the thread or the records listed below support. A message that states facts neither the thread nor a listed record shows is a miss. A fact that matches a listed record (a loop's title, status, lane or owner as the dashboard holds it) is supported, even when the thread does not repeat it.
 - SOP edits: the change must be the one the message asked for.
 - In a scheduled task run there is no typed message: the action matches when it is what a task of that name exists to do.
 - When the message is ambiguous and the action is a reasonable reading of it, it matches. Only call a miss when the action is clearly not what was asked: a different loop or person, a different action, or words the message does not support.
@@ -362,14 +362,41 @@ async function askModel(user: string): Promise<Verdict> {
   return { match: null, reason: '', asked: '', provider: null, error: errors.join('; ') };
 }
 
-export function prompt(ask: Ask, action: string, tool: string): string {
+export function prompt(ask: Ask, action: string, tool: string, records = ''): string {
   return [
     ask.source === 'scheduled' ? 'The run:' : ask.source === 'agent_stated' ? 'The question, as Bays reports it (no Slack message exists):' : ask.source === 'slack_thread_newest' ? 'The newest message a person posted in the thread (Bays did not name which message asked):' : 'The message that asked:',
     ask.text,
     ask.context ? `\nEarlier in the thread, for context only (oldest first):\n${ask.context}` : '',
+    records ? `\nRecords the action names, as the dashboard holds them (facts that match these are supported):\n${records}` : '',
     `\nThe action Bays is about to take (tool ${tool}):`,
     action,
   ].join('\n');
+}
+
+/**
+ * The loops an action names, as the dashboard holds them (13 Nov 2026, Destiny). On 13 Nov a nudge naming
+ * LOOP-1793620799001-3NBE by its own title was refused (audit 6314) because the title was not in the thread,
+ * though it was read from the loop. The model is shown each named loop's title, status, lane and owner, read
+ * here and never from Bays, so a fact from the record is supported and an invented one is still a miss.
+ */
+export const LOOP_IN_ACTION = /LOOP-\d{10,}-[A-Z0-9]{4}/g;
+export function recordLines(rows: Array<{ natural_id: string; status: string | null; lane: string | null; builder_id: string | null; what: string | null }>): string {
+  return rows.map((r) => `- ${r.natural_id}: status ${r.status || 'not set'}, lane ${r.lane || 'not set'}, owner ${r.builder_id || 'not set'}. What: ${clip((r.what || '').replace(/\s+/g, ' '), 400)}`).join('\n');
+}
+async function recordsFor(action: string): Promise<string> {
+  const ids = [...new Set((action.match(LOOP_IN_ACTION) ?? []).map((x) => x.toUpperCase()))].slice(0, 5);
+  if (!ids.length) return '';
+  try {
+    const r = await query<{ natural_id: string; status: string | null; lane: string | null; builder_id: string | null; what: string | null }>(
+      `SELECT DISTINCT ON (natural_id) natural_id, fields->>'Status' AS status, fields->>'lane_tag' AS lane, builder_id, fields->>'What' AS what
+         FROM engine_loops WHERE natural_id = ANY($1) ORDER BY natural_id, updated_at DESC NULLS LAST, id DESC`,
+      [ids],
+    );
+    return recordLines(r.rows);
+  } catch (e) {
+    console.error(`[intent-check] loop records not read: ${e instanceof Error ? e.message : String(e)}`);
+    return '';
+  }
 }
 
 /* ------------------------------------------------------------------ the gate */
@@ -511,7 +538,7 @@ export async function gate(agent: string, tool: string, rawArgs: Args): Promise<
     return { refusal: { ok: false, reason: resolved.reason, message: resolved.message, written: false }, args };
   }
   const ask = resolved.ask;
-  const v = await askModel(prompt(ask, action, tool));
+  const v = await askModel(prompt(ask, action, tool, await recordsFor(action)));
 
   if (v.match === null) {
     const id = await record({ agent, tool, ask_key: ask.key, ask_source: ask.source, ask_excerpt: ask.text, action, verdict: 'unchecked', reason: v.error, asked: null, provider: null, attempt: 0 });
