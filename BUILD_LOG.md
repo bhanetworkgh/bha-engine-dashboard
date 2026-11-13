@@ -15296,3 +15296,8 @@ Intent:     The log pre-check (n8n run 88377) read pay row 381's flip on 12 Nov 
 Files:      server/src/paySync.ts, BUILD_LOG.md
 Fix:        syncWith calls raiseUnpaid after the commit whenever a pay_sessions copy that was paid is written unpaid: one `pay_session_unpaid` event (dedupe per row and minute) and one post as Bays in QUOTA_ALERT_CHANNEL naming the row, the Codex entry, the builder and what the log now says. The write itself stands, because the log is the record of Paid.
 Decision:   An alert rather than a refusal: a person un-ticking Paid on purpose is allowed, and the alert is how anyone finds out it happened.
+
+## 2026-11-13 19:10 — An unchecked check opens an incident, not only an hourly alert
+Intent:     The pre-check (n8n run 88406) still capped the log on the intent check: the hourly alert (events 116307 to 117772) named only the first unchecked write each hour, so 35 writes and 52 replies went through with one post an hour, and I read those posts as a model outage.
+Files:      server/src/intentCheck.ts, server/test/intent-check.test.cjs, CLAUDE.md, BUILD_LOG.md
+Fix:        uncheckedSeen: every unchecked intent or reply check writes one event (`intent_check_unchecked`, `answer_check_unchecked`); the third in 60 minutes opens one incident on the Bays lane (class CHECK_UNCHECKED, subsystem AGENT) for that hour, naming the count and the last error, copied to Engine health. An incident that cannot be opened is alerted. The write or reply is still let through: a model outage never stops Bays.

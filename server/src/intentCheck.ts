@@ -435,6 +435,55 @@ async function raiseIncident(tool: string, ask: Ask, action: string, reasons: st
   }
 }
 
+/** Unchecked passes in one hour that open an incident (13 Nov 2026): the hourly alert named only the first, and 35 went by. */
+export const UNCHECKED_INCIDENT_AFTER = 3;
+
+/** Whether this many unchecked passes in an hour opens the hour's incident. Pure. */
+export function uncheckedCrosses(countThisHour: number): boolean {
+  return countThisHour >= UNCHECKED_INCIDENT_AFTER;
+}
+
+/**
+ * Every unchecked pass is one event; the third in an hour opens one incident on the Bays lane for that
+ * hour, naming the count and the last error, so a check that keeps failing open is never only a quiet
+ * row. Never throws and never blocks the write or reply it is about.
+ */
+export async function uncheckedSeen(kind: 'intent_check' | 'answer_check', error: string, ref: string): Promise<void> {
+  try {
+    const hour = new Date().toISOString().slice(0, 13);
+    await engineEvents.record({ event_type: `${kind}_unchecked`, subject_id: ref, lane: 'BAYS', actor: 'intent-check', detail: { error: clip(error, 500), hour }, dedupe_key: `${kind}_unchecked:${ref}` });
+    const n = Number((await query<{ n: string }>(`SELECT count(*)::text AS n FROM engine_events WHERE event_type = $1 AND at > now() - interval '60 minutes'`, [`${kind}_unchecked`])).rows[0]?.n ?? 0);
+    if (!uncheckedCrosses(n)) return;
+    const claim = await engineEvents.record({ event_type: `${kind}_unchecked_incident`, subject_id: hour, lane: 'BAYS', actor: 'intent-check', detail: { count: n, error: clip(error, 500) }, dedupe_key: `${kind}_unchecked_incident:${hour}` });
+    if (!claim.recorded) return;
+    const what = kind === 'intent_check' ? "Bays' writes" : "Bays' and North Star's replies";
+    const body = {
+      type: 'INC' as const,
+      subsystem: 'AGENT', source: 'bays', severity: 'warning',
+      summary: `Bays ${kind.replace('_', ' ')}: ${n} unchecked in the last hour`,
+      payload: {
+        lane: 'bays', workflow_or_scenario: 'Bays intent check (dashboard)', failed_node_or_component: kind,
+        error_class: 'CHECK_UNCHECKED',
+        error_message: clip(`The check on ${what} let ${n} through unchecked in the last hour, because no model answer could be read. Last error: ${error}`, 1000),
+        error_message_original_bytes: null,
+        execution_id: `${kind}:${hour}`, impact_tags: ['bays', 'intent_check'],
+        retry_policy: { retryable: false, max_retries: 0, retry_interval: '5m', retries_attempted: 0 },
+        self_healing_strategy: 'Read the unchecked rows (engine_intent_checks verdict unchecked, or the answer-check lines on engine_writes) and their errors; fix the model call or the key before more go through.',
+        research_needed: false, research_id: null, commercial_hint: null, resolved_at: null, resolved_by: null,
+      },
+    };
+    const opened = await bharag.openIncident('bays', body);
+    const res = opened.raw && typeof opened.raw === 'object' ? (opened.raw as Record<string, unknown>) : {};
+    const inc = (res.incident && typeof res.incident === 'object' ? res.incident : res) as Record<string, unknown>;
+    await mirror.upsert('incidents', { fields: { ...body, resolution_status: 'open', created_at: new Date().toISOString(), ...inc, entity_id: opened.id }, lane_id: 'bays' }, 'engine');
+    await query(`UPDATE engine_incidents SET open_now = true, last_seen_open = $2 WHERE natural_id = $1`, [opened.id, new Date().toISOString()]);
+    events.changed('incidents');
+  } catch (e) {
+    console.error(`[intent-check] unchecked incident not opened: ${e instanceof Error ? e.message : String(e)}`);
+    await alert(`The check on Bays went unchecked repeatedly and its incident could not be opened (${e instanceof Error ? e.message : String(e)}). Last error: ${clip(error, 300)}`, `${kind}_unchecked_incident_failed:${new Date().toISOString().slice(0, 13)}`);
+  }
+}
+
 /** One post in the engine alerts channel per dedupe key, claimed by an event first. */
 async function alert(text: string, dedupe: string): Promise<void> {
   try {
@@ -466,7 +515,8 @@ export async function gate(agent: string, tool: string, rawArgs: Args): Promise<
 
   if (v.match === null) {
     const id = await record({ agent, tool, ask_key: ask.key, ask_source: ask.source, ask_excerpt: ask.text, action, verdict: 'unchecked', reason: v.error, asked: null, provider: null, attempt: 0 });
-    await alert(`The intent check on Bays' writes could not reach a model (${clip(v.error, 300)}). Bays' ${tool} went through unchecked (${id}). Further unchecked writes this hour are recorded on engine_intent_checks without another post.`, `intent_check_unchecked:${new Date().toISOString().slice(0, 13)}`);
+    await alert(`The intent check on Bays' writes could not reach a model (${clip(v.error, 300)}). Bays' ${tool} went through unchecked (${id}). The third unchecked write in an hour opens an incident.`, `intent_check_unchecked:${new Date().toISOString().slice(0, 13)}`);
+    await uncheckedSeen('intent_check', v.error || 'unknown', id);
     return { refusal: null, args };
   }
   if (v.match) {
@@ -528,6 +578,7 @@ export async function answerCheck(b: Record<string, unknown>): Promise<AnswerVer
   if (NON_ANSWER.test(reply.slice(0, 400))) return { answers: false, reason: `The reply opens by saying there is nothing to answer: "${clip(reply.replace(/\s+/g, ' '), 160)}"`, checked: 'phrase', provider: null, error: null };
   if (!ask.trim()) return { answers: true, reason: 'No message was given to check against.', checked: 'unchecked', provider: null, error: 'no ask' };
   const v = await askAnswerModel(`The message:\n${ask}\n\nBays' reply:\n${reply}`);
+  if (v.checked === 'unchecked') await uncheckedSeen('answer_check', v.error || 'unknown', `AC-${Date.now()}-${randomUUID().slice(0, 4)}`);
   return v;
 }
 

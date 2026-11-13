@@ -24,6 +24,8 @@ const ok = (m) => { n += 1; console.log('  ok  ' + m); };
   assert.equal(ic.matchTask(tasks, 'Weekly sweep'), null); ok('a name that fits two tasks matches neither');
   assert.equal(ic.matchTask(tasks, 'Log review nudge -- Hardik'), null); ok('a different task is still refused');
 
+  assert.equal(ic.uncheckedCrosses(2), false); assert.equal(ic.uncheckedCrosses(3), true); ok('the third unchecked pass in an hour opens the incident');
+
   for (const t of ['update_record', 'create_record', 'archive_record', 'move_loop', 'open_decision_watch', 'close_decision_watch', 'send_nudge', 'edit_sop']) assert.ok(ic.CHECKED.includes(t), t);
   ok('loop moves, watch openings and closes, nudges and SOP edits are all checked');
   assert.ok(ic.CHECKED_AGENTS.has('bays') && !ic.CHECKED_AGENTS.has('research_twin')); ok('only Bays is checked');
