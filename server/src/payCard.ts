@@ -224,7 +224,8 @@ export async function figures(b: Obj, db?: Queryable): Promise<Figures> {
 
     // Still held across the builder's notes, this one included.
     const heldRows = await q.query<{ submission_id: string; codex_entry_id: string | null; held: string; cond: string | null }>(
-      `SELECT submission_id, codex_entry_id, held_share::text AS held, release_condition AS cond FROM engine_pay_notes WHERE builder_slack_id = $1 AND held_share > 0 ORDER BY decided_at`,
+      `SELECT submission_id, codex_entry_id, held_share::text AS held, release_condition AS cond FROM engine_pay_notes n WHERE builder_slack_id = $1 AND held_share > 0
+         AND n.submission_id NOT IN (SELECT fields->>'Submission ID' FROM engine_codex_submissions WHERE fields->>'Merged Into Day' = 'true') ORDER BY decided_at`,
       [log.builder_slack_id],
     );
     const stillHeld = [];
@@ -372,6 +373,20 @@ export function merge(card: Block[], pay: Block[]): Block[] {
  * card n8n posts and the figures can never come from two places.
  */
 export async function forCard(b: Obj): Promise<Obj> {
+  // A log merged into its day's entry (sameDay.ts, 14 Nov 2026) has no pay of its own: its card says where the day is
+  // paid and carries no Yes, Paid button.
+  const sub = s(b.submission_id, 200);
+  const mergedRow = sub
+    ? (await query<{ f: Obj }>(`SELECT fields AS f FROM engine_codex_submissions WHERE fields->>'Submission ID' = $1 AND fields->>'Merged Into Day' = 'true' ORDER BY updated_at DESC LIMIT 1`, [sub])).rows[0]?.f
+    : undefined;
+  if (mergedRow) {
+    const entry = s(mergedRow['Day Entry Codex ID']) || s(mergedRow['Day Entry Submission ID']) || 'the day entry';
+    const cid = s(mergedRow['Codex Entry ID']) || sub;
+    const day = s(mergedRow['Day Date']);
+    const text = `*Pay Review: merged into the day*\n\`${cid}\` is log ${s(mergedRow['Day Log Number']) || '2'} of ${s(mergedRow['Day Logs']) || '2'} by ${s(mergedRow['Builder Name']) || 'this builder'} on ${day} (New York date). It was added to the day entry \`${entry}\`, which is the one paid day, so this log pays nothing of its own and nothing on it is held as a balance (SOP 3c0def60).`;
+    const blocks = [{ type: 'section', text: { type: 'mrkdwn', text } }];
+    return { ok: true, merged: true, figures: null, blocks, body: { text: `Merged into ${entry}`, blocks }, line: `${cid}: merged into ${entry}, no pay of its own` };
+  }
   const f = await figures(b);
   const paid = b.paid === true || b.paid === 'true';
   const pay = blocks(f, { paid });

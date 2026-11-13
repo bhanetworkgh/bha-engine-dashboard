@@ -399,6 +399,28 @@ export function CodexEntryDialog({
                   </div>
                 )}
               </div>
+              {detail.day && (
+                <div className="min-w-0 md:col-span-3">
+                  <div className="text-[11px] text-faint">This day’s logs ({detail.day.date}, New York date)</div>
+                  <div className="text-dim">
+                    {detail.day.logs.length} logs, one working day and one paid day. The first log approved is the day’s entry; the others were added to it and pay nothing of their own.
+                  </div>
+                  <ol className="mt-1 space-y-1">
+                    {detail.day.logs.map((l) => (
+                      <li key={l.id} className="text-ink">
+                        <a className="text-accent hover:underline" href={`/codex/${encodeURIComponent(l.codex_entry_id ?? l.submission_id)}`}>
+                          {l.number}. {l.title}
+                        </a>
+                        <span className="text-dim">
+                          {' '}· {l.merged ? 'added to the day' : 'the day’s entry'} · {l.status}
+                          {l.submitted_at ? ` · submitted ${when(l.submitted_at)}` : ''}
+                          {l.submission_id === detail.submission_id ? ' · this log' : ''}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
               {detail.jason_notes && (
                 <div className="min-w-0 md:col-span-3">
                   <div className="text-[11px] text-faint">Jason’s notes</div>

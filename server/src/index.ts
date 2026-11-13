@@ -23,7 +23,7 @@ import { ask, ASK_URL, ASK_URL_FROM_ENV, askConfigured, MODEL_LABEL } from './as
 import { authConfigured, login, logout, readSession, sessionInfo, sessionSecretConfigured } from './auth';
 import { databaseIdentity } from './db';
 import { migrate, MIGRATION_COUNT } from './migrations';
-import { assertDatabase, closePool, DATABASE_URL, query } from './pg';
+import { assertDatabase, closePool, DATABASE_URL, query, withTransaction } from './pg';
 import * as engine from './engine';
 import * as store from './store';
 import * as registry from './registry';
@@ -40,6 +40,7 @@ import * as mirror from './mirror';
 import * as engineWrite from './engineWrite';
 import * as events from './events';
 import * as paySync from './paySync';
+import * as sameDay from './sameDay';
 import * as executions from './executions';
 import * as health from './health';
 import * as selfHealing from './selfHealing';
@@ -3347,8 +3348,16 @@ async function boot(): Promise<void> {
    * same idempotent pass as POST /api/engine/pay/reconcile. Its counts go to
    * engine_writes like the route's, so the first run is on the record.
    */
-  void paySync
-    .reconcile()
+  // One working day is one Codex entry (sameDay.ts, 14 Nov 2026): every day from the cutover worked out again first,
+  // so the pay reconcile reads the day fields as they now stand. A second boot changes nothing.
+  void sameDay
+    .backfill((fn) => withTransaction(fn), paySync.syncPayFromCodex)
+    .then((d) => {
+      console.log(`  same-day: ${d.days} day(s) with logs from ${sameDay.CUTOVER}, ${d.changed} log(s) regrouped`);
+      return mirror.logWrite({ endpoint: 'boot', kind: 'codex', method: 'SAME_DAY', key_label: null, outcome: d.changed ? 'updated' : 'unchanged', detail: `same-day regroup: ${d.days} day(s), ${d.changed} log(s) changed` });
+    })
+    .catch((e: unknown) => console.error(`  same-day: boot regroup failed: ${e instanceof Error ? e.message : String(e)}`))
+    .then(() => paySync.reconcile())
     .then((r) => {
       console.log(`  pay:      reconciled at boot — ${r.checked} checked, ${r.created} created, ${r.updated} updated, ${r.unchanged} unchanged, ${r.statements_closed} statement(s) closed${r.failed.length ? `, ${r.failed.length} FAILED` : ''} (${r.ms}ms)`);
       return mirror.logWrite({

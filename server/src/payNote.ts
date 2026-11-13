@@ -290,6 +290,8 @@ export async function release(b: Obj, opts: { dry_run?: boolean } = {}): Promise
     const row = (await db.query<Obj>(`SELECT ${COLS} FROM engine_pay_notes WHERE submission_id = $1 FOR UPDATE`, [log.submission_id])).rows[0];
     if (!row) throw new PayNoteError('no_pay_note', `${log.codex_entry_id ?? log.submission_id} has no pay note, so nothing is held.`, 404);
     const prior = shape(row);
+    const mergedRow = (await db.query<{ e: string | null }>(`SELECT fields->>'Day Entry Codex ID' AS e FROM engine_codex_submissions WHERE fields->>'Submission ID' = $1 AND fields->>'Merged Into Day' = 'true' LIMIT 1`, [log.submission_id])).rows[0];
+    if (mergedRow) throw new PayNoteError('merged_into_day', `${log.codex_entry_id ?? log.submission_id} was merged into its day's entry${mergedRow.e ? ` (${mergedRow.e})` : ''}, so it pays nothing of its own and has nothing to release (SOP 3c0def60: one working day is one paid day). Release the day entry's held share instead.`, 409);
     if (prior.held_share <= 0) throw new PayNoteError('nothing_held', `${log.codex_entry_id ?? log.submission_id} holds nothing (${prior.credited_share} credited${prior.docked_share > 0 ? `, ${prior.docked_share} docked, which is never released` : ''}).`);
     const share = partShare === null ? prior.held_share : round3(partShare);
     if (share > prior.held_share + 0.0005) throw new PayNoteError('more_than_held', `${log.codex_entry_id ?? log.submission_id} holds ${pct(prior.held_share)} of a day; ${pct(share)} cannot be released.`);
@@ -537,7 +539,8 @@ export async function removeForDeletedLog(b: Obj, opts: { dry_run?: boolean } = 
 
 /** Every share still held, oldest first: the Held list. */
 export async function held(): Promise<PayNote[]> {
-  const r = await query<Obj>(`SELECT ${COLS} FROM engine_pay_notes WHERE held_share > 0 ORDER BY decided_at`);
+  // A log merged into its day's entry holds nothing that is owed (sameDay.ts): one day is one paid day.
+  const r = await query<Obj>(`SELECT ${COLS} FROM engine_pay_notes n WHERE held_share > 0 AND n.submission_id NOT IN (SELECT fields->>'Submission ID' FROM engine_codex_submissions WHERE fields->>'Merged Into Day' = 'true') ORDER BY decided_at`);
   return r.rows.map(shape);
 }
 
@@ -584,7 +587,9 @@ export async function statementFacts(b: Obj): Promise<{ month: string; pay_mode:
     `SELECT DISTINCT ON (natural_id) fields FROM engine_pay_sessions WHERE fields->>'Month' = $1 AND fields->>'Pay Mode' = $2 ORDER BY natural_id, updated_at DESC`,
     [month, mode],
   );
-  const notes = await all();
+  // Merged logs' notes are left out (sameDay.ts): a merged log pays nothing and its held share is never a balance.
+  const merged = new Set((await query<{ s: string }>(`SELECT fields->>'Submission ID' AS s FROM engine_codex_submissions WHERE fields->>'Merged Into Day' = 'true'`)).rows.map((r) => r.s));
+  const notes = (await all()).filter((n) => !merged.has(n.submission_id));
   const byEntry = new Map(notes.filter((n) => n.codex_entry_id).map((n) => [n.codex_entry_id as string, n]));
   const out = new Map<string, StatementFacts>();
   const ensure = (id: string, name: string): StatementFacts => {

@@ -52,6 +52,7 @@ import * as events from './events';
 import * as mirror from './mirror';
 import * as payNote from './payNote';
 import { afterCommit, withTransaction, type Queryable } from './pg';
+import * as sameDay from './sameDay';
 
 const SESSIONS = 'engine_pay_sessions';
 const STATEMENTS = 'engine_pay_statements';
@@ -164,6 +165,10 @@ function ymd(raw: unknown): { date: string; month: string } | null {
 async function syncWith(db: Queryable, fields: Record<string, unknown>): Promise<SyncOutcome> {
   const entryId = entryIdOf(fields);
   if (!entryId) return 'skipped';
+  // A log merged into its day's entry (sameDay.ts, 14 Nov 2026) is owed nothing of its own: the day's entry is the
+  // one paid day. Its unpaid pay rows go, each kept in record_deletions first; a row already marked paid is kept,
+  // because a payment that happened is never taken off the record.
+  if (sameDay.isMerged(fields)) return dropMergedCopies(db, entryId, fields);
 
   const slackId = pick(fields['Builder User ID']).trim();
   const roster = slackId
@@ -240,6 +245,32 @@ async function syncWith(db: Queryable, fields: Record<string, unknown>): Promise
   }
   if (changedAny) await closeSettledStatements(db, slackId, month);
   return changedAny ? 'updated' : 'unchanged';
+}
+
+async function dropMergedCopies(db: Queryable, entryId: string, fields: Record<string, unknown>): Promise<SyncOutcome> {
+  const copies = await heldCopies(db, entryId);
+  let dropped = 0;
+  const day = pick(fields[sameDay.FIELD.entryCodex]) || pick(fields[sameDay.FIELD.entrySubmission]);
+  for (const c of copies) {
+    const paid = c.fields.Paid === true || c.fields.Paid === 'true' || c.fields.Paid === 'Yes';
+    if (paid) {
+      console.error(`[pay-sync] ${entryId} is merged into the day of ${day || 'another log'} but its pay row ${c.id} is marked paid, so it is kept.`);
+      continue;
+    }
+    const row = (await db.query<{ airtable_record_id: string | null; natural_id: string | null }>(`SELECT airtable_record_id, natural_id FROM ${SESSIONS} WHERE id = $1::bigint`, [c.id])).rows[0];
+    await db.query(
+      `INSERT INTO record_deletions (kind, record_id, natural_id, builder_id, table_id, reason, fields, actor, at) VALUES ('pay_sessions', $1, $2, NULL, NULL, $3, $4, 'pay-sync', $5)`,
+      [row?.airtable_record_id ?? `row-${c.id}`, row?.natural_id ?? entryId, `Merged into the day entry ${day || '(not yet approved)'}: one working day is one paid day (SOP 3c0def60).`, JSON.stringify(c.fields), nowIso()],
+    );
+    await db.query(`DELETE FROM ${SESSIONS} WHERE id = $1::bigint`, [c.id]);
+    events.changed('pay_sessions', Number(c.id), db);
+    dropped++;
+  }
+  if (dropped) {
+    const slackId = pick(fields['Builder User ID']).trim();
+    if (slackId) afterCommit(db, () => { void import('./payCard').then((pc) => pc.refreshUnpaidSoon(slackId)).catch(() => undefined); });
+  }
+  return dropped ? 'updated' : 'unchanged';
 }
 
 /** One alert when a paid pay session is written unpaid: who, which log, what the log now says. Never throws. */

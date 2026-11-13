@@ -516,6 +516,7 @@ export async function releasesFor(fields: Obj, db: Queryable = { query } as Quer
             n.decided_at::text AS decided_at,
             (SELECT c.fields->>'Timestamp' FROM engine_codex_submissions c WHERE c.fields->>'Submission ID' = n.submission_id ORDER BY c.id DESC LIMIT 1) AS logged_at
        FROM engine_pay_notes n WHERE n.builder_slack_id = $1 AND n.held_share > 0 AND n.submission_id <> $2
+         AND n.submission_id NOT IN (SELECT fields->>'Submission ID' FROM engine_codex_submissions WHERE fields->>'Merged Into Day' = 'true')
       ORDER BY n.decided_at DESC LIMIT 30`,
     [builder, self],
   );

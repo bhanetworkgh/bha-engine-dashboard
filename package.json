@@ -23,6 +23,7 @@
     "test:pay-suggest": "node server/test/pay-suggest.test.cjs",
     "test:log-precheck": "node server/test/log-precheck.test.cjs",
     "test:pay-card": "npm run build:server --silent && node server/test/pay-card.test.cjs",
+    "test:same-day": "npm run build:server --silent && node server/test/same-day.test.cjs",
     "test:pay-note": "npm run build:server --silent && node server/test/pay-note.test.cjs",
     "test:pay-note-delete": "npm run build:server --silent && node server/test/pay-note-delete.test.cjs",
     "test:pay": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/pay-sync.test.cjs",

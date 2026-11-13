@@ -39,6 +39,7 @@ import * as loops_ from './loops';
 import * as mirror from './mirror';
 import { getPool, withTransaction, type Queryable } from './pg';
 import * as events from './events';
+import * as sameDay from './sameDay';
 import type {
   BuildPattern,
   BuildPatternDetail,
@@ -866,7 +867,18 @@ export async function codexEntries(): Promise<CodexEntry[]> {
 }
 export async function codexDetail(id: string): Promise<CodexEntryDetail | null> {
   const r = await rowById('codex', id);
-  return r ? (JSON.parse(r.json) as CodexEntryDetail) : null;
+  if (!r) return null;
+  const d = JSON.parse(r.json) as CodexEntryDetail;
+  // The day this log belongs to (sameDay.ts, 14 Nov 2026): every log of the builder's New York day, the day entry first.
+  // A read that fails leaves the entry as it is and says nothing about the day, rather than failing the page.
+  try {
+    const mr = await mirrorRowById('codex', id);
+    const day = mr ? await sameDay.dayOf(db(), (mr.fields ?? {}) as Record<string, unknown>) : null;
+    return { ...d, day };
+  } catch (e) {
+    console.error(`[codex] day of ${id} not read: ${e instanceof Error ? e.message : String(e)}`);
+    return d;
+  }
 }
 
 /**
