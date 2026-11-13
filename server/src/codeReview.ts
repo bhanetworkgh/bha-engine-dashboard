@@ -149,26 +149,47 @@ export async function prepare(b: Obj): Promise<{ brief: string; task: string; ex
 
 const hash = (v: unknown): string => createHash('sha256').update(typeof v === 'string' ? v : JSON.stringify(v ?? null)).digest('hex').slice(0, 16);
 
+/** The record post: a short card, like the note a log gets after Jason approves. The full review is one click away. */
 function recordBlocks(r: CodeReview, f: Obj): { text: string; blocks: unknown[] } {
   const sid = s(f['Submission ID'], 80);
+  const id = s(f['Codex Entry ID'], 80) || s(f['Day Entry Codex ID'], 80) || sid;
   const link = `${DASH}/codex/${encodeURIComponent(s(f['Codex Entry ID'], 80) || sid)}`;
-  const claimLines = r.claims.slice(0, 8).map((c) => `• *${c.claim.slice(0, 160)}* ${RESULT_LABEL[c.result] ?? c.result}`).join('\n');
+  const who = f['Builder User ID'] ? `<@${s(f['Builder User ID'], 20)}>` : s(f['Builder Name'], 80) || 'builder';
+  const extra = f['Merged Into Day'] === true ? ` Extra log ${s(f['Day Log Number'], 4)} of ${s(f['Day Date'], 12)}.` : '';
+  const notConfirmed = r.claims.filter((c) => c.result !== 'confirmed').length;
+  const tally = r.claims.length ? ` ${r.claims.length - notConfirmed} of ${r.claims.length} claims confirmed.` : '';
+  const short = r.summary.split(/(?<=[.!?])\s+/).slice(0, 2).join(' ').slice(0, 400);
+  const line = `*Code review:* ${who}, ${s(f['Session Description'], 120) || sid}\n*${VERDICT_LABEL[r.verdict]}.*${tally}${extra}\n${short}`;
   const blocks: unknown[] = [
-    { type: 'header', text: { type: 'plain_text', text: `Code review: ${s(f['Builder Name'], 60) || 'builder'}`.slice(0, 150) } },
-    { type: 'section', fields: [
-      { type: 'mrkdwn', text: `*Builder:*\n${f['Builder User ID'] ? `<@${s(f['Builder User ID'], 20)}>` : s(f['Builder Name'], 80)}` },
-      { type: 'mrkdwn', text: `*Verdict:*\n${VERDICT_LABEL[r.verdict]}` },
-      { type: 'mrkdwn', text: `*Session:*\n${s(f['Session Description'], 200) || sid}` },
-      { type: 'mrkdwn', text: `*Readiness:*\n${readinessLine(r)}` },
-    ] },
-    { type: 'section', text: { type: 'mrkdwn', text: `*In short*\n${r.summary}`.slice(0, 2900) } },
+    { type: 'section', text: { type: 'mrkdwn', text: line.slice(0, 2900) }, accessory: { type: 'button', text: { type: 'plain_text', text: 'Full review' }, url: link } },
+    { type: 'context', elements: [{ type: 'mrkdwn', text: `Run at submission, a record only. \`${id}\`` }] },
   ];
-  if (claimLines) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*Claims checked*\n${claimLines}`.slice(0, 2900) } });
-  if (r.held_proof.length) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*Held pay it says it proves*\n${r.held_proof.map((h) => `• ${h.part} (${h.log}): ${RESULT_LABEL[h.result] ?? h.result}`).join('\n')}`.slice(0, 2900) } });
-  blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*Could not check*\n${(r.couldnt_check.length ? r.couldnt_check : ['Nothing named.']).map((m) => `• ${m}`).join('\n')}`.slice(0, 2900) } });
-  blocks.push({ type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'Open the full review' }, url: link }] });
-  blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `Run at submission, before Jason's review. A record only: nothing here needs a click. \`${sid}\`` }] });
   return { text: `Code review: ${s(f['Builder Name'], 60)}, ${VERDICT_LABEL[r.verdict]}`, blocks };
+}
+
+/** Redraw the record posts made in the last `days` in the current card, in place (chat.update). Run at boot, so a
+ *  change to the card's look reaches the recent posts too. Never throws. */
+export async function redrawRecent(days = 2): Promise<{ redrawn: number; failed: number }> {
+  let redrawn = 0; let failed = 0;
+  try {
+    const ev = await query<{ subject_id: string; ts: string; channel: string }>(
+      `SELECT DISTINCT ON (subject_id) subject_id, detail->>'ts' AS ts, COALESCE(detail->>'channel', $2) AS channel
+         FROM engine_events WHERE event_type = 'code_review_recorded' AND detail ? 'ts' AND at > now() - make_interval(days => $1)
+        ORDER BY subject_id, at DESC`, [days, CHANNEL]);
+    for (const e of ev.rows) {
+      const row = await query<{ fields: Obj }>(`SELECT fields FROM engine_codex_submissions WHERE fields->>'Submission ID' = $1 ORDER BY id DESC LIMIT 1`, [e.subject_id]);
+      const f = row.rows[0]?.fields;
+      const r = f ? parse(f[FIELD]) : null;
+      if (!f || !r) continue;
+      const m = recordBlocks(r, f);
+      const u = await slack.botCall('chat.update', { channel: e.channel, ts: e.ts, text: m.text, blocks: m.blocks });
+      if (u.ok) redrawn++; else { failed++; console.error(`[code-review] redraw of ${e.subject_id} refused: ${String(u.error)}`); }
+    }
+  } catch (e) {
+    console.error(`[code-review] redraw failed: ${(e as Error).message}`);
+  }
+  if (redrawn || failed) console.log(`[code-review] redrew ${redrawn} record post(s), ${failed} refused`);
+  return { redrawn, failed };
 }
 
 /** After a Codex write: one read-only record post in #bha-code-reviews per submission and answer. Never throws. */

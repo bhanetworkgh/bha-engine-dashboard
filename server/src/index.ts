@@ -3593,6 +3593,8 @@ async function boot(): Promise<void> {
     slackApps.startReading();
     sopCheck.startSweeping();
     intake2.startSweeping();
+    // The code review record posts of the last two days, redrawn in the current card (codeReview.ts, 14 Nov 2026).
+    void codeReview.redrawRecent(2).catch((e) => console.error(`[code-review] boot redraw failed: ${e instanceof Error ? e.message : String(e)}`));
     void layer0Notice.sweepRecent().then((r) => { if (r.checked) console.log(`[layer0-notice] boot sweep: ${r.checked} completed log(s) checked, ${r.deleted} notice(s) deleted, ${r.failed} failed`); }).catch((e) => console.error(`[layer0-notice] boot sweep failed: ${e instanceof Error ? e.message : String(e)}`));
     void agentInventory.rederiveStored().then((r) => { if (r.changed) console.log(`[agent-inventory] ${r.changed} of ${r.rows} rows re-derived from their stored config (the derivation changed; n8n was not re-read)`); });
     health.startLedgerPolling();
