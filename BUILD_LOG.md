@@ -15269,3 +15269,10 @@ Files:      server/src/mcp/evidenceTools.ts, CLAUDE.md
 Problem:    The Bays bot cannot read the file in Kaiqi's DM to Destiny ("Slack would not describe file F0CH168C4NM: file_not_found"), and saving it as text failed with "MCP server returned 403 Forbidden. The request may have been blocked by a firewall or security service." The document quotes `curl https://genie-rss-zntu.onrender.com/health`, which Render's edge filter reads as a shell command.
 Fix:        save_evidence accepts text_b64 (base64 of the UTF-8 text), decoded before anything else reads it, the same way the engine routes take fields_b64 and body_b64. Text and text_b64 together is refused; text_b64 that does not round-trip as UTF-8 is refused.
 Decision:   A base64 option rather than editing the document: the evidence store keeps documents word for word.
+
+## 2026-11-13 18:05 — write_registry takes the Builders registry (people)
+Intent:     Take Kaiqi, who left BHA on 12 Nov, off the dashboard's Builders registry without a manual page step.
+Files:      server/src/mcp/registryTools.ts, CLAUDE.md, BUILD_LOG.md
+Problem:    write_registry served services, endpoints, workflows, keys, stage1 and truth; people was "left to the page", so the row could not be removed over MCP.
+Fix:        'people' added to MCP_KINDS and the tool description names its fields. Remove is still Destiny's or Jason's and soft-deletes (deleted_at), so the row stays as history.
+Decision:   His Builder Profile is kept and marked former rather than deleted: his past loops, logs and pay read his name from it.

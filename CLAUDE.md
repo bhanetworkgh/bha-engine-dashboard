@@ -3267,7 +3267,7 @@ someone with a Builder Profile; remove and restore are Destiny's or Jason's (a t
 kind's spec is `unknown_field`; a name already held is `already_held`; and **any value shaped like a secret
 is refused** (`secret_refused`, the BHARAG guard's shapes plus Stripe, ElevenLabs and Twilio keys), never
 stored redacted. A cost nobody stated is left empty: spend is not tracked yet (the Mercury card feed is a
-later step). `npm run test:registry-tools`.
+later step). `npm run test:registry-tools`. **People joined it on 13 Nov 2026** (Destiny): `write_registry` kind `people` updates or removes a Builders registry row, so a builder who leaves BHA comes off that list the same way (remove is Destiny's or Jason's, and keeps the row as history).
 
 **The Sovereign Context Layer: true homes, one door, versioned records** (11 Nov 2026, Destiny — Jason's thread C0ASMPYQLG3 1794180025.573569; inventory EV-1794387100730-42S2). Four parts, one rule: one true home per kind of fact, every change through that home's own door, every copy labelled as a copy.
 - **The true-home register** is registry kind `truth` (`registry_truth`, migration 130), the System Registry's True homes tab (`?tab=true-homes`): per kind of fact its home (dashboard, bharag, vfarm, n8n, slack), relation (`true home`, `copy`, `read live`), store, the door it is written through, writers, views and owner. Seeded once from the inventory (`registrySeed.TRUTH`), edited on the page or with `write_registry` kind `truth`. **`read_true_home`** (read, both connections, in every agent's scope) answers one question from it and carries the rule; a fact with no row says so and tells the agent not to guess.
