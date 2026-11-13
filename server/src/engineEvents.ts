@@ -51,6 +51,7 @@ export const IN_PROCESS_ONLY: Readonly<Record<string, string>> = Object.freeze({
   VFARM_SUBSCRIBER_UPGRADED: 'it changes what a paying farm is on, so it is written only by the dashboard\'s own subscriber code',
   code_check_marked_reviewed: "it stops a log's code check reminders, so it is written only by the dashboard when Destiny or Jason marks the card reviewed",
   acceptance_evidence_recorded: "it will be an acceptance decision (U0MN, PR #23), so it is written only by the dashboard's trusted acceptance writer once that exists",
+  acceptance_evidence_checked: "it is the validator's own result on a real record (acceptanceCheck.ts, 13 Nov 2026), so it is written only by check_acceptance_evidence inside the dashboard",
 });
 
 /** The refusal for an outside post of an in-process-only event type, or null. Pure. */

@@ -129,7 +129,8 @@
     "test:event-ingress": "node server/test/event-ingress.test.cjs",
     "test:genie-skip-warn": "node server/test/genie-skip-warn.test.cjs",
     "test:vfarm-lead-attribution": "node server/test/vfarm-lead-attribution.test.cjs",
-    "test:codex-doc-delete": "node server/test/codex-doc-delete.test.cjs"
+    "test:codex-doc-delete": "node server/test/codex-doc-delete.test.cjs",
+    "test:acceptance-check": "node server/test/acceptance-check.test.cjs"
   },
   "dependencies": {
     "pg": "^8.23.0",

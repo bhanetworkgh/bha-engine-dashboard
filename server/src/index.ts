@@ -97,6 +97,7 @@ import * as draftEval from './draftEval';
 import * as decisionWatch from './decisionWatch';
 import * as patternCapture from './patternCapture';
 import * as codexGap from './codexGap';
+import * as acceptanceCheckTools from './mcp/acceptanceCheckTools';
 import * as renewalReminder from './renewalReminder';
 import * as skillWatch from './skillWatch';
 import * as codeCheckWatch from './codeCheckWatch';
@@ -767,6 +768,14 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       const out = (await un9dTools.runStressTestTool.handler(body as Record<string, unknown>, { access: 'write' } as never)) as { ok: boolean; reason?: string; message?: string; verdict?: string };
       await mirror.logWrite({ endpoint, kind: 'vfarm', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: String(body.farm_id ?? '') || null, outcome: out.ok ? 'updated' : 'rejected', detail: (out.ok ? `stress test ${out.verdict}` : `${out.reason ?? 'failed'} ${out.message ?? ''}`).slice(0, 400), ms: Date.now() - t0 });
       return send(res, 200, out);
+    }
+    // check_acceptance_evidence (13 Nov 2026), the same handler, for when the connector's tool list has not picked it up.
+    if (p === '/api/engine/acceptance-check') {
+      if (method !== 'POST') throw new HttpError(405, 'POST {record, requester_user_id, dry_run}.');
+      const body = decodeBodyB64(await readJson(req, 64 * 1024));
+      const out = (await acceptanceCheckTools.checkAcceptanceEvidenceTool.handler(body as Record<string, unknown>, { access: 'write' } as never)) as { ok: boolean; reason?: string; message?: string; event_id?: number | null; summary?: string };
+      await mirror.logWrite({ endpoint, kind: 'acceptance', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: out.event_id != null ? String(out.event_id) : null, outcome: out.ok ? 'inserted' : 'rejected', detail: (out.ok ? String(out.summary ?? '') : `${out.reason ?? 'failed'} ${out.message ?? ''}`).slice(0, 400), ms: Date.now() - t0 });
+      return send(res, out.ok ? 200 : 422, out);
     }
     if (p === '/api/engine/logstream-e2e') {
       if (method !== 'POST') throw new HttpError(405, 'POST {step, case, run, channel_id, confirm, requester_user_id, dry_run}.');
