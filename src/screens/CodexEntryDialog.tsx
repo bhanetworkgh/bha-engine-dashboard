@@ -401,7 +401,7 @@ export function CodexEntryDialog({
               </div>
               {detail.day && (
                 <div className="min-w-0 md:col-span-3">
-                  <div className="text-[11px] text-faint">This day’s logs ({detail.day.date}, New York date)</div>
+                  <div className="text-[11px] text-faint">This day’s logs ({detail.day.date}, UTC date)</div>
                   <div className="text-dim">
                     {detail.day.logs.length} logs, one working day and one paid day. The first log approved is the day’s entry; the others were added to it and pay nothing of their own.
                   </div>

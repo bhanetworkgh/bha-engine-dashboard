@@ -585,7 +585,7 @@ export async function upsert(kind: MirrorKind, input: MirrorInput, source: 'airt
  * cannot follow a write differently.
  */
 async function afterWrite(kind: MirrorKind, fields: Record<string, unknown>, db: Queryable): Promise<void> {
-  // A Codex write regroups its builder's New York day and syncs the pay of every log in it (sameDay.ts, 14 Nov 2026).
+  // A Codex write regroups its builder's UTC day and syncs the pay of every log in it (sameDay.ts, 14 Nov 2026).
   if (kind === 'codex') await sameDay.afterCodexWrite(fields, db, paySync.syncPayFromCodex);
   if (kind === 'pay_sessions') {
     await paySync.closeSettledStatements(db, text(fields['Builder Slack ID']) ?? '', text(fields.Month) ?? '');

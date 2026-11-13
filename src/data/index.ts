@@ -942,7 +942,7 @@ export interface PayNoteChoice {
   release_condition?: string | null;
   correction_note?: string | null;
 }
-export const PAY_REASON_TAGS = ['LOCAL_ONLY', 'RELOG_OLD_WORK', 'PARTIAL_SCOPE', 'TEST_ONLY', 'OTHER', 'INSUFFICIENT_PROOF', 'AWAITING_REVIEW', 'BLOCKED_EXTERNAL', 'NEEDS_LIVE_EVENT'] as const;
+export const PAY_REASON_TAGS = ['LOCAL_ONLY', 'RELOG_OLD_WORK', 'PARTIAL_SCOPE', 'TEST_ONLY', 'OTHER', 'INSUFFICIENT_PROOF', 'AWAITING_REVIEW', 'BLOCKED_EXTERNAL', 'NEEDS_LIVE_EVENT', 'WAITING_ON_CUSTOMER', 'EXTRA_LOG'] as const;
 export const getPayNotes = () => api<{ ok: boolean; notes: PayNote[]; held: PayNote[] }>('/api/pay/notes');
 export const setPayNote = (ref: { submission_id?: string; codex_entry_id?: string }, choice: PayNoteChoice) =>
   api<{ ok: boolean; message: string; note: PayNote }>('/api/pay/notes', { method: 'POST', body: { ...ref, ...choice } });

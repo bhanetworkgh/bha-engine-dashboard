@@ -3,7 +3,7 @@
  * Per Working Day: Merged Logs Create No Future Balance").
  *
  * A builder may submit as many logs in a day as they like, and each still goes to Jason's review. But every log a
- * builder submits on one New York calendar date after the first belongs to that day's entry: it pays nothing of its
+ * builder submits on one UTC calendar date after the first belongs to that day's entry: it pays nothing of its
  * own, gets no pay row, no pay card, no Codex post, no impact post and no Logstream post, and its held share never
  * becomes a balance. The builder is told it was added to the day's running log.
  *
@@ -14,14 +14,14 @@
  * Worked out on every Codex write, in the same transaction (mirror.afterWrite), for every log of that builder on
  * that date, and written onto each row as new fields (never a rename):
  *
- *   Day Date                 the New York date, YYYY-MM-DD
+ *   Day Date                 the UTC date, YYYY-MM-DD
  *   Day Logs                 how many logs the day holds
  *   Day Log Number           this log's place in the day, by when it was submitted
  *   Day Entry Submission ID  the primary's Submission ID
  *   Day Entry Codex ID       the primary's Codex Entry ID, once it has one
  *   Merged Into Day          true for every log but the primary
  *
- * Only from `CUTOVER` (New York date). Days before it were paid as they were, and nothing here rewrites them.
+ * Only from `CUTOVER` (UTC date). Days before it were paid as they were, and nothing here rewrites them.
  */
 import { nowIso } from './db';
 import * as events from './events';
@@ -29,8 +29,8 @@ import type { Queryable } from './pg';
 
 type Obj = Record<string, unknown>;
 
-export const ZONE = 'America/New_York';
-/** The first New York date the rule applies to (Destiny, 13 Nov 2026: merge Ahad's 12 and 13 Nov logs). */
+export const ZONE = 'UTC';
+/** The first UTC date the rule applies to (Destiny, 13 Nov 2026: merge Ahad's 12 and 13 Nov logs). */
 export const CUTOVER = '2026-11-12';
 
 export const FIELD = {
@@ -45,8 +45,8 @@ export const FIELD = {
 const s = (v: unknown): string => (v === null || v === undefined ? '' : String(typeof v === 'object' ? ((v as Obj).name ?? '') : v)).trim();
 const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: ZONE, year: 'numeric', month: '2-digit', day: '2-digit' });
 
-/** The New York calendar date of a timestamp, or null when it is not one. Pure. */
-export function nyDate(raw: unknown): string | null {
+/** The UTC calendar date of a timestamp, or null when it is not one. Pure. */
+export function utcDate(raw: unknown): string | null {
   const t = s(raw);
   if (!t) return null;
   const d = new Date(t);
@@ -67,7 +67,7 @@ export const MERGED_SUBMISSIONS_SQL = `SELECT fields->>'Submission ID' FROM engi
 export function dayKey(fields: Obj | null | undefined): { builder: string; date: string } | null {
   if (!fields) return null;
   const builder = s(fields['Builder User ID']);
-  const date = nyDate(fields.Timestamp) ?? nyDate(fields['Processed At']);
+  const date = utcDate(fields.Timestamp) ?? utcDate(fields['Processed At']);
   if (!builder || !date || date < CUTOVER) return null;
   if (s(fields['Log Kind']).toLowerCase() === 'report') return null;
   return { builder, date };
@@ -88,7 +88,6 @@ const submittedAt = (f: Obj): number => {
   const t = Date.parse(s(f.Timestamp));
   return Number.isNaN(t) ? approvedAt(f) : t;
 };
-const approved = (f: Obj): boolean => ['Approved', 'Input Added'].includes(s(f['Jason Status']));
 
 export interface DayRow {
   id: string;
@@ -103,14 +102,9 @@ export function planDay(rows: DayRow[]): Map<string, Obj> {
   const day = rows.filter((r) => inDay(r.fields));
   const out = new Map<string, Obj>();
   if (!day.length) return out;
-  const rank = (r: DayRow): [number, number, number] => {
-    const f = r.fields;
-    if (s(f['Codex Entry ID'])) return [0, approvedAt(f), Number(r.id)];
-    if (approved(f)) return [1, approvedAt(f), Number(r.id)];
-    return [2, submittedAt(f), Number(r.id)];
-  };
-  const cmp = (a: [number, number, number], b: [number, number, number]) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
-  const primary = [...day].sort((a, b) => cmp(rank(a), rank(b)))[0];
+  // The first log submitted that UTC day owns it (Destiny, 13 Nov 2026: "as long as you have submitted the first one, it
+  // counts as that day's pay"); every later one is an extra log, decided at submission, so approval order never moves it.
+  const primary = [...day].sort((a, b) => submittedAt(a.fields) - submittedAt(b.fields) || Number(a.id) - Number(b.id))[0];
   const order = [...day].sort((a, b) => submittedAt(a.fields) - submittedAt(b.fields) || Number(a.id) - Number(b.id));
   const date = dayKey(primary.fields)!.date;
   order.forEach((r, i) => {
@@ -126,7 +120,7 @@ export function planDay(rows: DayRow[]): Map<string, Obj> {
   return out;
 }
 
-/** Every log of one builder within a day either side of a New York date, whole. The day itself is picked out in planDay. */
+/** Every log of one builder within a day either side of a UTC date, whole. The day itself is picked out in planDay. */
 async function readNear(db: Queryable, builder: string, date: string): Promise<DayRow[]> {
   const d = new Date(`${date}T12:00:00Z`);
   const lo = new Date(d.getTime() - 2 * 86_400_000).toISOString().slice(0, 10);
@@ -235,3 +229,30 @@ export async function dayOf(db: Queryable, fields: Obj): Promise<{ date: string;
   const primary = logs.find((l) => !l.merged) ?? null;
   return { date: key.date, entry_submission_id: primary?.submission_id ?? null, entry_codex_id: primary?.codex_entry_id ?? null, logs };
 }
+
+/**
+ * Is a log submitted now (or at `at`) an extra log of its builder's UTC day? Asked at submission (relog-check) and on
+ * every Codex write (paySuggest.annotate), before the day fields are stamped. An extra log is any log after the first
+ * non-rejected log of that builder on that UTC date. Null when it is the first, or before the cutover.
+ */
+export async function extraOfDay(db: Queryable, b: { builder_user_id?: unknown; submission_id?: unknown; at?: unknown }): Promise<{ day_date: string; entry_submission_id: string | null; entry_codex_id: string | null; log_number: number; earlier: { submission_id: string; codex_entry_id: string | null; status: string }[] } | null> {
+  const builder = s(b.builder_user_id);
+  const self = s(b.submission_id);
+  const at = utcDate(b.at) ?? utcDate(new Date().toISOString());
+  if (!builder || !at || at < CUTOVER) return null;
+  const rows = (await readNear(db, builder, at)).filter((r) => s(r.fields['Submission ID']) !== self || !self);
+  const mine = Date.parse(s(b.at)) || Date.now();
+  const earlier = rows
+    .filter((r) => inDay(r.fields) && dayKey(r.fields)!.date === at && submittedAt(r.fields) < mine && (!self || s(r.fields['Submission ID']) !== self))
+    .sort((x, y) => submittedAt(x.fields) - submittedAt(y.fields) || Number(x.id) - Number(y.id));
+  if (!earlier.length) return null;
+  const first = earlier[0].fields;
+  return {
+    day_date: at,
+    entry_submission_id: s(first['Submission ID']) || null,
+    entry_codex_id: s(first['Codex Entry ID']) || null,
+    log_number: earlier.length + 1,
+    earlier: earlier.map((r) => ({ submission_id: s(r.fields['Submission ID']), codex_entry_id: s(r.fields['Codex Entry ID']) || null, status: s(r.fields['Jason Status']) || 'Pending' })),
+  };
+}
+

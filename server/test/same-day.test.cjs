@@ -1,5 +1,5 @@
 /**
- * One working day is one Codex entry (14 Nov 2026, sameDay.ts): the New York date and which log owns the day, pure.
+ * One working day is one Codex entry (14 Nov 2026, sameDay.ts): the UTC date and which log owns the day, pure.
  * No database, no network. SERVER_DIST=<compiled server dir> node server/test/same-day.test.cjs
  */
 const assert = require('node:assert/strict');
@@ -11,11 +11,11 @@ let n = 0;
 const ok = (name, fn) => { fn(); n++; console.log(`ok ${n} ${name}`); };
 const row = (id, f) => ({ id: String(id), fields: { 'Builder User ID': 'U0AC6RFNP3P', ...f } });
 
-ok('the New York date, not UTC and not Lagos', () => {
-  assert.equal(sd.nyDate('2026-11-12T23:12:33.805+01:00'), '2026-11-12'); // 17:12 in New York
-  assert.equal(sd.nyDate('2026-11-14T03:30:00+01:00'), '2026-11-13'); // 21:30 on the 13th in New York
-  assert.equal(sd.nyDate('2026-11-14T06:30:00+01:00'), '2026-11-14');
-  assert.equal(sd.nyDate('not a time'), null);
+ok('the UTC date, not Lagos or New York', () => {
+  assert.equal(sd.utcDate('2026-11-12T23:12:33.805+01:00'), '2026-11-12'); // 22:12 UTC
+  assert.equal(sd.utcDate('2026-11-13T00:30:00+01:00'), '2026-11-12'); // 23:30 on the 12th in UTC
+  assert.equal(sd.utcDate('2026-11-14T03:30:00+01:00'), '2026-11-14'); // 02:30 on the 14th in UTC
+  assert.equal(sd.utcDate('not a time'), null);
 });
 
 ok('nothing before the cutover is in a day', () => {
@@ -39,25 +39,16 @@ ok("Ahad's 12 Nov: the paid log owns the day, the later one is merged, the sent-
   assert.equal(plan.get('496')['Day Date'], '2026-11-12');
 });
 
-ok('the first log approved owns the day, even when a later-submitted one', () => {
+ok('the first log submitted owns the day, whatever is approved first', () => {
   const plan = sd.planDay([
     row(1, { 'Submission ID': 'S1', Timestamp: '2026-11-14T14:00:00Z', 'Jason Status': 'Pending' }),
-    row(2, { 'Submission ID': 'S2', Timestamp: '2026-11-14T16:00:00Z', 'Jason Status': 'Approved', 'Jason Reviewed At': '2026-11-14T17:00:00Z' }),
-  ]);
-  assert.equal(plan.get('2')['Merged Into Day'], false);
-  assert.equal(plan.get('1')['Merged Into Day'], true);
-  assert.equal(plan.get('1')['Day Entry Submission ID'], 'S2');
-  assert.equal(plan.get('1')['Day Entry Codex ID'], null);
-});
-
-ok('once a log has a Codex Entry ID it keeps the day, whatever is approved after', () => {
-  const plan = sd.planDay([
-    row(1, { 'Submission ID': 'S1', Timestamp: '2026-11-14T16:00:00Z', 'Jason Status': 'Approved', 'Jason Reviewed At': '2026-11-14T17:00:00Z', 'Codex Entry ID': 'CODEX-A' }),
-    row(2, { 'Submission ID': 'S2', Timestamp: '2026-11-14T14:00:00Z', 'Jason Status': 'Approved', 'Jason Reviewed At': '2026-11-14T18:00:00Z' }),
+    row(2, { 'Submission ID': 'S2', Timestamp: '2026-11-14T16:00:00Z', 'Jason Status': 'Approved', 'Jason Reviewed At': '2026-11-14T17:00:00Z', 'Codex Entry ID': 'CODEX-B' }),
   ]);
   assert.equal(plan.get('1')['Merged Into Day'], false);
   assert.equal(plan.get('2')['Merged Into Day'], true);
-  assert.equal(plan.get('2')['Day Log Number'], 1);
+  assert.equal(plan.get('2')['Day Entry Submission ID'], 'S1');
+  assert.equal(plan.get('2')['Day Entry Codex ID'], null);
+  assert.equal(plan.get('2')['Day Log Number'], 2);
 });
 
 ok('a rejected log is in no day, and a single log is not merged', () => {
@@ -76,4 +67,21 @@ ok('isMerged reads true only', () => {
   assert.equal(sd.isMerged({}), false);
 });
 
-console.log(`${n} passed`);
+(async () => {
+  const rows = [
+    { id: '1', fields: { 'Builder User ID': 'U1', 'Submission ID': 'S1', Timestamp: '2026-11-13T09:00:00Z', 'Jason Status': 'Approved', 'Codex Entry ID': 'CODEX-A' } },
+    { id: '2', fields: { 'Builder User ID': 'U1', 'Submission ID': 'S2', Timestamp: '2026-11-12T23:30:00Z', 'Jason Status': 'Approved' } },
+    { id: '3', fields: { 'Builder User ID': 'U1', 'Submission ID': 'S3', Timestamp: '2026-11-13T05:00:00Z', 'Jason Status': 'Rejected' } },
+  ];
+  const db = { query: async () => ({ rows }) };
+  const first = await sd.extraOfDay(db, { builder_user_id: 'U1', submission_id: 'S1', at: '2026-11-13T09:00:00Z' });
+  assert.equal(first, null, 'the first log of the UTC day is not extra (the 12th and the rejected log do not count)');
+  const extra = await sd.extraOfDay(db, { builder_user_id: 'U1', submission_id: 'S4', at: '2026-11-13T20:00:00Z' });
+  assert.equal(extra.day_date, '2026-11-13');
+  assert.equal(extra.entry_codex_id, 'CODEX-A');
+  assert.equal(extra.log_number, 2);
+  const before = await sd.extraOfDay(db, { builder_user_id: 'U1', at: '2026-11-11T20:00:00Z' });
+  assert.equal(before, null, 'before the cutover nothing is extra');
+  n++; console.log(`ok ${n} extraOfDay: a later log of the same UTC day is extra, the first is not`);
+  console.log(`${n} passed`);
+})().catch((e) => { console.error(e); process.exit(1); });

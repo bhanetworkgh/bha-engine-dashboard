@@ -4734,6 +4734,14 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `CREATE INDEX IF NOT EXISTS engine_intent_checks_at ON engine_intent_checks (at DESC)`,
     ],
   },
+  {
+    id: 136,
+    name: 'Pay notes: EXTRA_LOG, a second or later log of the UTC day paid 0% of its own (13 Nov 2026, Destiny)',
+    statements: [
+      `ALTER TABLE engine_pay_notes DROP CONSTRAINT IF EXISTS engine_pay_notes_reason_tag_check`,
+      `ALTER TABLE engine_pay_notes ADD CONSTRAINT engine_pay_notes_reason_tag_check CHECK (reason_tag IS NULL OR reason_tag IN ('LOCAL_ONLY', 'RELOG_OLD_WORK', 'PARTIAL_SCOPE', 'TEST_ONLY', 'OTHER', 'INSUFFICIENT_PROOF', 'AWAITING_REVIEW', 'BLOCKED_EXTERNAL', 'NEEDS_LIVE_EVENT', 'WAITING_ON_CUSTOMER', 'EXTRA_LOG'))`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

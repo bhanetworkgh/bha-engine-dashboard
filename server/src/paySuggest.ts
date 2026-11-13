@@ -49,6 +49,7 @@
  * builder to classify the log when it finds something and the log does not say.
  */
 import { query, type Queryable } from './pg';
+import * as sameDay from './sameDay';
 
 type Obj = Record<string, unknown>;
 const str = (v: unknown, max = 600): string => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, max) : v == null ? '' : String(v).slice(0, max));
@@ -605,6 +606,50 @@ export async function relogCheck(b: Obj, db: Queryable = { query } as Queryable)
  */
 export async function annotate(fields: Obj, db: Queryable = { query } as Queryable): Promise<Obj> {
   if (!('Work Parts' in fields) && !('Log Class' in fields)) return fields;
+  // An extra log of the day (13 Nov 2026, Destiny): 0% of its own, decided here and not by the review's split. Only
+  // what it proves about earlier held pay is worked out. A check that cannot run falls back to the normal suggestion.
+  let extra: Awaited<ReturnType<typeof sameDay.extraOfDay>> = null;
+  try {
+    extra = sameDay.isMerged(fields)
+      ? { day_date: String(fields['Day Date'] ?? ''), entry_submission_id: (fields['Day Entry Submission ID'] as string) || null, entry_codex_id: (fields['Day Entry Codex ID'] as string) || null, log_number: Number(fields['Day Log Number'] ?? 0) || 2, earlier: [] }
+      : await sameDay.extraOfDay(db, { builder_user_id: fields['Builder User ID'], submission_id: fields['Submission ID'], at: fields.Timestamp });
+  } catch {
+    extra = null;
+  }
+  if (extra) {
+    let rel: Releases | null = null;
+    let relUnread = '';
+    try {
+      rel = await releasesFor(fields, db);
+    } catch (e) {
+      relUnread = e instanceof Error ? e.message : String(e);
+    }
+    const entry = extra.entry_codex_id || extra.entry_submission_id || 'the first log of the day';
+    const proves = rel && rel.total_share > 0 ? ` It proves ${pct(rel.total_share)} of a day held on earlier logs, released on Approve.` : ' It proves none of the pay held on earlier logs, so that stays held.';
+    return {
+      ...fields,
+      'Pay Suggestion': JSON.stringify({
+        extra_of_day: extra,
+        pay_recommendation: 'none',
+        rest: 'dock',
+        credited_share: 0,
+        held_share: 0,
+        docked_share: 1,
+        reason_tag: 'EXTRA_LOG',
+        reason_note: `Extra log of ${extra.day_date} (UTC), log ${extra.log_number}. The day is paid once, on ${entry}.`,
+        release_condition: null,
+        line: `Extra log of the day (${extra.day_date}, UTC, log ${extra.log_number}): 0% of its own. The day is paid once, on ${entry}.${proves}`,
+        flags: relUnread ? [`The held-pay check could not run (${relUnread}), so earlier held pay was not looked at.`] : [],
+        parts: [],
+        log_class: (fields['Log Class'] as string) ?? null,
+        relog_of: null,
+        relog_delta: null,
+        basis: 'extra log of the day',
+        computed_at: new Date().toISOString(),
+        releases: rel,
+      }),
+    };
+  }
   let relog: RelogCheck | null = null;
   try {
     relog = await relogCheck({ builder_user_id: fields['Builder User ID'], submission_id: fields['Submission ID'], session_url: fields['Session Url'], transcript: fields.Transcript }, db);

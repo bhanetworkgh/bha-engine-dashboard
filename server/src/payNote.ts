@@ -14,6 +14,7 @@
  *   reason_tag           LOCAL_ONLY | RELOG_OLD_WORK | PARTIAL_SCOPE | TEST_ONLY | OTHER, and from 10 Nov 2026 Jason's
  *                        proof tags INSUFFICIENT_PROOF | AWAITING_REVIEW | BLOCKED_EXTERNAL | NEEDS_LIVE_EVENT, and from
  *                        11 Nov 2026 WAITING_ON_CUSTOMER (a live event only a customer can make happen; credited)
+ *                        13 Nov 2026 EXTRA_LOG (a second or later log of the builder's UTC day: 0% of its own, set here)
  *   reason_note, release_condition, decided_by/at, released_by/at, proof_link
  *
  * The rules, all enforced here rather than left to whoever calls:
@@ -35,10 +36,12 @@ import * as events from './events';
 import * as engineEvents from './engineEvents';
 import { FeedError } from './systemFeeds';
 import * as paySuggest from './paySuggest';
+import * as sameDay from './sameDay';
+import * as slack from './slack';
 const pct = paySuggest.pct;
 
 export const RECOMMENDATIONS = ['full', 'half', 'none', 'custom_fraction'] as const;
-export const REASON_TAGS = ['LOCAL_ONLY', 'RELOG_OLD_WORK', 'PARTIAL_SCOPE', 'TEST_ONLY', 'OTHER', 'INSUFFICIENT_PROOF', 'AWAITING_REVIEW', 'BLOCKED_EXTERNAL', 'NEEDS_LIVE_EVENT', 'WAITING_ON_CUSTOMER'] as const;
+export const REASON_TAGS = ['LOCAL_ONLY', 'RELOG_OLD_WORK', 'PARTIAL_SCOPE', 'TEST_ONLY', 'OTHER', 'INSUFFICIENT_PROOF', 'AWAITING_REVIEW', 'BLOCKED_EXTERNAL', 'NEEDS_LIVE_EVENT', 'WAITING_ON_CUSTOMER', 'EXTRA_LOG'] as const;
 export const DECIDERS: Record<string, string> = { U0AEW3TBYH1: 'Destiny Arupi', U0A9V97949F: 'Jason Bays' };
 export type Recommendation = (typeof RECOMMENDATIONS)[number];
 
@@ -177,6 +180,13 @@ export async function set(b: Obj, opts: { dry_run?: boolean } = {}): Promise<{ w
   if (!DECIDERS[by]) throw new PayNoteError('not_permitted', `Only Destiny or Jason set a pay note (decided_by is their Slack id); ${by || 'nobody'} was given.`, 403);
   const via = (s(b.via, 40) || 'engine') as (typeof VIA)[number];
   if (!VIA.includes(via)) throw new PayNoteError('bad_via', `via must be one of ${VIA.join(', ')}.`);
+  // An extra log of the builder's UTC day (13 Nov 2026, Destiny) is 0% of its own whatever the pop-up sent: the day
+  // is paid once, on its first log. What it proves about earlier held pay is still released below.
+  const extra = await extraOf({ submission_id: s(b.submission_id, 200), codex_entry_id: s(b.codex_entry_id, 200) });
+  if (extra) {
+    b = { ...b, pay_recommendation: 'none', rest: 'dock', credited_share: 0, held_share: 0, reason_tag: 'EXTRA_LOG', release_condition: null,
+      reason_note: `Extra log of ${extra.day_date} (UTC), log ${extra.log_number}. The day is paid once, on ${extra.entry_codex_id || extra.entry_submission_id || 'its first log'}.` };
+  }
   const { recommendation, credited, held } = resolve(b);
   const tag = s(b.reason_tag, 40).toUpperCase() || null;
   const note = s(b.reason_note, 600) || null;
@@ -259,9 +269,40 @@ export async function set(b: Obj, opts: { dry_run?: boolean } = {}): Promise<{ w
   if (bool(b.release_earlier) && r.action === 'set') {
     const releases = await releaseFromLog({ submission_id: r.note.submission_id, released_by: s(b.decided_by, 40), via });
     const said = releases.results.map((x) => (x.ok ? x.message : `${x.ref} not released: ${x.message}`)).join(' ');
-    return { written: true, dry_run: false, action: r.action, note: r.note, message: said ? `${message} ${said}` : message, releases };
+    // An extra log that cleared held pay says so in the peer review channel (Destiny, 13 Nov 2026); one that
+    // proved nothing stays quiet. A post Slack refuses never undoes the release and is named on the answer.
+    let posted = '';
+    if (extra && releases.released > 0) posted = await announceExtraRelease(r.note, extra, releases, s(b.decided_by, 40));
+    return { written: true, dry_run: false, action: r.action, note: r.note, message: [message, said, posted].filter(Boolean).join(' '), releases };
   }
   return { written: r.action !== 'unchanged', dry_run: false, action: r.action, note: r.note, message };
+}
+
+/** Whether a log is an extra log of its builder's UTC day, from its own row. Null when it is not, or cannot be read. */
+async function extraOf(ref: { submission_id: string; codex_entry_id: string }): Promise<{ day_date: string; entry_submission_id: string | null; entry_codex_id: string | null; log_number: number } | null> {
+  if (!ref.submission_id && !ref.codex_entry_id) return null;
+  try {
+    const log = await findLog({ query } as Queryable, ref);
+    const f = log.fields;
+    if (sameDay.isMerged(f)) return { day_date: pick(f['Day Date']), entry_submission_id: pick(f['Day Entry Submission ID']) || null, entry_codex_id: pick(f['Day Entry Codex ID']) || null, log_number: Number(f['Day Log Number'] ?? 0) || 2 };
+    const sug = paySuggest.fromRow(f) as { extra_of_day?: { day_date: string; entry_submission_id: string | null; entry_codex_id: string | null; log_number: number } } | null;
+    return sug?.extra_of_day ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** One post in the peer review channel (#bha-code-reviews) naming what an extra log proved and what was released. */
+async function announceExtraRelease(note: PayNote, extra: { day_date: string; entry_codex_id: string | null; entry_submission_id: string | null }, releases: Awaited<ReturnType<typeof releaseFromLog>>, by: string): Promise<string> {
+  const channel = process.env.CODE_CHECK_CHANNEL?.trim() || 'C0CDRV4TMCP';
+  const id = note.codex_entry_id ?? note.submission_id;
+  const link = `https://dashboard.bhanetwork.org/codex/${encodeURIComponent(id)}`;
+  const lines = releases.results.filter((x) => x.ok).map((x) => `• ${x.message}`);
+  const text = `*Held pay cleared by an extra log.* <@${note.builder_slack_id ?? ''}> proved held work in an extra log of ${extra.day_date} (UTC), <${link}|${id}>. Approved by <@${by}>.\n${lines.join('\n')}\nThe extra log itself is 0%: the day is paid once, on ${extra.entry_codex_id || extra.entry_submission_id || 'its first log'}.`;
+  const r = await slack.botCall('chat.postMessage', { channel, text, unfurl_links: false, unfurl_media: false });
+  await engineEvents.record({ event_type: r.ok ? 'extra_log_release_announced' : 'extra_log_release_announce_failed', subject_id: id, actor: 'payNote', detail: { channel, ts: r.ts ?? null, error: r.error ?? null, released: releases.released } }).catch(() => undefined);
+  if (!r.ok) console.error(`[payNote] the extra-log release for ${id} was not posted in ${channel}: ${r.error}`);
+  return r.ok ? `Posted in the peer review channel.` : `The peer review post was refused by Slack (${r.error}); the release stands.`;
 }
 
 class DryRun extends Error {

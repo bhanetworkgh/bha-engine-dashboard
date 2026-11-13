@@ -31,8 +31,12 @@ const PARSER_NODE = 'Layer 1 Output Parser';
 const L0_NODE = 'Layer 0 — Completeness Gate';
 const L0_PARSER = 'Layer 0 Output Parser';
 const L0_EVAL = 'Evaluate Layer 0 Gate';
-/** sha256 of `Evaluate Layer 0 Gate`'s code when `layer0Missing` was ported from it (11 Nov 2026). */
-export const L0_EVAL_SHA = '9b5be59b424ce98678fb033fe14ed7c58ac461f566a88e83fb5d5aa39665c022';
+/**
+ * sha256 of `Evaluate Layer 0 Gate`'s code when `layer0Missing` was ported from it (11 Nov 2026), updated 13 Nov 2026 when
+ * the gate gained its extra-log pass (an extra log of the builder's UTC day skips the check). The pre-check never sees
+ * an extra log, so the port is unchanged.
+ */
+export const L0_EVAL_SHA = '25690997c15975cffe45d88d4459cb50a6fa9140a1137e2c6e794746bc72c1fe';
 const SOURCES = ['Otter (voice-narrated build session)', 'Loom (UI/UX screen recording)', 'Manual (typed submission)'];
 
 type Obj = Record<string, unknown>;

@@ -712,12 +712,12 @@ export interface CodexEntryDetail extends CodexEntry {
   code_check: { verdict: string | null; pay_call: string | null; reason: string | null; approve: string | null; why: string | null; lane_goal: string | null; lane_check: string | null; link: string | null; at: string | null; full?: string | null } | null;
   /** SOP-aware LogStream (11 Nov 2026): the log went against an SOP, and the author's reason once given. */
   sop_conflict?: { flag: string | null; sop_id: string | null; evidence: string | null; prompt_link: string | null; reason: string | null; reason_link: string | null; reason_at: string | null } | null;
-  /** One working day is one Codex entry (14 Nov 2026, sameDay.ts): every log of the builder's New York day, when there is more than one. */
+  /** One working day is one Codex entry (14 Nov 2026, sameDay.ts): every log of the builder's UTC day, when there is more than one. */
   day?: CodexDay | null;
 }
 
 export interface CodexDay {
-  /** The New York calendar date. */
+  /** The UTC calendar date. */
   date: string;
   entry_submission_id: string | null;
   entry_codex_id: string | null;

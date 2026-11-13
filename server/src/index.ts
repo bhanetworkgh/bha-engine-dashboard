@@ -23,7 +23,7 @@ import { ask, ASK_URL, ASK_URL_FROM_ENV, askConfigured, MODEL_LABEL } from './as
 import { authConfigured, login, logout, readSession, sessionInfo, sessionSecretConfigured } from './auth';
 import { databaseIdentity } from './db';
 import { migrate, MIGRATION_COUNT } from './migrations';
-import { assertDatabase, closePool, DATABASE_URL, query, withTransaction } from './pg';
+import { assertDatabase, closePool, DATABASE_URL, query, withTransaction, type Queryable } from './pg';
 import * as engine from './engine';
 import * as store from './store';
 import * as registry from './registry';
@@ -989,9 +989,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       /** LogStream (9 Nov 2026): the builder's approved logs this one may repeat. Layer 0 asks before the completeness check. Reads; writes nothing. */
       '/api/engine/relog-check': {
         kind: 'codex',
-        store: async (b) => ({ ...(await paySuggest.relogCheck(b)), dry_run: true }),
-        describe: (r) => `${(r.matches as unknown[]).length} earlier approved log(s) matched${r.unread ? ` (${r.unread})` : ''}`,
-        hint: 'POST { builder_user_id, session_url?, transcript?, submission_id? }. Reads the builder\'s approved logs; writes nothing.',
+        store: async (b) => ({ ...(await paySuggest.relogCheck(b)), extra_of_day: await sameDay.extraOfDay({ query } as Queryable, { builder_user_id: b.builder_user_id, submission_id: b.submission_id, at: b.at }).catch(() => null), dry_run: true }),
+        describe: (r) => `${(r.matches as unknown[]).length} earlier approved log(s) matched${r.extra_of_day ? `; an extra log of ${(r.extra_of_day as { day_date: string }).day_date}` : ''}${r.unread ? ` (${r.unread})` : ''}`,
+        hint: 'POST { builder_user_id, session_url?, transcript?, submission_id?, at? }. Reads the builder\'s approved logs, and says (extra_of_day) when this is a second or later log of their UTC day; writes nothing.',
       },
       /** The reply check (13 Nov 2026, intentCheck.ts; SOP 4c413e97): does Bays' reply answer the message? Agent Delivery asks before posting. Reads; writes nothing. */
       '/api/engine/answer-check': {
