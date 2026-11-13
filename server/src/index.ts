@@ -134,6 +134,7 @@ import * as agentInventory from './agentInventory';
 import * as slackApps from './slackApps';
 import * as candidateActions from './candidateActions';
 import * as patternDraft from './patternDraft';
+import * as codeReview from './codeReview';
 import type { Freshness, NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
 import { INTAKE2_FILE_MAX_BYTES } from '../../src/data/intake2';
 
@@ -992,6 +993,20 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         store: async (b) => ({ ...(await paySuggest.relogCheck(b)), extra_of_day: await sameDay.extraOfDay({ query } as Queryable, { builder_user_id: b.builder_user_id, submission_id: b.submission_id, at: b.at }).catch(() => null), dry_run: true }),
         describe: (r) => `${(r.matches as unknown[]).length} earlier approved log(s) matched${r.extra_of_day ? `; an extra log of ${(r.extra_of_day as { day_date: string }).day_date}` : ''}${r.unread ? ` (${r.unread})` : ''}`,
         hint: 'POST { builder_user_id, session_url?, transcript?, submission_id?, at? }. Reads the builder\'s approved logs, and says (extra_of_day) when this is a second or later log of their UTC day; writes nothing.',
+      },
+      /** The code review at submission (14 Nov 2026, codeReview.ts): the brief and the task Submit Actions' code review agent is given. Reads; writes nothing. */
+      '/api/engine/code-review/prepare': {
+        kind: 'codex',
+        store: async (b) => ({ ...(await codeReview.prepare(b)), dry_run: true }),
+        describe: (r) => `code review prepared${r.extra ? ` for an extra log, ${String(r.held)} held part(s) listed` : ''}`,
+        hint: 'POST { builder_user_id, builder_name?, session_url?, session_description?, summary?, transcript?, extra_of_day? } (or body_b64). Answers { brief, task }.',
+      },
+      /** After Jason approves (14 Nov 2026): one short summary of the Codex and the code review in the Codex entry's thread. */
+      '/api/engine/code-review/thread-summary': {
+        kind: 'codex',
+        store: async (b) => ({ ...(await codeReview.threadSummary(b)) }),
+        describe: (r) => `code review summary ${r.posted ? 'posted' : 'not posted'}: ${String(r.message ?? '').slice(0, 200)}`,
+        hint: 'POST { submission_id, channel, thread_ts, codex_entry_id?, codex_summary?, dry_run? }. Posts as Bays in the thread.',
       },
       /** The reply check (13 Nov 2026, intentCheck.ts; SOP 4c413e97): does Bays' reply answer the message? Agent Delivery asks before posting. Reads; writes nothing. */
       '/api/engine/answer-check': {

@@ -14,6 +14,7 @@
  * endpoint, the method and which credential let them in. That is `WriteCtx`.
  */
 import * as layer0Notice from './layer0Notice';
+import * as codeReview from './codeReview';
 import * as paySuggest from './paySuggest';
 import { query } from './pg';
 import * as mirror from './mirror';
@@ -70,11 +71,15 @@ export async function postRecord(kind: mirror.MirrorKind, body: mirror.MirrorInp
     if (kind === 'layer0') await guardVoided({ submissionId: submissionOf(body.fields) }, (body.fields as Record<string, unknown> | null) ?? null);
     // LogStream (9 Nov 2026): a Codex write carrying the review's work parts gets its suggested pay note.
     if (kind === 'codex' && body.fields && typeof body.fields === 'object') body = { ...body, fields: await paySuggest.annotate(body.fields as Record<string, unknown>) };
+    // The code review at submission (14 Nov 2026, codeReview.ts): its answer becomes the Codex entry's code check fields.
+    if (kind === 'codex' && body.fields && typeof body.fields === 'object') body = { ...body, fields: codeReview.annotate(body.fields as Record<string, unknown>) };
     const result = await mirror.upsert(kind, body, 'engine');
     if (kind === 'layer0' && layer0Notice.becameComplete(body.fields as Record<string, unknown>, result.changed)) void layer0Notice.deleteOnComplete(String(result.id)).catch(() => undefined);
     // A log that went through retires any parked copy of the same recording (2026-10-25).
     // Not awaited and never able to fail this write: its outcome is on engine_writes.
     if (kind === 'codex') void retireOnSubmission((body.fields as Record<string, unknown> | null) ?? null);
+    // One read-only record post in #bha-code-reviews per code review (never awaited, never able to fail this write).
+    if (kind === 'codex') void codeReview.afterCodexWrite((body.fields as Record<string, unknown> | null) ?? null);
     // The row is stored; this dates the status it left the record in. It is
     // the only place a status change is timestamped, so it happens on the
     // write rather than being noticed later, and it never fails the write.

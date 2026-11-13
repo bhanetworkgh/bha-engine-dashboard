@@ -184,7 +184,12 @@ export interface Approval {
   builder_slack_id: string | null;
   session_date: string | null;
   approved_at: string | null;
+  /** The log was code reviewed at submission (codeReview.ts, 14 Nov 2026): it is not waiting on a check. */
+  reviewed_at_submission?: boolean;
 }
+
+/** From here Destiny's own logs are code reviewed too, at submission, like everyone's (14 Nov 2026). */
+export const SUBMISSION_REVIEW_FROM = '2026-11-13T22:00:00Z';
 
 const iso = (v: unknown): string | null => {
   if (v == null || v === '') return null;
@@ -377,9 +382,11 @@ export function summarise(approvals: Approval[], checks: CodeCheck[], now: numbe
   const startMs = Date.parse(start);
   const checkedIds = new Set(checks.map((c) => c.codex_entry_id));
   const inWindow = approvals.filter((a) => a.approved_at && Date.parse(a.approved_at) >= startMs);
-  const own = inWindow.filter((a) => a.builder_slack_id === DESTINY);
-  const owed = inWindow.filter((a) => a.builder_slack_id !== DESTINY);
+  const ownBefore = (a: Approval) => a.builder_slack_id === DESTINY && Date.parse(a.approved_at ?? '') < Date.parse(SUBMISSION_REVIEW_FROM);
+  const own = inWindow.filter(ownBefore);
+  const owed = inWindow.filter((a) => !ownBefore(a));
   const waiting: Waiting[] = owed
+    .filter((a) => !a.reviewed_at_submission)
     .filter((a) => !a.codex_entry_id || !checkedIds.has(a.codex_entry_id))
     .map((a) => {
       const h = hoursBetween(a.approved_at, new Date(now).toISOString());
@@ -488,9 +495,10 @@ function toOutput(r: Record<string, unknown>): AuditOutput {
 /** Approved sessions from the pay ledger, since the start. */
 export async function approvals(since: string = START): Promise<Approval[]> {
   const r = await query(
-    `SELECT fields FROM engine_pay_sessions
-      WHERE fields->>'Approved At' IS NOT NULL AND fields->>'Approved At' <> ''
-        AND (fields->>'Approved At')::timestamptz >= $1::timestamptz`,
+    `SELECT ps.fields, EXISTS (SELECT 1 FROM engine_codex_submissions c WHERE c.fields->>'Codex Entry ID' = ps.fields->>'Codex Entry ID' AND coalesce(c.fields->>'Code Review At', '') <> '') AS reviewed
+       FROM engine_pay_sessions ps
+      WHERE ps.fields->>'Approved At' IS NOT NULL AND ps.fields->>'Approved At' <> ''
+        AND (ps.fields->>'Approved At')::timestamptz >= $1::timestamptz`,
     [since],
   );
   return r.rows.map((row) => {
@@ -501,6 +509,7 @@ export async function approvals(since: string = START): Promise<Approval[]> {
       builder_slack_id: (f['Builder Slack ID'] as string) || null,
       session_date: (f['Session Date'] as string) || null,
       approved_at: iso(f['Approved At']),
+      reviewed_at_submission: (row as { reviewed?: boolean }).reviewed === true,
     };
   });
 }
@@ -535,7 +544,7 @@ export async function recordCheck(i: CheckInput, opts: { dry_run?: boolean } = {
   const f = (ledger.rows[0]?.fields ?? {}) as Record<string, unknown>;
   const approved_at = iso(f['Approved At']);
   const builder_slack_id = (f['Builder Slack ID'] as string) || null;
-  if (builder_slack_id === DESTINY) throw new CodeCheckError('own_log', 'That is Destiny\'s own log. A code check is a second pair of eyes; his own logs are not checked by himself.');
+  // Destiny's own logs are checked too from 14 Nov 2026 (the code review at submission checks everyone's).
   const posted_at = c.posted_at ?? new Date().toISOString();
   const prev = await query(`SELECT codex_entry_id FROM engine_code_checks WHERE codex_entry_id = $1`, [c.codex_entry_id]);
   const corrected = prev.rows.length > 0;
