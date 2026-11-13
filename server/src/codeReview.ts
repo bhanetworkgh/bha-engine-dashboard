@@ -149,20 +149,36 @@ export async function prepare(b: Obj): Promise<{ brief: string; task: string; ex
 
 const hash = (v: unknown): string => createHash('sha256').update(typeof v === 'string' ? v : JSON.stringify(v ?? null)).digest('hex').slice(0, 16);
 
-/** The record post: a short card, like the note a log gets after Jason approves. The full review is one click away. */
+/** "Fri, 13 Nov 2026, 11:09PM UTC", the date line the approved card in #bha-log-reviews uses. */
+function cardDate(v: unknown): string {
+  const d = new Date(String(v ?? ''));
+  if (Number.isNaN(d.getTime())) return '';
+  const day = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getUTCDay()];
+  const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()];
+  const h = d.getUTCHours();
+  const t = `${h % 12 || 12}:${String(d.getUTCMinutes()).padStart(2, '0')}${h < 12 ? 'AM' : 'PM'}`;
+  return `${day}, ${d.getUTCDate()} ${mon} ${d.getUTCFullYear()}, ${t} UTC`;
+}
+
+/** The record post: the same short card the log review channel shows once Jason approves (Destiny, 14 Nov 2026).
+ *  A field per line, the verdict on top, and the full review one link away. */
 function recordBlocks(r: CodeReview, f: Obj): { text: string; blocks: unknown[] } {
   const sid = s(f['Submission ID'], 80);
-  const id = s(f['Codex Entry ID'], 80) || s(f['Day Entry Codex ID'], 80) || sid;
   const link = `${DASH}/codex/${encodeURIComponent(s(f['Codex Entry ID'], 80) || sid)}`;
   const who = f['Builder User ID'] ? `<@${s(f['Builder User ID'], 20)}>` : s(f['Builder Name'], 80) || 'builder';
-  const extra = f['Merged Into Day'] === true ? ` Extra log ${s(f['Day Log Number'], 4)} of ${s(f['Day Date'], 12)}.` : '';
-  const notConfirmed = r.claims.filter((c) => c.result !== 'confirmed').length;
-  const tally = r.claims.length ? ` ${r.claims.length - notConfirmed} of ${r.claims.length} claims confirmed.` : '';
-  const short = r.summary.split(/(?<=[.!?])\s+/).slice(0, 2).join(' ').slice(0, 400);
-  const line = `*Code review:* ${who}, ${s(f['Session Description'], 120) || sid}\n*${VERDICT_LABEL[r.verdict]}.*${tally}${extra}\n${short}`;
+  const title = s(f['Session Description'], 280) || sid;
+  const url = s(f['Session Url'], 400);
+  const confirmed = r.claims.filter((c) => c.result === 'confirmed').length;
+  const extra = f['Merged Into Day'] === true ? `\nExtra log ${s(f['Day Log Number'], 4)} of ${s(f['Day Date'], 12)} (UTC)` : '';
+  const sec = (text: string): Obj => ({ type: 'section', text: { type: 'mrkdwn', text: text.slice(0, 2900) } });
   const blocks: unknown[] = [
-    { type: 'section', text: { type: 'mrkdwn', text: line.slice(0, 2900) }, accessory: { type: 'button', text: { type: 'plain_text', text: 'Full review' }, url: link } },
-    { type: 'context', elements: [{ type: 'mrkdwn', text: `Run at submission, a record only. \`${id}\`` }] },
+    sec(`:mag_right: *Code review: ${VERDICT_LABEL[r.verdict]}*`),
+    sec(`*Builder*\n${who}`),
+    sec(`*Session title*\n${title}${url ? `\n<${url}|Open session>` : ''}`),
+    sec(`*Session date*\n${cardDate(f['Timestamp']) || s(f['Timestamp'], 30)}`),
+    sec(`*Submission ID*\n\`${sid}\``),
+    sec(`*Claims confirmed*\n${r.claims.length ? `${confirmed} of ${r.claims.length}` : 'None listed'}${extra}`),
+    { type: 'context', elements: [{ type: 'mrkdwn', text: `Run at submission, a record only \u00b7 <${link}|Open the full review>` }] },
   ];
   return { text: `Code review: ${s(f['Builder Name'], 60)}, ${VERDICT_LABEL[r.verdict]}`, blocks };
 }

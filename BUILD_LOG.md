@@ -15376,3 +15376,8 @@ Files:      server/src/codeReview.ts, server/src/index.ts
 Problem:    recordBlocks drew a header, four fields, the summary, every claim, the held proof and the could-not-check list: a full review in the channel.
 Fix:        The card is now one section: builder and session, the verdict with how many claims were confirmed (and "Extra log n of <day>" when it is one), the first two sentences of the summary, and a Full review button; one context line with the Codex id. redrawRecent(2) runs at boot and rewrites the record posts of the last two days in place with chat.update, so the post already made changes look without a repost.
 Decision:   Redraw at boot rather than a route: the only post to fix is the one made tonight, and the next deploy reaches it with no manual call.
+
+## 2026-11-14 00:35 — D2: the record card copies the approved card in #bha-log-reviews
+Intent:     Destiny asked for the code review card to look like the card a log becomes once Jason approves it.
+Files:      server/src/codeReview.ts
+Fix:        recordBlocks now draws the approved card's shape: a ":mag_right: Code review: <verdict>" line, then one field per line (Builder, Session title with Open session, Session date as "Fri, 13 Nov 2026, 11:09PM UTC", Submission ID, Claims confirmed n of m, with the extra-log line where it is one), and a context line "Run at submission, a record only · Open the full review". No summary text on the card. The boot redraw rewrites tonight's post in place.
