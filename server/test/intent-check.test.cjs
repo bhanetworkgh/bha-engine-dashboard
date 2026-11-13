@@ -47,5 +47,7 @@ const ok = (m) => { n += 1; console.log('  ok  ' + m); };
   assert.equal(nothing.checked, 'nothing_to_check'); assert.deepEqual(nothing.held, []); ok('a log that closes nothing is not checked');
   const nolog = await ic.loopCloseCheck({ closes: [{ loop_id: 'LOOP-1', what: 'x', evidence: 'y' }], log: '' });
   assert.equal(nolog.checked, 'unchecked'); assert.deepEqual(nolog.kept, ['LOOP-1']); ok('a close check with no log holds nothing back and says so');
+  const noNote = await ic.rewriteCheck({ rewrites: [{ platform: 'x', note: '', old: 'a', new: 'b' }] });
+  assert.equal(noNote.checked, 'nothing_to_check'); assert.deepEqual(noNote.missed, []); ok('a rewrite with no note to answer is not checked');
   console.log(`intent-check: ${n} passed`);
 })().catch((e) => { console.error(e); process.exit(1); });

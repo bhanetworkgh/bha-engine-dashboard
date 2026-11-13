@@ -651,3 +651,44 @@ export async function loopCloseCheck(b: Record<string, unknown>): Promise<Record
   }
   return out;
 }
+
+/* ---------------------------------------- Media Twin rewrites against Jason's notes */
+
+export const REWRITE_SYSTEM = `You check rewrites of social media posts for Bays Horizon Advisory (BHA). Jason rejected a draft for a platform and wrote a note saying what was wrong. The Media Twin rewrote it. For each platform, answer: does the new text do what Jason's note asks?
+
+Addressed: the change the note asks for is made (a claim removed or softened, a tone changed, a fact fixed, a length cut, a different angle), even if worded differently from how Jason would put it.
+Not addressed: the thing the note objects to is still there, the rewrite ignores the note, or it makes a different change from the one asked for.
+
+Judge only against the note. Do not judge the post's quality otherwise.
+
+Return exactly one JSON object and nothing else: {"platforms": [{"platform": "linkedin", "addressed": true or false, "reason": "one short sentence"}]}, one entry for every platform you were given.`;
+
+/**
+ * POST /api/engine/rewrite-check { rewrites: [{platform, note, old, new}] } (13 Nov 2026, SOP 4c413e97):
+ * before `Media Twin — Rewrite Draft` saves a revision, each rewritten platform is checked against
+ * Jason's note for it. The workflow asks the agent once more on a fresh memory when one misses, and
+ * raises when the retry misses too, so a rewrite that ignored the note never reaches Jason as though
+ * it had answered it. A check that cannot run answers `unchecked` and misses nothing.
+ */
+export async function rewriteCheck(b: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const rewrites = (Array.isArray(b.rewrites) ? b.rewrites : [])
+    .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object' && typeof (x as Record<string, unknown>).platform === 'string')
+    .slice(0, 4)
+    .map((x) => ({ platform: String(x.platform), note: clip(x.note, 2000), old: clip(x.old, 4000), new: clip(x.new, 4000) }));
+  const withNote = rewrites.filter((r) => r.note.trim());
+  if (!withNote.length) return { checked: 'nothing_to_check', missed: [], addressed: rewrites.map((r) => r.platform), dry_run: true };
+  const user = withNote.map((r) => `--- ${r.platform}\nJason's note: "${r.note}"\nThe rejected text:\n${r.old}\nThe rewrite:\n${r.new}`).join('\n\n');
+  const res = await callModel(REWRITE_SYSTEM, user, 800);
+  if ('error' in res) return { checked: 'unchecked', error: res.error, missed: [], addressed: rewrites.map((r) => r.platform), dry_run: true };
+  let verdicts: { platform: string; addressed: boolean; reason: string }[] | null = null;
+  try {
+    const t = res.text;
+    const j = JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1)) as { platforms?: unknown };
+    if (Array.isArray(j.platforms)) verdicts = (j.platforms as Record<string, unknown>[]).filter((x) => x && typeof x.platform === 'string' && typeof x.addressed === 'boolean').map((x) => ({ platform: String(x.platform), addressed: x.addressed as boolean, reason: String(x.reason ?? '').slice(0, 300) }));
+  } catch {
+    verdicts = null;
+  }
+  if (!verdicts) return { checked: 'unchecked', error: `answer was not the JSON asked for: ${clip(res.text, 160)}`, missed: [], addressed: rewrites.map((r) => r.platform), dry_run: true };
+  const missed = withNote.filter((r) => verdicts!.find((v) => v.platform === r.platform)?.addressed === false).map((r) => ({ platform: r.platform, note: r.note, reason: verdicts!.find((v) => v.platform === r.platform)!.reason }));
+  return { checked: 'model', provider: res.provider, missed, addressed: rewrites.map((r) => r.platform).filter((p) => !missed.find((m) => m.platform === p)), verdicts, dry_run: true };
+}

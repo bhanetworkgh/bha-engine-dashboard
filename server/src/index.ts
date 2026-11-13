@@ -1006,6 +1006,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         describe: (r) => `loop close check (${r.checked}): ${(r.held as unknown[]).length} held, ${(r.kept as unknown[]).length} kept`.slice(0, 400),
         hint: 'POST { closes: [{loop_id, what, evidence}], log, submission_id?, codex_entry_id? } (or body_b64). Answers { held: [{loop_id, reason}], kept, checked }.',
       },
+      /** Media Twin rewrites against Jason's notes (13 Nov 2026, intentCheck.ts; SOP 4c413e97). Reads; writes nothing. */
+      '/api/engine/rewrite-check': {
+        kind: 'media_posts',
+        store: async (b) => ({ ...(await intentCheck.rewriteCheck(b)) }),
+        describe: (r) => `rewrite check (${r.checked}): ${(r.missed as unknown[]).length} platform(s) missed the note`.slice(0, 400),
+        hint: 'POST { rewrites: [{platform, note, old, new}] } (or body_b64). Answers { missed: [{platform, note, reason}], addressed, checked }.',
+      },
       /** The log pre-check (10 Nov 2026, logPrecheck.ts): the exact Layer 1 review, read live, and the pay it would give. Both read; neither writes. */
       '/api/engine/log-precheck/prompt': {
         kind: 'codex',
