@@ -1818,7 +1818,9 @@ where an agent turns an ask into a decision, a loop move or a reply. `server/src
   a second miss on the same ask and tool within 6 hours answers `intent_mismatch_repeated` and opens a warning
   incident on the Bays lane (subsystem AGENT, class INTENT_MISMATCH), copied to Engine health. No ask is
   `ask_required`, not counted as a miss. A model that cannot be reached lets the write through as `unchecked`
-  with one alert an hour. Dry runs, approved calls and every other caller are not checked.
+  with one alert an hour; every unchecked pass (here or on the reply check) is an `intent_check_unchecked` or
+  `answer_check_unchecked` event, and the third in an hour opens one Bays-lane incident (class CHECK_UNCHECKED).
+  Dry runs, approved calls and every other caller are not checked.
 - **Every Bays and North Star reply** (n8n `Bays — Agent Delivery`, Slack and panel paths, and `North Star —
   Agent Delivery`, Logstream's guidance asks included): `POST /api/engine/answer-check` before anything is
   posted. A miss is asked once more on a fresh memory; a second miss is delivered as a failure and raised. The
