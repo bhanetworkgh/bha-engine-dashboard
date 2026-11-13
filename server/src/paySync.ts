@@ -230,10 +230,33 @@ async function syncWith(db: Queryable, fields: Record<string, unknown>): Promise
       if (paid && copy.fields.Paid !== true && copy.fields.Paid !== 'true' && copy.fields.Paid !== 'Yes' && slackId) {
         afterCommit(db, () => { void import('./payCard').then((pc) => pc.refreshUnpaidSoon(slackId)).catch(() => undefined); });
       }
+      // A paid session turned unpaid (13 Nov 2026): the 12 Nov boot reconcile did this with nothing said. The log
+      // is the record, so the write stands, but it is raised at once: one event and one alert in the engine alerts channel.
+      if (!paid && (copy.fields.Paid === true || copy.fields.Paid === 'true' || copy.fields.Paid === 'Yes')) {
+        const row = Number(copy.id);
+        afterCommit(db, () => { void raiseUnpaid(row, entryId, slackId, pick(fields.Paid)); });
+      }
     }
   }
   if (changedAny) await closeSettledStatements(db, slackId, month);
   return changedAny ? 'updated' : 'unchanged';
+}
+
+/** One alert when a paid pay session is written unpaid: who, which log, what the log now says. Never throws. */
+export async function raiseUnpaid(rowId: number, entryId: string, slackId: string, logPaid: string): Promise<void> {
+  const text = `A pay session that was marked paid has just been written unpaid: pay row ${rowId}, Codex ${entryId}, builder ${slackId || 'unknown'}. The log now says Paid "${logPaid || 'empty'}". If nobody meant to undo a payment, check the log and mark it paid again.`;
+  try {
+    const engineEvents = await import('./engineEvents');
+    const claim = await engineEvents.record({ event_type: 'pay_session_unpaid', subject_id: entryId, lane: 'BAYS', actor: 'pay-sync', detail: { row_id: rowId, builder_slack_id: slackId, log_paid: logPaid, text }, dedupe_key: `pay_session_unpaid:${rowId}:${nowIso().slice(0, 16)}` });
+    if (!claim.recorded) return;
+    const channel = process.env.QUOTA_ALERT_CHANNEL?.trim();
+    if (!channel) return void console.error(`[pay-sync] no QUOTA_ALERT_CHANNEL, alert not posted: ${text}`);
+    const slack = await import('./slack');
+    const res = await slack.botCall('chat.postMessage', { channel, text, unfurl_links: false });
+    if (!res.ok) console.error(`[pay-sync] unpaid alert refused by Slack (${res.error}): ${text}`);
+  } catch (e) {
+    console.error(`[pay-sync] unpaid alert not posted: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 /**

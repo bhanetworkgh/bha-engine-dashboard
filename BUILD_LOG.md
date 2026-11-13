@@ -15290,3 +15290,9 @@ Files:      server/src/intentCheck.ts, BUILD_LOG.md
 Problem:    engine_intent_checks held 44 rows: 4 match, 3 ask_not_found (the scheduled-task name, fixed 18:15), 2 ask_required, and 35 unchecked. 31 of the 35 read "anthropic: answer was not the JSON asked for: ; openrouter: answer was not the JSON asked for: ", an empty answer from both; 3 were JSON cut off mid-reason. Every model call here asked for 300 tokens (200 on the reply check), so the write went through unchecked and the check was mostly not checking.
 Fix:        MAX_TOKENS 1500 on the intent and reply checks and the rewrite check, 2500 on the first loop-close pass. An empty or non-JSON answer now names why the model stopped and what it sent (stopNote: stop_reason and block types on Anthropic, finish_reason on OpenRouter), so the next empty answer says its own cause.
 Decision:   Raised the room rather than shortening the prompt: the answer is a short JSON, so a larger limit costs nothing on a normal answer and only matters when the model needs it.
+
+## 2026-11-13 19:00 — A paid session written unpaid is raised at once
+Intent:     The log pre-check (n8n run 88377) read pay row 381's flip on 12 Nov (Paid true, then false from the boot reconcile, then true) as a silent state change: nothing alerted, it was found by reading engine_record_history. 7ca2c7f removed the cause; nothing would say so if another path did it.
+Files:      server/src/paySync.ts, BUILD_LOG.md
+Fix:        syncWith calls raiseUnpaid after the commit whenever a pay_sessions copy that was paid is written unpaid: one `pay_session_unpaid` event (dedupe per row and minute) and one post as Bays in QUOTA_ALERT_CHANNEL naming the row, the Codex entry, the builder and what the log now says. The write itself stands, because the log is the record of Paid.
+Decision:   An alert rather than a refusal: a person un-ticking Paid on purpose is allowed, and the alert is how anyone finds out it happened.
