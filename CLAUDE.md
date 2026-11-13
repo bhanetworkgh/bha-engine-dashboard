@@ -1811,7 +1811,8 @@ where an agent turns an ask into a decision, a loop move or a reply. `server/src
   loops, `move_loop`, the four Decision Watch writes, `send_nudge`, `post_file` and `edit_sop` run the check in
   `mcp/index.ts` before the tool: the ask is read from Slack by this server (the `ask` argument Bays is shown on
   those tools: channel, thread and message ts from its context block; a tool carrying a channel and thread falls
-  back to the newest message a person posted there; a scheduled run names its task, which must be one Bays has),
+  back to the newest message a person posted there; a scheduled run names its task, which must be one Bays has;
+  case, dash style and the trailing schedule note in brackets do not count, and a name fitting two tasks fits none),
   and Haiku answers whether the action (the loop and what is done to it, a watch's owner and wording, who a
   message goes to and what it says) matches. A miss writes nothing and answers `intent_mismatch` with the reason;
   a second miss on the same ask and tool within 6 hours answers `intent_mismatch_repeated` and opens a warning

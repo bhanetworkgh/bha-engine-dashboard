@@ -17,6 +17,13 @@ const ok = (m) => { n += 1; console.log('  ok  ' + m); };
   assert.equal(ic.parseVerdict('I think it matches.'), null); ok('prose is never read as a verdict');
   assert.equal(ic.parseVerdict('{"match": "yes"}'), null); ok('a verdict whose match is not a boolean is refused');
 
+  const tasks = ['Log review nudge -- Jason (every 6h)', 'Morning digest', 'Weekly sweep (Mon)', 'Weekly sweep (Fri)'];
+  assert.equal(ic.matchTask(tasks, 'Log review nudge -- Jason'), tasks[0]); ok('a task named without its "(every 6h)" note is found (the 13 Nov 18:00 refusal)');
+  assert.equal(ic.matchTask(tasks, 'log review nudge — jason'), tasks[0]); ok('case and dash style do not count');
+  assert.equal(ic.matchTask(tasks, 'Morning digest'), tasks[1]); ok('an exact name still matches');
+  assert.equal(ic.matchTask(tasks, 'Weekly sweep'), null); ok('a name that fits two tasks matches neither');
+  assert.equal(ic.matchTask(tasks, 'Log review nudge -- Hardik'), null); ok('a different task is still refused');
+
   for (const t of ['update_record', 'create_record', 'archive_record', 'move_loop', 'open_decision_watch', 'close_decision_watch', 'send_nudge', 'edit_sop']) assert.ok(ic.CHECKED.includes(t), t);
   ok('loop moves, watch openings and closes, nudges and SOP edits are all checked');
   assert.ok(ic.CHECKED_AGENTS.has('bays') && !ic.CHECKED_AGENTS.has('research_twin')); ok('only Bays is checked');

@@ -199,12 +199,30 @@ async function scheduledTasks(): Promise<string[]> {
   return (r.rows[0]?.tasks || []).filter((t) => t && t.enabled !== false && t.name).map((t) => String(t.name));
 }
 
+/**
+ * A task name as Bays says it (13 Nov 2026): case, dash style (-, --, en and em dashes), spacing and a
+ * trailing schedule note in brackets ("(every 6h)") do not count. Bays named "Log review nudge -- Jason"
+ * for the task "Log review nudge -- Jason (every 6h)" and the 18:00 nudge was refused.
+ */
+export function taskKey(name: string): string {
+  return name.toLowerCase().replace(/\s*\([^)]*\)\s*$/, '').replace(/[‐-―]|-{1,}/g, '-').replace(/\s*-\s*/g, ' - ').replace(/\s+/g, ' ').trim();
+}
+
+/** The one task a name means: an exact match first, else the only task with the same key. Two keys alike is no match. */
+export function matchTask(tasks: string[], said: string): string | null {
+  const exact = tasks.find((t) => t.toLowerCase() === said.toLowerCase());
+  if (exact) return exact;
+  const k = taskKey(said);
+  const hits = tasks.filter((t) => taskKey(t) === k);
+  return hits.length === 1 ? hits[0] : null;
+}
+
 export async function resolveAsk(tool: string, args: Args): Promise<AskResult> {
   const a = (args.ask && typeof args.ask === 'object' ? args.ask : {}) as Args;
   const sched = str(a.scheduled_task);
   if (sched) {
     const tasks = await scheduledTasks();
-    const hit = tasks.find((t) => t.toLowerCase() === sched.toLowerCase());
+    const hit = matchTask(tasks, sched);
     if (!hit) return { ok: false, reason: 'ask_not_found', message: `"${sched}" is not one of Bays' scheduled tasks. They are: ${tasks.join('; ')}. Name the task this run is exactly as it is called.` };
     return { ok: true, ask: { key: `scheduled:${hit}:${new Date().toISOString().slice(0, 10)}`, source: 'scheduled', text: `Bays' scheduled task "${hit}" is running. Nothing was typed; the task's own purpose is the ask.`, context: '', asker: null } };
   }

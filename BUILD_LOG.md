@@ -15276,3 +15276,10 @@ Files:      server/src/mcp/registryTools.ts, CLAUDE.md, BUILD_LOG.md
 Problem:    write_registry served services, endpoints, workflows, keys, stage1 and truth; people was "left to the page", so the row could not be removed over MCP.
 Fix:        'people' added to MCP_KINDS and the tool description names its fields. Remove is still Destiny's or Jason's and soft-deletes (deleted_at), so the row stays as history.
 Decision:   His Builder Profile is kept and marked former rather than deleted: his past loops, logs and pay read his name from it.
+
+## 2026-11-13 18:15 — A scheduled task is found without its schedule note
+Intent:     Bays' 18:00 Log review nudge to Jason was refused, so nothing reached Jason while 3 logs had waited over 6 hours.
+Files:      server/src/intentCheck.ts, server/test/intent-check.test.cjs, CLAUDE.md
+Problem:    "BHA_Dashboard_send_nudge -- ask_not_found: "Log review nudge -- Jason" is not one of Bays' scheduled tasks (the list returned it as "Log review nudge -- Jason (every 6h)")". resolveAsk matched the task name exactly, and Bays drops the bracketed schedule note. All 11 of Bays' tasks carry one, so any scheduled write could have been refused the same way.
+Fix:        taskKey and matchTask: an exact match first, else the one task whose name is the same once case, dash style, spacing and a trailing "(…)" are set aside. Two tasks alike match neither. Checked against the 11 live task names: all stay distinct.
+Decision:   Loosened on the server rather than the prompt, because the task name is Bays' to say and the server's job is to know which task it means, not to spell-check it.
