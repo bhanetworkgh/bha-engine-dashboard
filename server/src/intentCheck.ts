@@ -551,3 +551,103 @@ export function parseAnswer(raw: string): { answers: boolean; reason: string } |
   }
   return null;
 }
+
+/* ------------------------------------------- loop closes from a log review (Submit Actions) */
+
+async function callModel(system: string, user: string, maxTokens: number): Promise<{ text: string; provider: string } | { error: string }> {
+  const errors: string[] = [];
+  const routes = [
+    { provider: 'anthropic', key: process.env.ANTHROPIC_API_KEY?.trim(), url: `${(process.env.ANTHROPIC_API_URL || 'https://api.anthropic.com/v1').replace(/\/+$/, '')}/messages` },
+    { provider: 'openrouter', key: process.env.OPENROUTER_API_KEY?.trim(), url: `${(process.env.OPENROUTER_API_URL || 'https://openrouter.ai/api/v1').replace(/\/+$/, '')}/chat/completions` },
+  ];
+  for (const r of routes) {
+    if (!r.key) { errors.push(`${r.provider}: not configured`); continue; }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 60_000);
+    try {
+      const anthropic = r.provider === 'anthropic';
+      const res = await fetch(r.url, {
+        method: 'POST',
+        headers: anthropic ? { 'x-api-key': r.key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' } : { Authorization: `Bearer ${r.key}`, 'content-type': 'application/json', 'X-Title': 'BHA Engine Dashboard - loop close check' },
+        body: JSON.stringify(
+          anthropic
+            ? { model: 'claude-haiku-5-5', max_tokens: maxTokens, system, messages: [{ role: 'user', content: user }] }
+            : { model: 'anthropic/claude-haiku-5.5', max_tokens: maxTokens, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] },
+        ),
+        signal: controller.signal,
+      });
+      const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!res.ok || json.error) throw new Error(`HTTP ${res.status}: ${clip((json.error as { message?: string })?.message ?? json.error ?? '', 200)}`);
+      const text = anthropic
+        ? ((json.content as { type?: string; text?: string }[]) || []).filter((x) => x.type === 'text').map((x) => x.text || '').join('')
+        : String(((json.choices as { message?: { content?: string } }[]) || [])[0]?.message?.content ?? '');
+      if (!text.trim()) throw new Error('no answer text');
+      return { text, provider: r.provider };
+    } catch (e) {
+      errors.push(`${r.provider}: ${e instanceof Error ? (e.name === 'AbortError' ? 'timed out' : e.message) : String(e)}`);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return { error: errors.join('; ') };
+}
+
+export const CLOSE_SYSTEM = `You check loop closes proposed from a BHA builder's session log. A loop is a tracked piece of work. A reviewer read the log and proposed that some of the builder's loops are now closed. For each one, answer: does the session log show that this loop's specific ask was delivered and verified?
+
+Backed: the log shows the thing the loop asks for was done (built, fixed, shipped, decided, or answered) and checked, or names the result that settles it.
+Not backed: the log shows only partial work, planning, a related but different fix, or nothing about this loop at all. The reviewer's evidence sentence is a claim to check against the log, not proof.
+
+Return exactly one JSON object and nothing else: {"loops": [{"loop_id": "LOOP-...", "backed": true or false, "reason": "one short sentence"}]}, one entry for every loop you were given.`;
+
+export function parseCloses(raw: string): { loop_id: string; backed: boolean; reason: string }[] | null {
+  const brace = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  if (brace < 0 || end <= brace) return null;
+  try {
+    const j = JSON.parse(raw.slice(brace, end + 1)) as { loops?: unknown };
+    if (!Array.isArray(j.loops)) return null;
+    return j.loops
+      .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object' && typeof (x as Record<string, unknown>).loop_id === 'string' && typeof (x as Record<string, unknown>).backed === 'boolean')
+      .map((x) => ({ loop_id: String(x.loop_id), backed: x.backed as boolean, reason: String(x.reason ?? '').slice(0, 300) }));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * POST /api/engine/loop-close-check { closes: [{loop_id, what, evidence}], log } (13 Nov 2026, SOP
+ * 05ccd8ab, the first target): before `Bays — Submit Actions` closes a builder's loops from their log,
+ * each proposed close is checked against the log. A close the check finds unbacked is checked once
+ * more on a fresh call, and only a close both calls find unbacked is held open (`held`), with the
+ * reason, so the loop is advanced instead of closed and the Codex says why. A close is never added
+ * here, only held back. A check that cannot run holds nothing and says `unchecked`.
+ */
+export async function loopCloseCheck(b: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const closes = (Array.isArray(b.closes) ? b.closes : [])
+    .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object' && typeof (x as Record<string, unknown>).loop_id === 'string')
+    .slice(0, 15)
+    .map((x) => ({ loop_id: String(x.loop_id), what: clip(x.what, 400), evidence: clip(x.evidence, 400) }));
+  const log = clip(b.log, 90_000);
+  if (!closes.length) return { checked: 'nothing_to_check', held: [], kept: [], dry_run: true };
+  if (!log.trim()) return { checked: 'unchecked', error: 'no log text was sent', held: [], kept: closes.map((c) => c.loop_id), dry_run: true };
+  const ask = (list: typeof closes) =>
+    `The session log:\n${log}\n\nThe proposed closes:\n${list.map((c) => `- ${c.loop_id}: the loop asks "${c.what}". The reviewer's evidence: "${c.evidence}"`).join('\n')}`;
+  const first = await callModel(CLOSE_SYSTEM, ask(closes), 1200);
+  if ('error' in first) return { checked: 'unchecked', error: first.error, held: [], kept: closes.map((c) => c.loop_id), dry_run: true };
+  const v1 = parseCloses(first.text);
+  if (!v1) return { checked: 'unchecked', error: `answer was not the JSON asked for: ${clip(first.text, 160)}`, held: [], kept: closes.map((c) => c.loop_id), dry_run: true };
+  const doubted = closes.filter((c) => v1.find((v) => v.loop_id === c.loop_id)?.backed === false);
+  if (!doubted.length) return { checked: 'model', provider: first.provider, held: [], kept: closes.map((c) => c.loop_id), verdicts: v1, dry_run: true };
+  // Retry once, on a fresh call, for the doubted ones only.
+  const second = await callModel(CLOSE_SYSTEM, ask(doubted), 800);
+  const v2 = 'error' in second ? null : parseCloses(second.text);
+  const held = doubted
+    .filter((c) => (v2 ? v2.find((v) => v.loop_id === c.loop_id)?.backed !== true : true))
+    .map((c) => ({ loop_id: c.loop_id, reason: v2?.find((v) => v.loop_id === c.loop_id)?.reason || v1.find((v) => v.loop_id === c.loop_id)?.reason || 'the log does not show it finished' }));
+  const kept = closes.map((c) => c.loop_id).filter((id) => !held.find((h) => h.loop_id === id));
+  const out = { checked: v2 ? 'model_twice' : 'model_once', provider: first.provider, held, kept, verdicts: v1, second: v2, second_error: v2 ? null : 'error' in second ? second.error : 'unparseable', dry_run: true };
+  for (const h of held) {
+    await engineEvents.record({ event_type: 'log_loop_close_held', subject_id: h.loop_id, lane: 'BAYS', actor: 'intent-check', detail: { reason: h.reason, submission_id: clip(b.submission_id, 80) || null, codex_entry_id: clip(b.codex_entry_id, 120) || null }, dedupe_key: `log_loop_close_held:${h.loop_id}:${clip(b.submission_id, 80) || Date.now()}` }).catch(() => undefined);
+  }
+  return out;
+}

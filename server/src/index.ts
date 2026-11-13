@@ -999,6 +999,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         describe: (r) => `reply ${r.answers ? 'answers' : 'does not answer'} (${r.checked}): ${String(r.reason ?? '')}`.slice(0, 400),
         hint: 'POST { ask, reply } (or body_b64). Answers { answers, reason, checked: model | phrase | unchecked }. Writes nothing.',
       },
+      /** Loop closes from a log review (13 Nov 2026, intentCheck.ts; SOP 05ccd8ab): each proposed close checked against the log, held open when twice unbacked. Writes events only. */
+      '/api/engine/loop-close-check': {
+        kind: 'loops',
+        store: async (b) => ({ ...(await intentCheck.loopCloseCheck(b)) }),
+        describe: (r) => `loop close check (${r.checked}): ${(r.held as unknown[]).length} held, ${(r.kept as unknown[]).length} kept`.slice(0, 400),
+        hint: 'POST { closes: [{loop_id, what, evidence}], log, submission_id?, codex_entry_id? } (or body_b64). Answers { held: [{loop_id, reason}], kept, checked }.',
+      },
       /** The log pre-check (10 Nov 2026, logPrecheck.ts): the exact Layer 1 review, read live, and the pay it would give. Both read; neither writes. */
       '/api/engine/log-precheck/prompt': {
         kind: 'codex',
