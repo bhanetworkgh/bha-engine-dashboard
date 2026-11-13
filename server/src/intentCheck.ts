@@ -39,6 +39,21 @@ export const CHECKED_AGENTS = new Set(['bays']);
 /** Two misses on one ask and tool within this window raise an incident. */
 const MISS_WINDOW_HOURS = 6;
 const MODEL_TIMEOUT_MS = 25_000;
+/**
+ * Room for the answer (13 Nov 2026): at 300 tokens (200 on the reply check) the JSON was often cut off,
+ * and 31 of 44 intent checks came back with no text at all, so the write went through unchecked.
+ */
+const MAX_TOKENS = 1500;
+
+/** Why a model stopped and what it sent, for an answer that was empty or not JSON. */
+export function stopNote(json: Record<string, unknown>, anthropic: boolean): string {
+  if (anthropic) {
+    const blocks = ((json.content as { type?: string }[]) || []).map((b) => b.type || '?');
+    return `stop ${String(json.stop_reason ?? '?')}, blocks [${blocks.join(', ')}]`;
+  }
+  const c = ((json.choices as { finish_reason?: string; message?: { content?: unknown; reasoning?: unknown } }[]) || [])[0];
+  return `finish ${String(c?.finish_reason ?? '?')}${c?.message?.reasoning ? ', reasoning only' : ''}`;
+}
 const CONTEXT_MESSAGES = 12;
 
 export const ASK_PROPERTY = {
@@ -325,8 +340,8 @@ async function askModel(user: string): Promise<Verdict> {
         headers: anthropic ? { 'x-api-key': r.key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' } : { Authorization: `Bearer ${r.key}`, 'content-type': 'application/json', 'X-Title': 'BHA Engine Dashboard - intent check' },
         body: JSON.stringify(
           anthropic
-            ? { model: 'claude-haiku-5-5', max_tokens: 300, system: SYSTEM, messages: [{ role: 'user', content: user }] }
-            : { model: 'anthropic/claude-haiku-5.5', max_tokens: 300, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: user }] },
+            ? { model: 'claude-haiku-5-5', max_tokens: MAX_TOKENS, system: SYSTEM, messages: [{ role: 'user', content: user }] }
+            : { model: 'anthropic/claude-haiku-5.5', max_tokens: MAX_TOKENS, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: user }] },
         ),
         signal: controller.signal,
       });
@@ -336,7 +351,7 @@ async function askModel(user: string): Promise<Verdict> {
         ? ((json.content as { type?: string; text?: string }[]) || []).filter((b) => b.type === 'text').map((b) => b.text || '').join('')
         : String(((json.choices as { message?: { content?: string } }[]) || [])[0]?.message?.content ?? '');
       const v = parseVerdict(text);
-      if (!v) throw new Error(`answer was not the JSON asked for: ${clip(text, 160)}`);
+      if (!v) throw new Error(`answer was not the JSON asked for (${stopNote(json, anthropic)}): ${clip(text, 160)}`);
       return { ...v, provider: r.provider, error: null };
     } catch (e) {
       errors.push(`${r.provider}: ${e instanceof Error ? (e.name === 'AbortError' ? 'timed out' : e.message) : String(e)}`);
@@ -533,8 +548,8 @@ async function askAnswerModel(user: string): Promise<AnswerVerdict> {
         headers: anthropic ? { 'x-api-key': r.key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' } : { Authorization: `Bearer ${r.key}`, 'content-type': 'application/json', 'X-Title': 'BHA Engine Dashboard - answer check' },
         body: JSON.stringify(
           anthropic
-            ? { model: 'claude-haiku-5-5', max_tokens: 200, system: ANSWER_SYSTEM, messages: [{ role: 'user', content: user }] }
-            : { model: 'anthropic/claude-haiku-5.5', max_tokens: 200, messages: [{ role: 'system', content: ANSWER_SYSTEM }, { role: 'user', content: user }] },
+            ? { model: 'claude-haiku-5-5', max_tokens: MAX_TOKENS, system: ANSWER_SYSTEM, messages: [{ role: 'user', content: user }] }
+            : { model: 'anthropic/claude-haiku-5.5', max_tokens: MAX_TOKENS, messages: [{ role: 'system', content: ANSWER_SYSTEM }, { role: 'user', content: user }] },
         ),
         signal: controller.signal,
       });
@@ -544,7 +559,7 @@ async function askAnswerModel(user: string): Promise<AnswerVerdict> {
         ? ((json.content as { type?: string; text?: string }[]) || []).filter((x) => x.type === 'text').map((x) => x.text || '').join('')
         : String(((json.choices as { message?: { content?: string } }[]) || [])[0]?.message?.content ?? '');
       const v = parseAnswer(text);
-      if (!v) throw new Error(`answer was not the JSON asked for: ${clip(text, 160)}`);
+      if (!v) throw new Error(`answer was not the JSON asked for (${stopNote(json, anthropic)}): ${clip(text, 160)}`);
       return { ...v, checked: 'model', provider: r.provider, error: null };
     } catch (e) {
       errors.push(`${r.provider}: ${e instanceof Error ? (e.name === 'AbortError' ? 'timed out' : e.message) : String(e)}`);
@@ -599,7 +614,7 @@ async function callModel(system: string, user: string, maxTokens: number): Promi
       const text = anthropic
         ? ((json.content as { type?: string; text?: string }[]) || []).filter((x) => x.type === 'text').map((x) => x.text || '').join('')
         : String(((json.choices as { message?: { content?: string } }[]) || [])[0]?.message?.content ?? '');
-      if (!text.trim()) throw new Error('no answer text');
+      if (!text.trim()) throw new Error(`no answer text (${stopNote(json, anthropic)})`);
       return { text, provider: r.provider };
     } catch (e) {
       errors.push(`${r.provider}: ${e instanceof Error ? (e.name === 'AbortError' ? 'timed out' : e.message) : String(e)}`);
@@ -650,14 +665,14 @@ export async function loopCloseCheck(b: Record<string, unknown>): Promise<Record
   if (!log.trim()) return { checked: 'unchecked', error: 'no log text was sent', held: [], kept: closes.map((c) => c.loop_id), dry_run: true };
   const ask = (list: typeof closes) =>
     `The session log:\n${log}\n\nThe proposed closes:\n${list.map((c) => `- ${c.loop_id}: the loop asks "${c.what}". The reviewer's evidence: "${c.evidence}"`).join('\n')}`;
-  const first = await callModel(CLOSE_SYSTEM, ask(closes), 1200);
+  const first = await callModel(CLOSE_SYSTEM, ask(closes), 2500);
   if ('error' in first) return { checked: 'unchecked', error: first.error, held: [], kept: closes.map((c) => c.loop_id), dry_run: true };
   const v1 = parseCloses(first.text);
   if (!v1) return { checked: 'unchecked', error: `answer was not the JSON asked for: ${clip(first.text, 160)}`, held: [], kept: closes.map((c) => c.loop_id), dry_run: true };
   const doubted = closes.filter((c) => v1.find((v) => v.loop_id === c.loop_id)?.backed === false);
   if (!doubted.length) return { checked: 'model', provider: first.provider, held: [], kept: closes.map((c) => c.loop_id), verdicts: v1, dry_run: true };
   // Retry once, on a fresh call, for the doubted ones only.
-  const second = await callModel(CLOSE_SYSTEM, ask(doubted), 800);
+  const second = await callModel(CLOSE_SYSTEM, ask(doubted), MAX_TOKENS);
   const v2 = 'error' in second ? null : parseCloses(second.text);
   const held = doubted
     .filter((c) => (v2 ? v2.find((v) => v.loop_id === c.loop_id)?.backed !== true : true))
@@ -696,7 +711,7 @@ export async function rewriteCheck(b: Record<string, unknown>): Promise<Record<s
   const withNote = rewrites.filter((r) => r.note.trim());
   if (!withNote.length) return { checked: 'nothing_to_check', missed: [], addressed: rewrites.map((r) => r.platform), dry_run: true };
   const user = withNote.map((r) => `--- ${r.platform}\nJason's note: "${r.note}"\nThe rejected text:\n${r.old}\nThe rewrite:\n${r.new}`).join('\n\n');
-  const res = await callModel(REWRITE_SYSTEM, user, 800);
+  const res = await callModel(REWRITE_SYSTEM, user, MAX_TOKENS);
   if ('error' in res) return { checked: 'unchecked', error: res.error, missed: [], addressed: rewrites.map((r) => r.platform), dry_run: true };
   let verdicts: { platform: string; addressed: boolean; reason: string }[] | null = null;
   try {

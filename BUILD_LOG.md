@@ -15283,3 +15283,10 @@ Files:      server/src/intentCheck.ts, server/test/intent-check.test.cjs, CLAUDE
 Problem:    "BHA_Dashboard_send_nudge -- ask_not_found: "Log review nudge -- Jason" is not one of Bays' scheduled tasks (the list returned it as "Log review nudge -- Jason (every 6h)")". resolveAsk matched the task name exactly, and Bays drops the bracketed schedule note. All 11 of Bays' tasks carry one, so any scheduled write could have been refused the same way.
 Fix:        taskKey and matchTask: an exact match first, else the one task whose name is the same once case, dash style, spacing and a trailing "(…)" are set aside. Two tasks alike match neither. Checked against the 11 live task names: all stay distinct.
 Decision:   Loosened on the server rather than the prompt, because the task name is Bays' to say and the server's job is to know which task it means, not to spell-check it.
+
+## 2026-11-13 18:40 — The intent check had room to answer
+Intent:     Check the read-back standard (11:20 entry) on its first day before logging it.
+Files:      server/src/intentCheck.ts, BUILD_LOG.md
+Problem:    engine_intent_checks held 44 rows: 4 match, 3 ask_not_found (the scheduled-task name, fixed 18:15), 2 ask_required, and 35 unchecked. 31 of the 35 read "anthropic: answer was not the JSON asked for: ; openrouter: answer was not the JSON asked for: ", an empty answer from both; 3 were JSON cut off mid-reason. Every model call here asked for 300 tokens (200 on the reply check), so the write went through unchecked and the check was mostly not checking.
+Fix:        MAX_TOKENS 1500 on the intent and reply checks and the rewrite check, 2500 on the first loop-close pass. An empty or non-JSON answer now names why the model stopped and what it sent (stopNote: stop_reason and block types on Anthropic, finish_reason on OpenRouter), so the next empty answer says its own cause.
+Decision:   Raised the room rather than shortening the prompt: the answer is a short JSON, so a larger limit costs nothing on a normal answer and only matters when the model needs it.
