@@ -3219,7 +3219,9 @@ at `in_corpus` whose text is the text Hardik checked, and with none it tells the
 person; `CST_HELP_PREVIEW_KEY` (testing) returns every page marked "approved" or "draft, not for customers", with
 what is not written yet and who owes it. Going live is moving the tool from the preview key to the live key. No
 default for either: unset is 503 naming the variable; a wrong key is 401. Every call is a `read` (or
-`unauthorised`) line on `engine_writes`, kind `help_pages`. `npm run test:cst-help`.
+`unauthorised`) line on `engine_writes`, kind `help_pages`. **A page with an open gap is held on the preview key**
+(13 Nov 2026, Jason: rack care stays out of CST until Jegan's sources and deep-clean confirmation are logged): the
+agent gets its title and who owes it under `held`, never its text. `npm run test:cst-help`.
 
 **The missing Codex log check** (2026-10-22, Destiny — DW-1792516757092-9EP8; Jason, 20 Oct: a
 standing mechanism, not a reminder, after Kavin's 20 Oct log broke on submission and nothing said so).

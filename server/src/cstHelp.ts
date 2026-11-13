@@ -9,8 +9,11 @@
  *
  *   CST_HELP_KEY          live calls. Only pages at `in_corpus` (Hardik checked that exact text and it
  *                         is in cst-help-manuals). Nothing else is ever returned on this key.
- *   CST_HELP_PREVIEW_KEY  the draft agent while we test it. Every page, each marked with its stage,
- *                         and every page that has not passed marked "draft, not for customers".
+ *   CST_HELP_PREVIEW_KEY  the draft agent while we test it. Every page without an open gap, each
+ *                         marked with its stage, and every page that has not passed marked "draft, not
+ *                         for customers". A page with an open gap is held: the agent is told it exists
+ *                         and who owes it, never its text (13 Nov 2026, Jason: rack care stays out of
+ *                         CST until Jegan's sources and deep-clean confirmation are logged).
  *
  * Going live is moving the agent's tool from the preview key to the live key. No default for either:
  * unset, the route answers 503 and says which variable. The answer is the page text and its stage,
@@ -48,10 +51,24 @@ export interface AgentPage {
   not_written_yet: Array<{ owner: string; note: string }>;
 }
 
-/** Pure: what the agent is handed for a mode. A live call never sees a page that has not passed. */
-export function agentView(pages: HelpPage[], mode: Mode): { mode: Mode; pages: AgentPage[]; instruction: string } {
+export interface HeldPage {
+  page_id: string;
+  title: string;
+  /** Who owes the parts still missing. The page's text is not handed over. */
+  waiting_on: string[];
+}
+
+/** Pure: what the agent is handed for a mode. A live call never sees a page that has not passed, and
+ * the preview key never hands over a page with an open gap. */
+export function agentView(pages: HelpPage[], mode: Mode): { mode: Mode; pages: AgentPage[]; held: HeldPage[]; instruction: string } {
   const passed = (p: HelpPage) => p.stage === 'in_corpus' && !!p.checked_sha256 && p.checked_sha256 === p.body_sha256;
-  const chosen = mode === 'live' ? pages.filter(passed) : pages;
+  const open = (p: HelpPage) => (p.gaps ?? []).length > 0;
+  const chosen = mode === 'live' ? pages.filter(passed) : pages.filter((p) => !open(p));
+  const held: HeldPage[] = mode === 'live' ? [] : pages.filter(open).map((p) => ({
+    page_id: p.page_id,
+    title: p.title,
+    waiting_on: [...new Set(p.gaps.map((g) => g.owner))],
+  }));
   const out = chosen.map((p) => ({
     page_id: p.page_id,
     title: p.title,
@@ -64,6 +81,6 @@ export function agentView(pages: HelpPage[], mode: Mode): { mode: Mode; pages: A
       ? out.length
         ? 'Answer only from these approved pages. If they do not cover the question, say so and offer to pass it to a person.'
         : 'No help page has been approved yet. Tell the caller you cannot answer that today and offer to pass it to a person.'
-      : 'TEST MODE. A page marked "draft, not for customers" has not passed review: say it is not yet confirmed, and never present it as BHA\'s answer. Never fill in anything listed under not_written_yet.';
-  return { mode, pages: out, instruction };
+      : 'TEST MODE. A page marked "draft, not for customers" has not passed review: say it is not yet confirmed, and never present it as BHA\'s answer. Never fill in anything listed under not_written_yet. A page under held is not written yet: do not answer its subject, say the team is still writing it and offer to pass the question to a person.';
+  return { mode, pages: out, held, instruction };
 }

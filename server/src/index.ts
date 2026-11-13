@@ -417,7 +417,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       return send(res, m.status, { ok: false, reason: m.reason });
     }
     const view = cstHelp.agentView(await helpPages.list(), m.mode);
-    void mirror.logWrite({ endpoint: p, kind: 'help_pages', method, key_label: cstHelp.KEY_VARS[m.mode], outcome: 'read', detail: `${m.mode}: ${view.pages.length} page(s) — ${view.pages.map((x) => `${x.page_id} ${x.status}`).join(', ') || 'none'}`, ms: Date.now() - t0 });
+    void mirror.logWrite({ endpoint: p, kind: 'help_pages', method, key_label: cstHelp.KEY_VARS[m.mode], outcome: 'read', detail: `${m.mode}: ${view.pages.length} page(s) — ${view.pages.map((x) => `${x.page_id} ${x.status}`).join(', ') || 'none'}${view.held.length ? `; held: ${view.held.map((x) => x.page_id).join(', ')}` : ''}`, ms: Date.now() - t0 });
     return send(res, 200, { ok: true, ...view }, { 'Cache-Control': 'no-store' });
   }
   if (p === '/api/public/vfarm-doctrine' && method === 'GET') {

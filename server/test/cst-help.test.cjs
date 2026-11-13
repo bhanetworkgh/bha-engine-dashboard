@@ -35,8 +35,12 @@ ok('live sees only in_corpus pages whose text is the text Hardik checked (a chec
 assert.match(c.agentView([pages[2]], 'live').instruction, /No help page has been approved/);
 ok('live with nothing approved tells the agent to say so and offer a person');
 const pv = c.agentView(pages, 'preview');
-assert.deepEqual(pv.pages.map((p) => [p.page_id, p.status]), [['a', 'approved'], ['b', 'draft, not for customers'], ['c', 'draft, not for customers'], ['d', 'draft, not for customers']]);
-assert.deepEqual(pv.pages[2].not_written_yet, [{ owner: 'Jegan', note: 'sources' }]);
+assert.deepEqual(pv.pages.map((p) => [p.page_id, p.status]), [['a', 'approved'], ['b', 'draft, not for customers'], ['d', 'draft, not for customers']]);
 assert.match(pv.instruction, /TEST MODE/);
-ok('preview sees every page, each marked by stage, with what is not written yet and who owes it');
+ok('preview sees every page with no open gap, each marked by stage');
+assert.deepEqual(pv.held, [{ page_id: 'c', title: 'c', waiting_on: ['Jegan'] }]);
+assert.ok(!JSON.stringify(pv).includes('"body":"C"'));
+assert.match(pv.instruction, /held is not written yet/);
+assert.deepEqual(live.held, []);
+ok('a page with an open gap is held on the preview key: its title and who owes it, never its text');
 console.log(`\n${n} checks passed`);
