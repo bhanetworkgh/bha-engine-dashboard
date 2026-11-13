@@ -904,7 +904,7 @@ reasonable about.
   commercial LANE-… ids, never work-lane tags, so a work lane reaches research
   only through `engine_lane_profiles.linked_lanes` (migration 39), set with
   `set_lane_profile`, empty until somebody links them.
-- **PR #23, the acceptance-evidence validator, is merged** (10 Nov 2026, Destiny, after review): `server/src/acceptanceEvidence.ts`, Hardik's, pure and called by nothing yet; its field mapping and combinations wait on Jason. `npm run test:acceptance-evidence`.
+- **One acceptance validator: `server/src/acceptanceEvidence.ts`** (PR #23 merged 10 Nov 2026; PR #25 merged 13 Nov 2026, Destiny, after review; Jason's SOP 926a5e0e: PR #25 is the single canonical Acceptance-State Contract v0 validator and PR #24, the standalone checker, is superseded and never lands). Hardik's, contract `bha.acceptance_evidence.v2`, pure and called by nothing yet: every pairing of runtime state and closure state blocks until Jason lists the allowed ones, `acceptance_pass` true is always refused, COMMERCIAL_OK needs Jason as `approver_id`, and nothing it returns allows, authorizes or charges. The evidence field names (`contract_evidence_refs`, `implementation_evidence_refs`) are accepted; the `actor_id`, `gate_id` and delegation formats stay proposed until the trusted writer is built (LOOP-1794326998164-O7CU). A second validator is never added beside it. `npm run test:acceptance-evidence`.
 - **One token per agent, scoped on the server** (decision 2026-09-28, Destiny —
   Agent Upgrade Plan step 1.4). `READONLY_SECRETS_NORTH_STAR` (read, 10 tools),
   `MCP_AGENT_TOKEN_RESEARCH_TWIN` (write, 7) and `MCP_AGENT_TOKEN_BAYS` (write,
