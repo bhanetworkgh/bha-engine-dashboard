@@ -1802,6 +1802,34 @@ one rule for every sharing change has no exception to remember. Unlike
 file. Audited on `engine_mcp_writes` (kind `google_drive`). `npm run
 test:approvals` pins it (checks 13 to 15).
 
+**Read back, validate, retry once, then an incident** (13 Nov 2026, Destiny — Jason in C0AF7AGC2UV
+1794497180.571389; SOPs 4c413e97 and 05ccd8ab; watch DW-1794529248141-RHRX). The standard for every step
+where an agent turns an ask into a decision, a loop move or a reply. `server/src/intentCheck.ts`, migration 135,
+`engine_intent_checks`. Four places:
+- **Bays' writes, before they land.** On Bays' token, `update_record` / `create_record` / `archive_record` on
+  loops, `move_loop`, the four Decision Watch writes, `send_nudge`, `post_file` and `edit_sop` run the check in
+  `mcp/index.ts` before the tool: the ask is read from Slack by this server (the `ask` argument Bays is shown on
+  those tools: channel, thread and message ts from its context block; a tool carrying a channel and thread falls
+  back to the newest message a person posted there; a scheduled run names its task, which must be one Bays has),
+  and Haiku answers whether the action (the loop and what is done to it, a watch's owner and wording, who a
+  message goes to and what it says) matches. A miss writes nothing and answers `intent_mismatch` with the reason;
+  a second miss on the same ask and tool within 6 hours answers `intent_mismatch_repeated` and opens a warning
+  incident on the Bays lane (subsystem AGENT, class INTENT_MISMATCH), copied to Engine health. No ask is
+  `ask_required`, not counted as a miss. A model that cannot be reached lets the write through as `unchecked`
+  with one alert an hour. Dry runs, approved calls and every other caller are not checked.
+- **Every Bays and North Star reply** (n8n `Bays — Agent Delivery`, Slack and panel paths, and `North Star —
+  Agent Delivery`, Logstream's guidance asks included): `POST /api/engine/answer-check` before anything is
+  posted. A miss is asked once more on a fresh memory; a second miss is delivered as a failure and raised. The
+  Codex summary chain's own check (12 Nov) stays as a second line.
+- **Loop closes from a log review** (`Bays — Submit Actions`): `POST /api/engine/loop-close-check` checks each
+  proposed close against the log, once more on a fresh call when doubted; a close both calls find unbacked is
+  advanced instead, with the reason on the Codex, and one `log_loop_close_held` event. A close is never added.
+- **Media Twin rewrites** (`Media Twin — Rewrite Draft`): `POST /api/engine/rewrite-check` checks each rewritten
+  platform against Jason's note; a miss is asked once more on a fresh memory; a second miss saves nothing and
+  raises.
+Add a new intent-driven write tool to `intentCheck.CHECKED` with its `describe` line, or it is not checked.
+`npm run test:intent-check`.
+
 **Outbound Slack has a destination guard** (2026-10-10, Destiny — agent maturity
 re-score). `send_nudge` and `post_file` (`server/src/mcp/slackTools.ts`) send at
 once to a person with a Builder Profile or to an approver, which is every DM
