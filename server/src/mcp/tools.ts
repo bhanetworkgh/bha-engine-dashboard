@@ -76,6 +76,7 @@ import { REGISTRY_READ_TOOLS, REGISTRY_WRITE_TOOLS } from './registryTools';
 import { TRUE_HOME_READ_TOOLS } from './trueHomeTools';
 import { BALANCE_READ_TOOLS } from './balanceTools';
 import { SLACK_APPS_READ_TOOLS } from './slackAppsTools';
+import { OUTAGE_READ_TOOLS } from './outageTools';
 import { SERVICE_READ_TOOLS, SERVICE_WRITE_TOOLS } from './serviceTools';
 import { CODE_CHECK_READ_TOOLS, CODE_CHECK_WRITE_TOOLS } from './codeCheckTools';
 import { REVIEW_CARD_WRITE_TOOLS } from './reviewCardTools';
@@ -1146,6 +1147,7 @@ export const TOOLS: ToolDefinition[] = [
   ...TRUE_HOME_READ_TOOLS,
   ...BALANCE_READ_TOOLS,
   ...SLACK_APPS_READ_TOOLS,
+  ...OUTAGE_READ_TOOLS,
   ...SERVICE_READ_TOOLS,
   ...CODE_CHECK_READ_TOOLS,
   // The one that is not a read.

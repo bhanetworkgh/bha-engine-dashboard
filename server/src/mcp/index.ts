@@ -369,6 +369,9 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         'read_providers',
         // 2026-11-11: the Sovereign Context Layer (see North Star's entry).
         'read_true_home', 'read_record_history',
+        // 2026-11-13 (Destiny, Jason on 408M 2 Nov): the rack's outages by cause and whether each counts
+        // against a run, so Genie answers reliability questions from the encoded rule, never a raw count.
+        'classify_outages',
       ]),
     },
   ] as Array<Omit<AgentKey, 'secret'>>
