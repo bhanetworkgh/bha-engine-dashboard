@@ -50,4 +50,13 @@ assert.equal(lp.earlierLines(null), 'The check could not run.');
 assert.throws(() => lp.resolveLayer0('={{ $json.other }}', 'x', 'y', 'z'), /does not know how to fill/);
 ok('Layer 0 prompt filled as the run fills it; an unknown expression refused');
 
+{
+  const tpl = "=Log: {{ $json.fullTranscript }}\nTitle: {{ ($json.codeReviewLog || {}).session_description || 'not given' }}\nURL: {{ ($json.codeReviewLog || {}).session_url || 'none' }}\nReview: {{ JSON.stringify($('Code Review Result').first().json) }}";
+  const out = lp.resolvePrompt(tpl, 'T', 'S', { description: 'My session', session_url: '' });
+  assert.match(out, /Title: My session/);
+  assert.match(out, /URL: none/);
+  assert.match(out, /No code review in a pre-check/);
+  ok('code review lines filled from the request, the fallback, or a plain no-review line');
+}
+
 console.log(`\nlog-precheck: ${n} checks passed`);

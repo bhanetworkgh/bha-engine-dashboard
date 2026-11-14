@@ -48,13 +48,26 @@ export class PrecheckError extends Error {
   }
 }
 
+/** What the code review lines of the review's prompt read in a pre-check (14 Nov 2026, D2 added them). The code review
+ *  runs at submission, so a pre-check has none and says so; the description, recording and summary come from the
+ *  request when given, else the expression's own fallback, else "not given". Pure. */
+export function codeReviewFill(e: string, extra: Obj): string {
+  const key = (e.match(/codeReviewLog \|\| \{\}\)\.(\w+)/) ?? [])[1] ?? '';
+  const given: Obj = { session_description: extra.description, description: extra.description, session_url: extra.session_url, url: extra.session_url, summary: extra.summary };
+  const v = key ? given[key] : undefined;
+  if (typeof v === 'string' && v.trim()) return v.trim();
+  if (key) return (e.match(/\|\|\s*'([^']*)'\s*\}\}$/) ?? [])[1] ?? 'not given';
+  return 'No code review in a pre-check: it runs at submission, before this review.';
+}
+
 /** The review's prompt with the log in place of its two expressions. Pure. */
-export function resolvePrompt(template: string, transcript: string, source: string): string {
+export function resolvePrompt(template: string, transcript: string, source: string, extra: Obj = {}): string {
   let t = template.startsWith('=') ? template.slice(1) : template;
   const exprs = t.match(/\{\{[\s\S]*?\}\}/g) ?? [];
   for (const e of exprs) {
     if (/fullTranscript/.test(e)) t = t.split(e).join(transcript);
     else if (/Loom Path|Otter Path|\.source/.test(e)) t = t.split(e).join(source);
+    else if (/codeReviewLog|Code Review/.test(e)) t = t.split(e).join(codeReviewFill(e, extra));
     else throw new PrecheckError(409, `The review's prompt now carries an expression the pre-check does not know how to fill (${e.slice(0, 120)}). Update logPrecheck.resolvePrompt before trusting a pre-check.`);
   }
   return t;
@@ -147,7 +160,7 @@ export async function prompt(b: Obj): Promise<Obj> {
     earlier = null;
   }
   const layer0 = { system_message: l0system, prompt: resolveLayer0(String(l0params.text ?? ''), transcript, source, earlierLines(earlier)), schema: l0schema };
-  return { system_message: system, prompt: resolvePrompt(template, transcript, source), schema, layer0, source, transcript, session_url: sessionUrl, workflow_version: w.versionId, read_at: new Date().toISOString(), dry_run: true };
+  return { system_message: system, prompt: resolvePrompt(template, transcript, source, { description: b.description, session_url: sessionUrl, summary: b.summary }), schema, layer0, source, transcript, session_url: sessionUrl, workflow_version: w.versionId, read_at: new Date().toISOString(), dry_run: true };
 }
 
 /** The review's answer as the Codex row would carry it. The agent wraps it in `output`. */
