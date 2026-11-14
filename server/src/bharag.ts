@@ -362,6 +362,11 @@ export const INGEST_KEY_VARS = {
    */
   north_star: 'BHARAG_NORTH_STAR_KEY',
   channel_archives: 'BHARAG_CHANNEL_ARCHIVES_KEY',
+  /**
+   * 14 Nov 2026 (D4, BHA RSS): the daily outside digest (outsideDigest.ts). Only the digest goes to BHARAG;
+   * every raw item stays in BHA RSS's own tables. Set it to the rss-feed workspace key ragingester wrote with.
+   */
+  outside: 'BHARAG_OUTSIDE_KEY',
 } as const;
 export type IngestWorkspace = keyof typeof INGEST_KEY_VARS;
 

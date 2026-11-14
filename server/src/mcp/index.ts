@@ -158,6 +158,8 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
       env: 'READONLY_SECRETS_NORTH_STAR',
       access: 'read',
       tools: new Set([
+        // 2026-11-14 (D4): the daily outside digest from BHA RSS, the one read of outside sources.
+        'read_outside_digest',
         'read_slack', 'read_open_loops', 'get_priority_evidence', 'find_records', 'get_page_data',
         'get_health', 'get_recovery_status', 'list_n8n_workflows', 'get_n8n_workflow', 'read_slack_file',
         'rank_lanes', 'lane_health',
@@ -194,6 +196,8 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
       env: 'MCP_AGENT_TOKEN_MEDIA_TWIN',
       access: 'read',
       tools: new Set([
+        // 2026-11-14 (D4): the daily outside digest from BHA RSS, the one read of outside sources.
+        'read_outside_digest',
         'read_media_posts', 'read_slack', 'find_records', 'read_slack_file',
         'read_media_doctrine', 'read_publication_decision', 'read_media_post_log',
         'read_engine_events', 'read_sop', 'read_evidence', 'get_vfarm_gates',
@@ -206,6 +210,8 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
       env: 'MCP_AGENT_TOKEN_RESEARCH_TWIN',
       access: 'write',
       tools: new Set([
+        // 2026-11-14 (D4): the daily outside digest from BHA RSS, the one read of outside sources.
+        'read_outside_digest',
         'find_records', 'read_publication_decision', 'read_doctrine_gap_summary', 'write_research_finding', 'write_commercial_card_fields', 'compute_lane_state',
         'queue_followup_research', 'update_watched_client_question', 'create_client_report_doc',
         // 2026-10-10: a fault's own history, read before writing the finding on a Logstream job.
@@ -232,6 +238,8 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
       env: 'MCP_AGENT_TOKEN_BAYS',
       access: 'write',
       tools: new Set([
+        // 2026-11-14 (D4): the daily outside digest from BHA RSS, the one read of outside sources.
+        'read_outside_digest',
         // 2026-11-05: a Stage 1 agreement to Destiny's or Jason's own DM, never through the agent.
         'send_agreement',
         // 2026-11-04: the Media Twin's drafts whole, so a reliability claim is read in full, never from its hook.
@@ -335,6 +343,8 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
       env: 'READONLY_SECRETS_GENIE',
       access: 'read',
       tools: new Set([
+        // 2026-11-14 (D4): the daily outside digest from BHA RSS, the one read of outside sources.
+        'read_outside_digest',
         'read_logstream', 'read_engine_events',
         // 2026-10-14: EG4N (LOOP-1791557096136-EG4N). "Are we ready?" and "can we say X?" are
         // answered from the T0NO claim and the current VRFK decision for surface genie_ns, the

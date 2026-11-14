@@ -220,6 +220,9 @@ services:
       # reads AIRTABLE_TOKEN, which is the variable actually set on the service.
       # Without it the server says so at boot and every loop edit is marked as
       # not having reached Airtable.
+      # 14 Nov 2026 (D4): the daily outside digest from BHA RSS goes to BHARAG on this key (the rss-feed workspace key).
+      - key: BHARAG_OUTSIDE_KEY
+        sync: false
       - key: AIRTABLE_TOKEN
         sync: false
       # One variable per base, each named for its base (2026-09-14, Destiny), so

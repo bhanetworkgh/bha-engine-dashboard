@@ -4742,6 +4742,27 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `ALTER TABLE engine_pay_notes ADD CONSTRAINT engine_pay_notes_reason_tag_check CHECK (reason_tag IS NULL OR reason_tag IN ('LOCAL_ONLY', 'RELOG_OLD_WORK', 'PARTIAL_SCOPE', 'TEST_ONLY', 'OTHER', 'INSUFFICIENT_PROOF', 'AWAITING_REVIEW', 'BLOCKED_EXTERNAL', 'NEEDS_LIVE_EVENT', 'WAITING_ON_CUSTOMER', 'EXTRA_LOG'))`,
     ],
   },
+  {
+    id: 137,
+    name: 'The outside digest from BHA RSS, one row per day (14 Nov 2026, Destiny, D4)',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_outside_digests (
+        digest_date date PRIMARY KEY,
+        title text NOT NULL,
+        body text NOT NULL,
+        period_start timestamptz NOT NULL,
+        period_end timestamptz NOT NULL,
+        items_used integer NOT NULL DEFAULT 0,
+        sources_used integer NOT NULL DEFAULT 0,
+        model text,
+        items jsonb NOT NULL DEFAULT '[]'::jsonb,
+        bharag_doc_id text,
+        bharag_detail text,
+        received_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

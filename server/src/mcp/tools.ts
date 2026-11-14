@@ -71,6 +71,7 @@ import { AGREEMENT_WRITE_TOOLS } from './agreementTools';
 import { CHARGE_GATE_READ_TOOLS, CHARGE_GATE_WRITE_TOOLS } from './chargeGateTools';
 import { ESSENCE_READ_TOOLS, ESSENCE_WRITE_TOOLS } from './essenceTools';
 import { HELP_READ_TOOLS, HELP_WRITE_TOOLS } from './helpPageTools';
+import { OUTSIDE_READ_TOOLS } from './outsideDigestTools';
 import { EVIDENCE_READ_TOOLS, EVIDENCE_WRITE_TOOLS } from './evidenceTools';
 import { REGISTRY_READ_TOOLS, REGISTRY_WRITE_TOOLS } from './registryTools';
 import { TRUE_HOME_READ_TOOLS } from './trueHomeTools';
@@ -1142,6 +1143,7 @@ export const TOOLS: ToolDefinition[] = [
   ...PROVIDER_READ_TOOLS,
   ...GENIE_BUILDER_READ_TOOLS,
   ...HELP_READ_TOOLS,
+  ...OUTSIDE_READ_TOOLS,
   ...EVIDENCE_READ_TOOLS,
   ...REGISTRY_READ_TOOLS,
   // 2026-11-11: the Sovereign Context Layer's reads: where a fact lives, and a record's earlier versions.

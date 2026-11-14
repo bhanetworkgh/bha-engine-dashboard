@@ -81,6 +81,7 @@ import * as mediaWeekly from './mediaWeekly';
 import * as payNote from './payNote';
 import * as payCard from './payCard';
 import * as narrationAudio from './narrationAudio';
+import * as outsideDigest from './outsideDigest';
 import * as reviewCard from './reviewCard';
 import * as paySuggest from './paySuggest';
 import * as logPrecheck from './logPrecheck';
@@ -934,6 +935,20 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         },
         describe: (r) => String(r.message ?? '').slice(0, 400),
         hint: 'POST { submission_id, removed_by (Destiny or Jason, Slack id), reason, confirm "DELETE <submission_id>", dry_run? }. Only the note of a log no longer on the Codex, with nothing released.',
+      },
+      /** The daily outside digest from BHA RSS (14 Nov 2026, D4, outsideDigest.ts): stored, sent to BHARAG once, read with read_outside_digest. */
+      '/api/engine/outside-digest': {
+        kind: 'outside_digests',
+        store: async (b) => {
+          try {
+            return await outsideDigest.store(b);
+          } catch (e) {
+            if (e instanceof outsideDigest.DigestError) throw new systemFeeds.FeedError(e.status, e.message);
+            throw e;
+          }
+        },
+        describe: (r) => `${r.dry_run ? 'dry run ' : ''}outside digest ${r.digest_date}${r.stored ? ` ${r.stored}, BHARAG ${r.ingested_to_bharag ? 'in' : `NOT in (${r.bharag})`}` : ''}`.slice(0, 400),
+        hint: 'POST { digest_date (YYYY-MM-DD), title, body, period_start, period_end, items_used, sources_used, model?, items?: [{title,url,kind,source}], dry_run? }, or { body_b64 }. One row per day; a repeat replaces it.',
       },
       /** Narration to one mp3 in Destiny's or Jason's DM, made here because n8n ran out of memory joining it (11 Nov 2026, narrationAudio.ts). */
       '/api/engine/narration-audio': {
