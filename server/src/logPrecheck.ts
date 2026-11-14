@@ -67,7 +67,7 @@ export function resolvePrompt(template: string, transcript: string, source: stri
   for (const e of exprs) {
     if (/fullTranscript/.test(e)) t = t.split(e).join(transcript);
     else if (/Loom Path|Otter Path|\.source/.test(e)) t = t.split(e).join(source);
-    else if (/codeReviewLog|Code Review/.test(e)) t = t.split(e).join(codeReviewFill(e, extra));
+    else if (/codeReview|Code Review/i.test(e)) t = t.split(e).join(codeReviewFill(e, extra));
     else throw new PrecheckError(409, `The review's prompt now carries an expression the pre-check does not know how to fill (${e.slice(0, 120)}). Update logPrecheck.resolvePrompt before trusting a pre-check.`);
   }
   return t;

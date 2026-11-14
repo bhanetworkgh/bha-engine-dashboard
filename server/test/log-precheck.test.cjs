@@ -51,7 +51,7 @@ assert.throws(() => lp.resolveLayer0('={{ $json.other }}', 'x', 'y', 'z'), /does
 ok('Layer 0 prompt filled as the run fills it; an unknown expression refused');
 
 {
-  const tpl = "=Log: {{ $json.fullTranscript }}\nTitle: {{ ($json.codeReviewLog || {}).session_description || 'not given' }}\nURL: {{ ($json.codeReviewLog || {}).session_url || 'none' }}\nReview: {{ JSON.stringify($('Code Review Result').first().json) }}";
+  const tpl = "=Log: {{ $json.fullTranscript }}\nTitle: {{ ($json.codeReviewLog || {}).session_description || 'not given' }}\nURL: {{ ($json.codeReviewLog || {}).session_url || 'none' }}\nReview: {{ JSON.stringify($('Code Review Result').first().json) }}\nCR: {{ $json.codeReview ? JSON.stringify($json.codeReview) : 'The code review did not run on this log.' }}";
   const out = lp.resolvePrompt(tpl, 'T', 'S', { description: 'My session', session_url: '' });
   assert.match(out, /Title: My session/);
   assert.match(out, /URL: none/);
