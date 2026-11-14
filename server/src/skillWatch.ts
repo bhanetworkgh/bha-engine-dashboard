@@ -29,6 +29,36 @@ type Baseline = { version: string | null; skills: string[] };
 const isDict = (v: unknown): v is Dict => typeof v === 'object' && v !== null && !Array.isArray(v);
 const KEY = (id: string) => `skill_watch.live.${id}`;
 
+/**
+ * A skill's name without the suffix n8n's 14 Nov 2026 update added when it moved
+ * every skill into one project library with unique names: a backup's copy became
+ * "Open loops (Bays (OpenRouter backup))". Compared by this, a rename is not a loss. Pure.
+ */
+export function baseName(name: string, agentName: string): string {
+  const suffix = ` (${agentName})`;
+  return name.endsWith(suffix) ? name.slice(0, -suffix.length) : name;
+}
+
+/**
+ * What one read says against the baseline. Pure.
+ * - `lost`: skills the baseline held that this read does not, by base name.
+ * - `same_version`: the active version did not change. A published version is
+ *   immutable, so a loss on the same version is n8n reading it differently (as
+ *   its 14 Nov update did), not a publish; the alert says so.
+ * - `keep_baseline`: on a loss without a new publish the baseline is kept, so a
+ *   bad read never becomes the new normal and the next pass says it again.
+ *   (On 14 Nov the watch saved the empty read and forgot what was there.)
+ */
+export function judge(before: Baseline | null, version: string, skills: string[], agentName: string): { lost: string[]; same_version: boolean; keep_baseline: boolean; baseline: Baseline } {
+  const now = skills.map((n) => baseName(n, agentName));
+  if (!before) return { lost: [], same_version: false, keep_baseline: false, baseline: { version, skills: now } };
+  const had = before.skills.map((n) => baseName(n, agentName));
+  const lost = had.filter((n) => !now.includes(n));
+  const same_version = before.version === version;
+  const keep_baseline = lost.length > 0 && same_version;
+  return { lost, same_version, keep_baseline, baseline: keep_baseline ? before : { version, skills: now } };
+}
+
 /** The skills one get_agent answer lists, by name, falling back to the id. Pure. */
 export function liveSkills(result: Dict): string[] {
   const config = isDict(result.config) ? result.config : {};
@@ -56,13 +86,14 @@ export async function pass(read: Read = n8nMcp.getAgent): Promise<{ checked: num
 
       const held = await getMeta(KEY(row.agent_id));
       const before: Baseline | null = held ? JSON.parse(held) : null;
-      const lost = before ? publishGate.droppedSkills(before.skills.map((name) => ({ name })), skills.map((name) => ({ id: name, name }))) : [];
-      if (lost.length) {
-        out.lost.push(`${row.name}: ${lost.join(', ')}`);
-        const said = await publishGate.onSkillsDropped({ agent_id: row.agent_id, name: row.name, version, from: before?.version ?? null, lost, left: skills.length });
+      const j = judge(before, version, skills, row.name);
+      if (j.lost.length) {
+        const why = j.same_version ? ' (same published version: n8n now reads it differently; nothing was published)' : '';
+        out.lost.push(`${row.name}: ${j.lost.join(', ')}${why}`);
+        const said = await publishGate.onSkillsDropped({ agent_id: row.agent_id, name: row.name, version, from: before?.version ?? null, lost: j.lost, left: skills.length, same_version: j.same_version });
         if (said === 'failed') continue; // baseline kept, so the next pass says it again
       }
-      await setMeta(KEY(row.agent_id), JSON.stringify({ version, skills } satisfies Baseline));
+      if (!j.keep_baseline) await setMeta(KEY(row.agent_id), JSON.stringify(j.baseline satisfies Baseline));
     } catch (e) {
       out.unread.push(`${row.name}: ${e instanceof Error ? e.message : String(e)}`.slice(0, 300));
     }

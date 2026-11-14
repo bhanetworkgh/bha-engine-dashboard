@@ -75,8 +75,13 @@ export function evalKey(name: string): string | null {
 }
 
 /** The skill names a recorded agent held and the new read no longer has. Pure. */
-export function droppedSkills(before: unknown, after: { name: string | null; id: string }[]): string[] {
-  const label = (s: { id?: unknown; name?: unknown }) => String(s.name ?? s.id ?? '');
+export function droppedSkills(before: unknown, after: { name: string | null; id: string }[], agentName?: string): string[] {
+  // n8n's 14 Nov 2026 update renamed a backup's copy of a skill to "<name> (<agent name>)"; that is not a loss.
+  const suffix = agentName ? ` (${agentName})` : null;
+  const label = (s: { id?: unknown; name?: unknown }) => {
+    const n = String(s.name ?? s.id ?? '');
+    return suffix && n.endsWith(suffix) ? n.slice(0, -suffix.length) : n;
+  };
   const now = new Set(after.map(label));
   return (Array.isArray(before) ? (before as { id?: unknown; name?: unknown }[]) : []).map(label).filter((n) => n && !now.has(n));
 }
@@ -88,7 +93,7 @@ export function droppedSkills(before: unknown, after: { name: string | null; id:
  * fewer skills than the row held, whether or not the version moved. It says so
  * in the engine alerts channel and changes nothing. Never throws.
  */
-export async function onSkillsDropped(input: { agent_id: string; name: string; version: string | null; from: string | null; lost: string[]; left: number }): Promise<'posted' | 'already' | 'failed'> {
+export async function onSkillsDropped(input: { agent_id: string; name: string; version: string | null; from: string | null; lost: string[]; left: number; same_version?: boolean }): Promise<'posted' | 'already' | 'failed'> {
   try {
     // Claimed before the post, so the inventory and the daily check alert once between them.
     const claim = await engineEvents.record({
@@ -96,14 +101,16 @@ export async function onSkillsDropped(input: { agent_id: string; name: string; v
       subject_id: input.agent_id,
       lane: 'ENGINE',
       actor: 'publish check',
-      detail: { name: input.name, version: input.version, lost: input.lost, left: input.left },
+      detail: { name: input.name, version: input.version, lost: input.lost, left: input.left, same_version: input.same_version ?? false },
       dedupe_key: `agent_skills_dropped:${input.agent_id}:${input.version}:${input.lost.join(',')}`,
     });
     if (!claim.recorded) return 'already';
     const version = (input.version ?? '').slice(0, 8) || 'unknown';
     const alert = message('failure', `${input.name} lost ${input.lost.length} skill${input.lost.length === 1 ? '' : 's'}`, [
       `Version \`${version}\` has ${input.left} left. Gone: ${input.lost.join(', ')}.`,
-      input.from ? `The last version on record is \`${input.from.slice(0, 8)}\`: restore from it with n8n's revert, then re-apply what changed since.` : 'No earlier version is on record.',
+      input.same_version
+        ? 'Nothing was published: the same live version now reads with fewer skills, so n8n changed how it stores or reports them. Check the draft, restore any skill it lost, and publish again.'
+        : input.from ? `The last version on record is \`${input.from.slice(0, 8)}\`: restore from it with n8n's revert, then re-apply what changed since.` : 'No earlier version is on record.',
       'Nothing was changed automatically.',
     ]);
     const sent = await post(alert);

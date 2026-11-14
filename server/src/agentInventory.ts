@@ -322,7 +322,7 @@ export async function record(result: Dict, opts: { owner?: string | null; record
   if (prev && d.active_version_id && prev.active_version_id !== d.active_version_id) {
     await publishGate.onVersionChange({ agent_id: d.agent_id, name: d.name, from: prev.active_version_id, to: d.active_version_id, config_hash: d.config_hash });
   }
-  const lost = prev ? publishGate.droppedSkills(prev.skills, d.skills) : [];
+  const lost = prev ? publishGate.droppedSkills(prev.skills, d.skills, d.name) : [];
   if (lost.length) await publishGate.onSkillsDropped({ agent_id: d.agent_id, name: d.name, version: d.active_version_id, from: prev.active_version_id, lost, left: d.skills.length });
   return { row: r.rows[0], outcome: !prev ? 'inserted' : same ? 'unchanged' : 'updated' };
 }
