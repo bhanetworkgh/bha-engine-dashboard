@@ -37,6 +37,10 @@ const ok = (m) => { n += 1; console.log('  ok  ' + m); };
   const watch = await ic.describe('open_decision_watch', { owner_user_id: 'U0BKT6MAW2Y', decision: 'Update 6I62 with PR #24 state' });
   assert.match(watch, /Hardik/); assert.match(watch, /6I62/); ok('a watch is described by its owner and what they owe');
 
+  assert.match(ic.fieldChanges({ What: 'x' }, { 'Progress Note': 'pointer' }), /Progress Note \(empty now\) -> "pointer"/);
+  assert.match(ic.fieldChanges({ 'Progress Note': 'old line' }, { 'Progress Note': 'new' }), /now "old line"/);
+  assert.match(ic.fieldChanges(null, { Status: null }), /current value not read\) -> removed/);
+  assert.match(ic.SYSTEM, /setting a field that is empty now adds to it/); ok('each field set shows what it holds now, so an append into an empty field reads as an append (INC-BAYS.AGENT-097)');
   const r = await ic.resolveAsk('update_record', { kind: 'loops', fields: {} });
   assert.equal(r.ok, false); assert.equal(r.reason, 'ask_required'); assert.match(r.message, /Nothing was written/); assert.match(r.message, /message_ts/);
   ok('a loop change with no ask is refused and told exactly what to send');

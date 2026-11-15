@@ -125,7 +125,7 @@ function neverEligible(r, label) {
   assert.deepEqual(r.acceptance_pass_blocked_by, [], 'nothing to block when true was not asked for');
   assert.ok(!r.blocked_by.includes('structural_issues'));
   assert.ok(!r.blocked_by.includes('acceptance_pass_not_allowed'));
-  assert.deepEqual(r.proposed_rules_applied, ['actor_shape', 'approver_not_bot_id', 'approver_required', 'decision_link_required', 'evidence_field_names', 'gate_id_format', 'run_ref_n8n_only', 'run_ref_workflow_required']);
+  assert.deepEqual(r.proposed_rules_applied, ['actor_shape', 'approver_not_bot_id', 'approver_required', 'decision_link_required', 'gate_id_format', 'run_ref_n8n_only', 'run_ref_workflow_required']);
   neverEligible(r, 'well-formed');
   ok('1  a well-formed synthetic record is structurally valid, and still not eligible, allowed or authorizing');
 }
@@ -410,7 +410,7 @@ function neverEligible(r, label) {
     for (const bad of ['EV-1700000000001-TST2', {}, 42, Array.from({ length: ae.MAX_EVIDENCE_REFS + 1 }, (_, i) => `EV-17000000000${String(i).padStart(2, '0')}-TS${String(i).padStart(2, '0').slice(-1)}X`)]) {
       const i = check({ ...VALID, [field]: bad }).issues.find((x) => x.field === field);
       assert.equal(i.code, 'bad_evidence_refs', `${field}=${JSON.stringify(bad).slice(0, 30)}`);
-      assert.equal(i.rule_status, 'proposed');
+      assert.equal(i.rule_status, 'approved');
     }
     for (const bad of ['https://drive.google.com/file/d/synthetic', 'CG-1700000000002-TST3', 'ev-1700000000001-tst2', 'slack:F0SYNTHETIC', 7]) {
       assert.deepEqual(onField(check({ ...VALID, [field]: [bad] }), `${field}[0]`), ['bad_evidence_refs'], `${field}: ${bad}`);
@@ -649,7 +649,7 @@ function neverEligible(r, label) {
     evidence_linked_records: 'approved', not_acceptance_evidence: 'approved', slack_link_shape: 'approved', run_ref_epoch: 'approved',
     proof_type: 'approved', historical_not_rewritten: 'approved', no_live_charging: 'approved',
     gate_id_format: 'proposed', actor_shape: 'proposed', approver_required: 'proposed', approver_not_bot_id: 'proposed',
-    evidence_field_names: 'proposed', delegation_ref_shape: 'proposed', decision_link_required: 'proposed',
+    evidence_field_names: 'approved', delegation_ref_shape: 'proposed', decision_link_required: 'proposed',
     run_ref_n8n_only: 'proposed', run_ref_workflow_required: 'proposed', supersedes_shape: 'proposed',
     status_text_shape: 'prototype_guard', no_commercial_delegate: 'prototype_guard', evidence_ref_retired: 'prototype_guard',
     combination_not_approved: 'prototype_guard', legacy_not_mapped: 'prototype_guard', derived_not_supplied: 'prototype_guard',

@@ -82,7 +82,7 @@ const person = (id: string): string => (id ? `${PEOPLE[id] || 'unknown person'} 
 const ids = (v: unknown): string[] =>
   (Array.isArray(v) ? v.map(String) : String(v ?? '').split(/[\s,;]+/)).map((t) => (/[UW][A-Z0-9]{6,}/.exec(t) || [''])[0]).filter(Boolean);
 
-async function loopRow(args: Args): Promise<{ loop_id: string; what: string; status: string; assignee: string } | null> {
+async function loopRow(args: Args): Promise<{ loop_id: string; what: string; status: string; assignee: string; fields: Record<string, unknown> } | null> {
   const nid = str(args.natural_id) || str(args.loop_id);
   const id = str(args.id);
   if (!nid && !id) return null;
@@ -92,7 +92,7 @@ async function loopRow(args: Args): Promise<{ loop_id: string; what: string; sta
   );
   const row = r.rows[0];
   if (!row) return null;
-  return { loop_id: row.natural_id, what: str(row.fields.What), status: str(row.fields.Status), assignee: str(row.fields['Assignee Slack User ID']) };
+  return { loop_id: row.natural_id, what: str(row.fields.What), status: str(row.fields.Status), assignee: str(row.fields['Assignee Slack User ID']), fields: row.fields };
 }
 
 async function watchRow(watchId: string): Promise<{ decision: string; owner: string; status: string } | null> {
@@ -100,6 +100,21 @@ async function watchRow(watchId: string): Promise<{ decision: string; owner: str
   const r = await query<{ decision: string; owner_user_id: string; status: string }>(`SELECT decision, owner_user_id, status FROM engine_decision_watches WHERE watch_id = $1`, [watchId]);
   const w = r.rows[0];
   return w ? { decision: w.decision, owner: w.owner_user_id, status: w.status } : null;
+}
+
+/**
+ * Each field an update sets, with what the loop holds in it now (15 Nov 2026, INC-BAYS.AGENT-097:
+ * the check was shown only the new value, so an "append to the Progress Note" ask on an empty note
+ * read as a replace and was refused twice). An empty field is said to be empty, so writing into it
+ * is plainly an append; a full one shows its current text, so a write that drops it can be seen.
+ */
+export function fieldChanges(current: Record<string, unknown> | null, set: Args): string {
+  const parts = Object.keys(set).map((k) => {
+    const now = current ? current[k] : undefined;
+    const was = now === undefined || now === null || now === '' ? (current ? 'empty now' : 'current value not read') : `now "${clip(now, 400)}"`;
+    return `${k} (${was}) -> ${set[k] === null ? 'removed' : `"${clip(set[k], 800)}"`}`;
+  });
+  return parts.join('; ') || '(none)';
 }
 
 const loopLine = (l: { loop_id: string; what: string; status: string; assignee: string } | null, fallback: string): string =>
@@ -118,7 +133,7 @@ export async function describe(tool: string, args: Args): Promise<string | null>
       const l = await loopRow(args);
       const f = (args.fields && typeof args.fields === 'object' ? args.fields : {}) as Args;
       const verb = /^closed$/i.test(str(f.Status)) ? 'Close' : 'Change';
-      return `${verb} ${loopLine(l, str(args.natural_id) || str(args.id))}. Fields set: ${clip(f, 1500)}.`;
+      return `${verb} ${loopLine(l, str(args.natural_id) || str(args.id))}. Fields set: ${clip(fieldChanges(l ? l.fields : null, f), 2400)}.`;
     }
     case 'create_record': {
       if (args.kind !== 'loops') return null;
@@ -287,7 +302,7 @@ export const SYSTEM = `You check one action an AI assistant called Bays is about
 
 Rules:
 - The action matches when the message asked for it, or it plainly follows from the message (the person asked for the result and this is how it is done). The person need not use the tool's words.
-- Loops: the loop must be the one the message means (by id, short code or what it is), and what is done to it must be what was asked: open, close, hold, reassign, update. Closing a loop the message did not ask to close, or did not say was done, is a miss. Changing a loop's wording to say something the message did not say is a miss.
+- Loops: the loop must be the one the message means (by id, short code or what it is), and what is done to it must be what was asked: open, close, hold, reassign, update. Closing a loop the message did not ask to close, or did not say was done, is a miss. Changing a loop's wording to say something the message did not say is a miss. Each field set is shown with what the loop holds in it now: setting a field that is empty now adds to it and drops nothing, so it satisfies an ask to append to that field; replacing a field that holds text with text that leaves that text out does not.
 - Decision Watches: the owner must be the person the message puts the decision or reply on, never the person asking for it unless they asked to be watched themselves. The watch's wording must say what that person owes as the message states it, not more and not something else. A watch opened when the message asked for no follow-up is a miss.
 - Messages sent for someone (a DM or a post): the recipients must be who the message asked to reach, and the text must say only what the message, the thread or the records listed below support. A message that states facts neither the thread nor a listed record shows is a miss. A fact that matches a listed record (a loop's title, status, lane or owner as the dashboard holds it) is supported, even when the thread does not repeat it.
 - SOP edits: the change must be the one the message asked for.

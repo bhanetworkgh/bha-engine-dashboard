@@ -15,8 +15,9 @@
  *
  * What this file is:
  *   - PURE. It reads no database, calls no network, writes nothing, and imports nothing but the pure
- *     proof_type rule. No route, tool, writer or consumer calls it yet (SOP 3cc1ba00: live but inert;
- *     Destiny, 10 Nov: nothing reads or writes acceptance records until the first loop and her go).
+ *     proof_type rule. One caller: check_acceptance_evidence (acceptanceCheck.ts, 13 Nov 2026), which
+ *     runs a record through check() and writes only an acceptance_evidence_checked event. No writer
+ *     saves an acceptance record yet (SOP 3cc1ba00; that waits on the trusted writer, O7CU).
  *   - a check of SHAPE. A well-formed EV-…, LOOP-… or Slack link says nothing about whether that
  *     record exists, what it proves, who posted the message, or whether a run happened.
  *   - NEVER authorizing. Every result carries acceptance_pass_allowed, eligible_for_persistence,
@@ -97,9 +98,9 @@ export const RULES = Object.freeze({
   technical_status_authority: rule('technical_status_authority', 'approved', 'The technical labels are set by the implementing builder and verified via tests and artifacts.', 'SOP f7720fc0 (Jason, 9 Nov). No field carries the labels in this slice.'),
   tech_only_default: rule('tech_only_default', 'approved', 'TECH_ONLY is the default once tests/evidence are in.', 'SOP f7720fc0 (Jason, 9 Nov). This check never fills in a default: closure_state is required as sent.'),
   evidence_linked_records: rule('evidence_linked_records', 'approved', 'At least one EV record for contract evidence and at least one for implementation evidence, as separate records the event links by id; no single monolithic acceptance bundle.', 'SOP 8034ef06 (Jason, 10 Nov).'),
-  evidence_field_names: rule('evidence_field_names', 'proposed', 'The two lists are named contract_evidence_refs and implementation_evidence_refs.', 'Design naming; SOP 8034ef06 sets the rule, not the field names. Awaiting Destiny.'),
+  evidence_field_names: rule('evidence_field_names', 'approved', 'The two lists are named contract_evidence_refs and implementation_evidence_refs.', 'SOP 8034ef06 sets the rule; Destiny accepted these two names when he merged PR #25 (13 Nov 2026, C0AF7AGC2UV 1794063138.912579).'),
   not_acceptance_evidence: rule('not_acceptance_evidence', 'approved', 'EV-1794203909317-FS3N is an evidence collection, not a gate, and is never accepted as acceptance proof in any evidence slot.', 'SOP 8034ef06 (Jason, 10 Nov): "Tests must fail if someone treats a generic EV such as FS3N as a complete acceptance bundle."'),
-  evidence_ref_retired: rule('evidence_ref_retired', 'prototype_guard', 'The single evidence_ref is retired from this input; one EV cannot stand for both kinds of evidence. Historical Engine records are not touched.', 'SOP 8034ef06; retirement approved by Hardik Bhatt for this slice (12 Nov 2026). Awaiting Destiny\'s review.'),
+  evidence_ref_retired: rule('evidence_ref_retired', 'prototype_guard', 'The single evidence_ref is retired from this input; one EV cannot stand for both kinds of evidence. Historical Engine records are not touched.', 'SOP 8034ef06; retirement approved by Hardik Bhatt for this slice (12 Nov 2026) and reviewed by Destiny with PR #25 (13 Nov 2026).'),
   delegation_ref_shape: rule('delegation_ref_shape', 'proposed', 'delegation_ref, when present, is an evidence-store id (EV-<ms>-<4>) and is never FS3N.', 'Design reading of SOP 2b794599 §6 ("points to a delegation record in the evidence store"); the delegation record format is not defined. Awaiting Destiny.'),
   decision_link_required: rule('decision_link_required', 'proposed', 'Every record names the Slack message it rests on (decision_link).', 'Design §12.3 (identity and idempotency).'),
   slack_link_shape: rule('slack_link_shape', 'approved', 'A decision link is a Slack message permalink: https://<workspace>.slack.com/archives/<C|D|G…>/p<16 digits>.', 'Existing code: chargeGate.parseLink.'),
