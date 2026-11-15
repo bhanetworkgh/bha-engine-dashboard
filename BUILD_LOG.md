@@ -15469,3 +15469,10 @@ Files:      n8n Bays — Submit Actions (YTpezWSOIN6TNYcX, Layer 1 prompt and th
 Problem:    Destiny's 15 Nov log pre-checked at 100% and came back at 65% on submission (U0AEW3TBYH1_1794773077314). The code review fed Layer 1 and held pay where it had no tool to see the proof (the Bays scheduled runs) and rated two parts one level lower. The pre-check never runs the code review, so the two could not agree.
 Fix:        The CODE REVIEW block was taken out of the Layer 1 prompt. The code review still runs in the same place, writes Code Review on the row, its paragraph on Jason's card, its record post in #bha-code-reviews and its section in the after-approval summary. Published as 3a026dea, read back: activeVersionId = versionId, no codeReview expression left in Layer 1. Restore point 92e63884.
 Decision:   The code review is a record beside the review, not an input to pay. Jason still sees it.
+
+## 2026-11-15 21:30 — The Held tab loads again
+Intent:     Destiny: the Held tab on Pay Tracker said "could not load this section".
+Files:      server/src/index.ts
+Problem:    GET /api/pay/notes answered 404 in 1ms (search_logs, 20:21 to 20:22 UTC). Its handler sat inside the `if (method === 'POST')` block, so a GET never reached it; /api/pay/notes/history had the same fault.
+Fix:        Both GETs answered before the POST block, same handlers, same admin gate in front.
+Decision:   The old branches inside the POST block are left; they are unreachable for GET and harmless.

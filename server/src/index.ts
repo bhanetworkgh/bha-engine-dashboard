@@ -2904,6 +2904,17 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
     }
   }
 
+  /**
+   * The Held tab's reads (15 Nov 2026). These two GETs lived inside the POST block below, so they were
+   * never reached and the tab answered 404 ("could not load this section"). Same handlers, same admin gate.
+   */
+  if (method === 'GET' && (p === '/api/pay/notes' || p === '/api/pay/notes/history')) {
+    if (p === '/api/pay/notes/history') {
+      return send(res, 200, { ok: true, history: await payNote.history({ codex_entry_id: url.searchParams.get('codex_entry_id') ?? '', submission_id: url.searchParams.get('submission_id') ?? '' }) });
+    }
+    return send(res, 200, { ok: true, notes: await payNote.all(), held: await payNote.held() });
+  }
+
   if (method === 'POST') {
     /**
      * Remove the copy a half-landed move left behind. Its own route rather than
