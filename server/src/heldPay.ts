@@ -126,6 +126,35 @@ export function personText(who: Person, items: HeldItem[], self: boolean): strin
   return out + foot;
 }
 
+type Block = Record<string, unknown>;
+const rtText = (text: string, style?: Record<string, boolean>) => (style ? { type: 'text', text, style } : { type: 'text', text });
+const rtList = (items: Block[][], indent: number) => ({ type: 'rich_text_list', style: 'bullet', indent, elements: items.map((e) => ({ type: 'rich_text_section', elements: e })) });
+
+/** Slack blocks: Slack's own bullet lists, so each held piece is its own line and what releases it sits under it. */
+export const MAX_LOG_BLOCKS = 20;
+export function personBlocks(who: Person, items: HeldItem[], self: boolean, note: string | null): Block[] {
+  const blocks: Block[] = [];
+  if (note) blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `_${note}_` }] });
+  if (!items.length) {
+    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `${self ? 'You have' : `${who.name} has`} no pay held right now.` } });
+    return blocks;
+  }
+  const total = r3(items.reduce((a, i) => a + i.held_share, 0));
+  blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*Held pay${self ? '' : ` for ${who.name}`}*\n${self ? 'You have' : `${who.name} has`} ${pct(total)} of a day held across ${items.length} log${items.length === 1 ? '' : 's'}. Each is released when a later log brings the proof below, named plainly.` } });
+  for (const i of items.slice(0, MAX_LOG_BLOCKS)) {
+    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*${shortDate(i.log_date)}* · <${i.link}|${i.codex_entry_id ?? i.submission_id}> · *${pct(i.held_share)}* held` } });
+    const elements: Block[] = [];
+    for (const p of i.parts) {
+      elements.push(rtList([[rtText(`${oneLine(p.what, 200)} `), rtText(`(${pct(p.share)}, ${p.held_for})`, { italic: true })]], 0));
+      elements.push(rtList([[rtText('Needs: ', { bold: true }), rtText(oneLine(p.needs, 400))]], 1));
+    }
+    if (elements.length) blocks.push({ type: 'rich_text', elements });
+  }
+  if (items.length > MAX_LOG_BLOCKS) blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `…and ${items.length - MAX_LOG_BLOCKS} more held logs.` }] });
+  blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `Every held log is on the dashboard: ${dashboard()}/pay?tab=held` }] });
+  return blocks;
+}
+
 /** The reply for everyone, one line per person. Pure. */
 export function allText(rows: { who: Person; items: HeldItem[] }[]): string {
   const held = rows.filter((r) => r.items.length);
@@ -138,6 +167,7 @@ export function allText(rows: { who: Person; items: HeldItem[] }[]): string {
 export interface HeldPayAnswer {
   ok: true;
   text: string;
+  blocks: Block[] | null;
   target: string;
   logs: number;
   held_share: number;
@@ -164,7 +194,7 @@ export async function answer(b: Obj): Promise<HeldPayAnswer> {
   if (named === 'all' && admin) {
     const ids = [...new Set(held.map((n) => n.builder_slack_id).filter((x): x is string => !!x))];
     const rows = ids.map((id) => ({ who: people.find((p) => p.id === id) ?? { id, name: held.find((n) => n.builder_slack_id === id)?.builder ?? id }, items: itemsOf(id) }));
-    return { ok: true, text: allText(rows), target: 'all', logs: held.length, held_share: r3(held.reduce((a, n) => a + n.held_share, 0)), note: null };
+    return { ok: true, text: allText(rows), blocks: null, target: 'all', logs: held.length, held_share: r3(held.reduce((a, n) => a + n.held_share, 0)), note: null };
   }
   if (named && named !== 'all' && named !== 'unknown' && named.id !== userId) {
     if (admin) target = named;
@@ -176,5 +206,5 @@ export async function answer(b: Obj): Promise<HeldPayAnswer> {
   }
   const items = itemsOf(target.id);
   const body = personText(target, items, target.id === userId);
-  return { ok: true, text: note ? `_${note}_\n${body}` : body, target: target.id, logs: items.length, held_share: r3(items.reduce((a, i) => a + i.held_share, 0)), note };
+  return { ok: true, text: note ? `_${note}_\n${body}` : body, blocks: personBlocks(target, items, target.id === userId, note), target: target.id, logs: items.length, held_share: r3(items.reduce((a, i) => a + i.held_share, 0)), note };
 }

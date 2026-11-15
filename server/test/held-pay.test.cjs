@@ -62,4 +62,11 @@ const one = h.personText(people[0], [it], false);
 assert.match(one, /Ahad has 40% of a day held/); assert.doesNotMatch(one, /\$/);
 ok('percent of a day, no money');
 
+const b = h.personBlocks(people[0], [it], true, null);
+const lists = b.filter((x) => x.type === 'rich_text').flatMap((x) => x.elements);
+assert.equal(lists.length, 4); assert.equal(lists[0].type, 'rich_text_list'); assert.equal(lists[1].indent, 1);
+assert.match(JSON.stringify(lists[1]), /Needs: .*the fallback path/);
+assert.ok(h.personBlocks(people[0], many, true, null).length <= 50);
+ok('blocks: one bullet per held piece, what releases it nested under it, under 50 blocks');
+
 console.log(`held-pay: ${n} checks passed`);

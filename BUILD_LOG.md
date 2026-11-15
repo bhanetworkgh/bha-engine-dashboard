@@ -15422,3 +15422,8 @@ Files:      n8n Bays — Commands & Cancel (WYOacTvwe6iarNSF), published 7859a98
 Problem:    The n8n update tool would not append to the Route Actions rules (index 7 out of bounds, '-' refused).
 Fix:        Set the whole rules list with the eighth rule (Held Pay) added; fallback moved to output 8, still to Unhandled Command — Logged. Group 26. Held pay: Read Held Pay · POST (retries 3, error output) → Build Held Pay Reply → the shared Post to Response URL; on failure the builder is told to try again and Raise Held Pay Failure throws. Sticky note rewritten for seven commands; its stale "no fallback" warning corrected.
 Decision:   The command itself is registered on the Bays Slack app by Destiny (no tool here can change an app's manifest). Proof is the first real /held-pay run.
+
+## 2026-11-15 13:00 — /held-pay as Slack lists
+Intent:     Destiny, after the first live run (10% of a day across 2 logs, correct): each held piece on its own line.
+Files:      server/src/heldPay.ts (personBlocks, blocks on the answer), server/test/held-pay.test.cjs (check 7); n8n Build Held Pay Reply sends the blocks.
+Fix:        The reply is Slack blocks: a header, one section per log, and a rich_text bullet list per log with each held piece and its "Needs:" line nested under it. text stays as the fallback. At most 20 logs listed, under Slack's 50 blocks.
