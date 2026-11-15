@@ -62,6 +62,7 @@
     "test:vfarm-presence": "node --no-warnings=ExperimentalWarning server/test/vfarm-presence.test.cjs",
     "test:vfarm-unlisted": "node --no-warnings=ExperimentalWarning server/test/vfarm-unlisted.test.cjs",
     "test:media-claims": "npm run build:server && node server/test/media-claims.test.cjs",
+    "test:media-doctrine": "npm run build:server && node server/test/media-doctrine.test.cjs",
     "test:media-post-log": "node --no-warnings=ExperimentalWarning server/test/media-post-log.test.cjs",
     "test:audit-token": "node --no-warnings=ExperimentalWarning server/test/audit-token.test.cjs",
     "test:codex-gap": "node --no-warnings=ExperimentalWarning server/test/codex-gap.test.cjs",

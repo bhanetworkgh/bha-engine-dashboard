@@ -848,6 +848,13 @@ export interface TwinDraft {
   platforms: Record<string, TwinDraftPlatform>;
   claim_check_status: string;
   sources: Record<string, unknown>;
+  /** The vFarm doctrine check (15 Nov 2026, YHGE): each platform's two answers and any tension. Null before then. */
+  doctrine: {
+    sops: string[];
+    platforms: Record<string, { dust_collector: boolean; appliance: boolean; note: string | null }>;
+    occasion_exempt: string | null;
+    tensions: { line_wanted: string; product_today: string; wording_used: string }[];
+  } | null;
   drafted_by: string;
   slack_channel: string | null;
   slack_ts: string | null;

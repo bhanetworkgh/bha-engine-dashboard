@@ -229,6 +229,68 @@ export interface PlatformDraft {
   edits?: { at: string; by: string; reason: string; before_text: string; before_thread: string[] }[];
 }
 
+/* --------------------------------------------------------------- doctrine */
+
+/**
+ * Jason's vFarm messaging doctrine, held on every draft (15 Nov 2026, Destiny — LOOP-1794664108482-YHGE).
+ * SOP f0a871ac is the contrast (dust-collector science projects vs a grab-and-go appliance), 753e8c36 the
+ * checklist discipline and review standard, 5e325189 the surface wiring, self-check gate and collision handling.
+ * Every draft records each platform's answer to the two questions, and a platform that fails does not reach
+ * Jason: LinkedIn and Facebook answer yes to both, X and Instagram at least carry the grab-and-go line (753e8c36,
+ * point 2). An occasion post where the contrast would not fit says why (f0a871ac). A tension between the line the
+ * doctrine wants and what the product can do today is recorded, never softened in silence (5e325189, point 3).
+ */
+export const DOCTRINE_SOPS = [
+  'f0a871ac-86ac-43ec-a9e1-b60494d9ff26',
+  '753e8c36-803d-4ff6-8153-92e2852bccf9',
+  '5e325189-ca6c-421c-b598-5fa5cd403631',
+] as const;
+/** Which of the two questions each platform must answer yes to (753e8c36, point 2). */
+export const DOCTRINE_MIN: Record<Platform, ('dust_collector' | 'appliance')[]> = {
+  linkedin: ['dust_collector', 'appliance'],
+  facebook: ['dust_collector', 'appliance'],
+  x: ['appliance'],
+  instagram: ['appliance'],
+};
+export interface DoctrineAnswer { dust_collector: boolean; appliance: boolean; note: string | null }
+export interface DoctrineTension { line_wanted: string; product_today: string; wording_used: string }
+export interface DoctrineRecord {
+  sops: string[];
+  platforms: Partial<Record<Platform, DoctrineAnswer>>;
+  occasion_exempt: string | null;
+  tensions: DoctrineTension[];
+}
+
+const yes = (v: unknown) => v === true || /^(yes|true|y)$/i.test(String(v ?? '').trim());
+
+/** Reads the doctrine check a draft carries and says which platforms fail it. Pure. */
+export function doctrineCheck(raw: unknown, platformKeys: string[], occasion: string): { record: DoctrineRecord; failures: string[] } {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const given = (r.platforms && typeof r.platforms === 'object' ? r.platforms : {}) as Record<string, Record<string, unknown> | undefined>;
+  const exempt = typeof r.occasion_exempt === 'string' && r.occasion_exempt.trim().length >= 10 ? r.occasion_exempt.trim().slice(0, 500) : null;
+  const tensions = (Array.isArray(r.tensions) ? r.tensions : [])
+    .map((t) => (t && typeof t === 'object' ? (t as Record<string, unknown>) : {}))
+    .map((t) => ({ line_wanted: String(t.line_wanted ?? '').trim().slice(0, 500), product_today: String(t.product_today ?? '').trim().slice(0, 500), wording_used: String(t.wording_used ?? '').trim().slice(0, 500) }))
+    .filter((t) => t.line_wanted && t.product_today && t.wording_used)
+    .slice(0, 10);
+  const platforms: Partial<Record<Platform, DoctrineAnswer>> = {};
+  const failures: string[] = [];
+  const occasionDay = occasion === 'holiday' || occasion === 'new_month';
+  for (const k of platformKeys) {
+    const a = given[k];
+    if (!a || typeof a !== 'object') {
+      failures.push(`${k}: no answer to the two doctrine questions`);
+      continue;
+    }
+    const ans: DoctrineAnswer = { dust_collector: yes(a.dust_collector), appliance: yes(a.appliance), note: typeof a.note === 'string' && a.note.trim() ? a.note.trim().slice(0, 300) : null };
+    platforms[k as Platform] = ans;
+    const need = DOCTRINE_MIN[k as Platform] ?? ['appliance'];
+    const missed = need.filter((q) => !ans[q]);
+    if (missed.length && !(occasionDay && exempt)) failures.push(`${k}: answers no to ${missed.map((q) => (q === 'dust_collector' ? 'the dust-collector question' : 'the appliance question')).join(' and ')}`);
+  }
+  return { record: { sops: [...DOCTRINE_SOPS], platforms, occasion_exempt: occasionDay ? exempt : null, tensions }, failures };
+}
+
 export interface MediaPost {
   post_id: string;
   run_date: string;
@@ -244,6 +306,7 @@ export interface MediaPost {
   platforms: Partial<Record<Platform, PlatformDraft>>;
   claim_check_status: string;
   sources: Record<string, unknown>;
+  doctrine?: DoctrineRecord | null;
   drafted_by: string;
   slack_channel: string | null;
   slack_ts: string | null;
@@ -281,7 +344,7 @@ export function statusOf(p: Pick<MediaPost, 'platforms'>, superseded = false): s
 const newId = (now = Date.now()) => `MTP-${now}-${Math.random().toString(36).slice(2, 6).toUpperCase().padEnd(4, 'X')}`;
 
 const COLS = `post_id, run_date, occasion, occasion_label, angle, revision, parent_post_id, pattern_ref, status, card, images, platforms,
-  claim_check_status, sources, drafted_by, slack_channel, slack_ts, test, created_at, updated_at`;
+  claim_check_status, sources, doctrine, drafted_by, slack_channel, slack_ts, test, created_at, updated_at`;
 
 function show(r: Record<string, unknown>): MediaPost {
   const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : v == null ? null : String(v));
@@ -305,6 +368,8 @@ export interface CreateInput {
   card?: Record<string, unknown> | null;
   platforms: Record<string, { text?: string; thread?: string[]; publish_at?: string | null }>;
   sources?: Record<string, unknown> | null;
+  /** The two doctrine questions per platform, an occasion exemption and any tension (see doctrineCheck). */
+  doctrine_check?: unknown;
   drafted_by?: string | null;
   test?: boolean;
   dry_run?: boolean;
@@ -380,6 +445,14 @@ export async function create(input: CreateInput) {
         if (!platforms[k as Platform] && v && v.decision === 'approved') platforms[k as Platform] = { ...v };
       }
     }
+    // The doctrine gate: every platform this draft sends answers the two questions, and one that fails never
+    // reaches Jason. A platform carried over from the parent keeps the answer it was approved with.
+    const sent = Object.keys(raw);
+    const doc = doctrineCheck(input.doctrine_check, sent, parent?.occasion ?? occasion);
+    if (doc.failures.length) refuse('doctrine_check_failed', `This draft fails Jason's vFarm doctrine checklist (SOPs ${DOCTRINE_SOPS.map((x) => x.slice(0, 8)).join(', ')}), so it does not go to Jason: ${doc.failures.join('; ')}. Rewrite those platforms, or on an occasion post say in occasion_exempt why the contrast does not fit.`);
+    for (const k of Object.keys(platforms)) {
+      if (!sent.includes(k) && parent?.doctrine?.platforms?.[k as Platform]) doc.record.platforms[k as Platform] = parent.doctrine.platforms[k as Platform];
+    }
     const overall = worst(Object.values(platforms).map((p) => p!.claim_check_status));
     const id = newId();
     const now = new Date().toISOString();
@@ -397,6 +470,7 @@ export async function create(input: CreateInput) {
       platforms,
       claim_check_status: overall,
       sources: (input.sources && typeof input.sources === 'object' ? input.sources : {}) as Record<string, unknown>,
+      doctrine: doc.record,
       drafted_by: s(input.drafted_by, 80) ?? 'media_twin',
       slack_channel: null,
       slack_ts: null,
@@ -407,15 +481,15 @@ export async function create(input: CreateInput) {
     if (input.dry_run) return { ok: true, written: false, dry_run: true, post, message: `Dry run: ${overall} draft, nothing written.` };
     await db.query(
       `INSERT INTO engine_media_posts (post_id, run_date, occasion, occasion_label, angle, revision, parent_post_id, status, card, images, platforms,
-         claim_check_status, sources, drafted_by, test)
-       VALUES ($1,$2::date,$3,$4,$5,$6,$7,$8,$9::jsonb,'[]'::jsonb,$10::jsonb,$11,$12::jsonb,$13,$14)`,
-      [id, post.run_date, post.occasion, post.occasion_label, post.angle, post.revision, post.parent_post_id, post.status, JSON.stringify(card), JSON.stringify(platforms), overall, JSON.stringify(post.sources), post.drafted_by, post.test],
+         claim_check_status, sources, drafted_by, test, doctrine)
+       VALUES ($1,$2::date,$3,$4,$5,$6,$7,$8,$9::jsonb,'[]'::jsonb,$10::jsonb,$11,$12::jsonb,$13,$14,$15::jsonb)`,
+      [id, post.run_date, post.occasion, post.occasion_label, post.angle, post.revision, post.parent_post_id, post.status, JSON.stringify(card), JSON.stringify(platforms), overall, JSON.stringify(post.sources), post.drafted_by, post.test, JSON.stringify(doc.record)],
     );
     if (parent) await db.query(`UPDATE engine_media_posts SET status = 'superseded', updated_at = now() WHERE post_id = $1`, [parent.post_id]);
     // A rewrite stays on its pattern, so Jason's gate reads the same on revision 2.
     if (parent?.pattern_ref) await db.query(`UPDATE engine_media_posts SET pattern_ref = $2 WHERE post_id = $1`, [id, parent.pattern_ref]);
     await record(
-      { event_type: 'media_post_drafted', subject_id: id, lane: 'MEDIA', actor: post.drafted_by, source_ref: parent?.post_id ?? null, detail: { schema: SCHEMA, revision: post.revision, parent_post_id: post.parent_post_id, occasion: post.occasion, platforms: Object.keys(platforms), claim_check_status: overall, test: post.test } },
+      { event_type: 'media_post_drafted', subject_id: id, lane: 'MEDIA', actor: post.drafted_by, source_ref: parent?.post_id ?? null, detail: { schema: SCHEMA, revision: post.revision, parent_post_id: post.parent_post_id, occasion: post.occasion, platforms: Object.keys(platforms), claim_check_status: overall, test: post.test, doctrine_tensions: doc.record.tensions.length, doctrine_exempt: Boolean(doc.record.occasion_exempt) } },
       db,
     );
     events.changed('media_posts', id, db);

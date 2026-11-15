@@ -4763,6 +4763,11 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       )`,
     ],
   },
+  {
+    id: 138,
+    name: 'Media Twin drafts carry the vFarm doctrine check: two questions per platform and any tension (15 Nov 2026, Destiny, YHGE)',
+    statements: [`ALTER TABLE engine_media_posts ADD COLUMN IF NOT EXISTS doctrine jsonb`],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

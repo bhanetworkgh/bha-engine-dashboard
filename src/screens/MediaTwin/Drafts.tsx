@@ -134,6 +134,17 @@ function DraftCard({ post }: { post: TwinDraft }) {
                   ))}
                 </ul>
               ) : null}
+              {post.doctrine ? (
+                <p className="text-[12px] text-dim">
+                  Doctrine check:{' '}
+                  {post.doctrine.platforms[open]
+                    ? `dust-collector contrast ${post.doctrine.platforms[open].dust_collector ? 'yes' : 'no'}, appliance not a hobby ${post.doctrine.platforms[open].appliance ? 'yes' : 'no'}${post.doctrine.platforms[open].note ? ` (${post.doctrine.platforms[open].note})` : ''}`
+                    : 'no answer recorded for this platform'}
+                  {post.doctrine.occasion_exempt ? ` · occasion post: ${post.doctrine.occasion_exempt}` : ''}
+                </p>
+              ) : (
+                <p className="text-[12px] text-dim">Doctrine check: not recorded (drafted before 15 Nov 2026).</p>
+              )}
               {d.decision === 'pending' && post.status !== 'superseded' ? (
                 decided[open] ? (
                   <p className="text-[12px]">Approved by {decided[open]}.</p>
@@ -155,6 +166,22 @@ function DraftCard({ post }: { post: TwinDraft }) {
                 </p>
               ) : null}
             </div>
+          ) : null}
+          {post.doctrine?.tensions.length ? (
+            <div className="mt-3 rounded-[10px] border border-line p-3 text-[12px]">
+              <p className="font-medium">Doctrine tension ({post.doctrine.tensions.length})</p>
+              <ul className="mt-1 space-y-2 text-dim">
+                {post.doctrine.tensions.map((t, i) => (
+                  <li key={i}>
+                    <div>Line wanted: “{t.line_wanted}”</div>
+                    <div>What the product does today: {t.product_today}</div>
+                    <div>Wording used under Stage 1: “{t.wording_used}”</div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : post.doctrine ? (
+            <p className="mt-3 text-[12px] text-dim">Doctrine tension: none recorded on this draft.</p>
           ) : null}
           {post.decisions.length ? (
             <details className="mt-3 text-[12px] text-dim">
