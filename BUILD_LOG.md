@@ -15448,3 +15448,10 @@ Files:      server/src/mediaPosts.ts (doctrine_check read from sources on a rewr
 Problem:    Rewrite Draft carries the agent's sources onto the revision, so a rewrite would have been refused doctrine_check_failed.
 Fix:        The rewrite schemas require sources.doctrine_check; create() reads it there and strips it from the stored sources. The Approval Card shows a "Doctrine check" line per platform and any tension. All three workflows and both Media Twin agents published, inventory recorded.
 Decision:   Proof is a production Daily Draft run, not Monday's: run 90223 wrote MTP-1794747070993-NDD7 with answers per platform (LinkedIn, X, Facebook both yes; Instagram appliance yes), cards posted with the doctrine line. /vfarm copy now names the dust-collector vs grab-and-go contrast beside Stage 1 (site 947a7e0, live). Loop closed.
+
+## 2026-11-15 17:50 — update_slack_app: change a Slack app's setup over MCP
+Intent:     Genie rebuild step 1 (retire /askgenie and /askgenieprivately) without a person clicking in Slack's settings; step 2 (display, home tab, scopes, agent mode) needs the same.
+Files:      server/src/slackAppUpdate.ts (new), server/src/mcp/slackAppUpdateTools.ts (new), server/src/slackApps.ts (slackCall exported), server/src/mcp/tools.ts, server/test/slack-app-update.test.cjs, package.json, CLAUDE.md
+Problem:    The dashboard could read every app's manifest (read_slack_apps) but change none.
+Fix:        Export the live manifest, apply only listed kinds of change (pure applyChanges), apps.manifest.validate, then apps.manifest.update only with confirm "UPDATE <app_id>", then export again and compare. Destiny or Jason, never an agent; audited with before and after.
+Decision:   Built from the live manifest, never a stored one (the registry's copy has its URLs cleaned and secrets redacted). A scope change says reinstall_needed; the picture stays manual (no API).

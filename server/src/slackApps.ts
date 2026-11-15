@@ -4,7 +4,8 @@
  * them have"). Built after /sample-command answered "app did not respond" in Kavin's log channel and nobody could say
  * which app owned it.
  *
- * Read only. Nothing here creates, changes or deletes an app, a command or a manifest.
+ * Read only. Nothing here creates, changes or deletes an app, a command or a manifest. Changing one of BHA's own
+ * apps is slackAppUpdate.ts (15 Nov 2026), which uses this file's token and `slackCall`.
  *
  * Two reads, each with its own credential:
  *   - **Which apps are installed**: `users.list` with the Bays bot token. Every app with a bot user is a bot user,
@@ -73,6 +74,9 @@ async function call(method: string, params: Record<string, string>, token?: stri
     clearTimeout(timer);
   }
 }
+
+/** The same Slack Web API call, for slackAppUpdate.ts. */
+export const slackCall = call;
 
 /**
  * A configuration token good for at least ten more minutes. Rotates when it is not, under a lock, and stores the new

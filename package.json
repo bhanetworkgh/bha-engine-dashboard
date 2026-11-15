@@ -127,6 +127,7 @@
     "test:genie-builder": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/genie-builder.test.cjs",
     "test:logstream-e2e": "node server/test/logstream-e2e.test.cjs",
     "test:slack-delete": "node server/test/slack-delete.test.cjs",
+    "test:slack-app-update": "node server/test/slack-app-update.test.cjs",
     "test:review-card": "node server/test/review-card.test.cjs",
     "test:sop-check": "node server/test/sop-check.test.cjs",
     "test:event-ingress": "node server/test/event-ingress.test.cjs",
