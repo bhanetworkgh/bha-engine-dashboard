@@ -15415,3 +15415,10 @@ Files:      server/src/heldPay.ts (new), server/src/index.ts (route /api/engine/
 Problem:    No local TypeScript (node_modules has no typescript or @types/node, and package installs are off); the global tsc is 7.0, which refuses moduleResolution Node10.
 Fix:        Typechecked with tsc 7 under moduleResolution bundler and no node types: the only error in heldPay.ts is the missing `process` type every file shares, and index.ts has the same error count before and after. Emitted heldPay and its imports to /tmp and ran the new test (6 checks) and pay-suggest (21) against it.
 Decision:   Reads payNote.held(), never a second list, so the command and the Held tab cannot disagree. Percent of a day only. Only Destiny or Jason may look at someone else; a builder naming someone else gets their own list and a line saying so, not a refusal.
+
+## 2026-11-15 12:40 — /held-pay wired in n8n
+Intent:     Route the command to the new endpoint.
+Files:      n8n Bays — Commands & Cancel (WYOacTvwe6iarNSF), published 7859a985 (restore point bbca1d66).
+Problem:    The n8n update tool would not append to the Route Actions rules (index 7 out of bounds, '-' refused).
+Fix:        Set the whole rules list with the eighth rule (Held Pay) added; fallback moved to output 8, still to Unhandled Command — Logged. Group 26. Held pay: Read Held Pay · POST (retries 3, error output) → Build Held Pay Reply → the shared Post to Response URL; on failure the builder is told to try again and Raise Held Pay Failure throws. Sticky note rewritten for seven commands; its stale "no fallback" warning corrected.
+Decision:   The command itself is registered on the Bays Slack app by Destiny (no tool here can change an app's manifest). Proof is the first real /held-pay run.
