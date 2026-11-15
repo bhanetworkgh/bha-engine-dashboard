@@ -15441,3 +15441,10 @@ Files:      server/src/mediaPosts.ts (DOCTRINE_SOPS, DOCTRINE_MIN, doctrineCheck
 Problem:    The live Media Twin had the contrast checklist as a skill, but the answers were only a line in self_check that the dashboard never stored, nothing refused a draft that failed, and nowhere recorded a tension (YHGE's own finding, 14 Nov).
 Fix:        create() reads doctrine_check, refuses doctrine_check_failed when LinkedIn or Facebook misses either question or X or Instagram misses the grab-and-go line, and stores the answers and tensions on the row. The Drafts tab shows each platform's answers and any tension.
 Decision:   The gate is the dashboard's, not the agent's or the workflow's, so the Media Twin, its backup and the rewrite path cannot disagree about it. Occasion posts may be exempt with a reason, as SOP f0a871ac allows.
+
+## 2026-11-15 13:55 — YHGE proven in production
+Intent:     Close YHGE today rather than wait for Monday's draft.
+Files:      server/src/mediaPosts.ts (doctrine_check read from sources on a rewrite), CLAUDE.md; n8n Rewrite Draft and Approval Card; bhanetwork-site public/landing-config.json
+Problem:    Rewrite Draft carries the agent's sources onto the revision, so a rewrite would have been refused doctrine_check_failed.
+Fix:        The rewrite schemas require sources.doctrine_check; create() reads it there and strips it from the stored sources. The Approval Card shows a "Doctrine check" line per platform and any tension. All three workflows and both Media Twin agents published, inventory recorded.
+Decision:   Proof is a production Daily Draft run, not Monday's: run 90223 wrote MTP-1794747070993-NDD7 with answers per platform (LinkedIn, X, Facebook both yes; Instagram appliance yes), cards posted with the doctrine line. /vfarm copy now names the dust-collector vs grab-and-go contrast beside Stage 1 (site 947a7e0, live). Loop closed.
