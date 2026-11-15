@@ -90,20 +90,15 @@ ok('a failure story with no record is flagged', () => assert.equal(m.failureSour
 ok('a failure story whose records are not held is flagged', () => assert.equal(m.failureSourceFindings(TRAY_A, ['LOOP-1000000000000-ABCD'], [])[0].rule, 'failure_story_source_not_found'));
 ok('a failure story on a held record passes', () => assert.equal(m.failureSourceFindings(TRAY_A, ['LOOP-1791428275782-TU4O'], ['LOOP-1791428275782-TU4O']).length, 0));
 ok('a post with no failure needs no record', () => assert.equal(m.failureSourceFindings('Open the door, grab fresh strawberries.', [], []).length, 0));
-// The approver-of-record trial (7 Nov 2026): Approve posts live on weekdays to Sat 14 Nov, never on a weekend, then the pattern gate again.
-const noDb = { query: async () => { throw new Error('the trial must not read the database'); } };
-ok('trial: a weekday approval posts without a pattern', async () => {
-  const r = await m.autoPostFor(noDb, { pattern_ref: null, test: false }, 'x', new Date('2026-11-09T15:00:00Z'));
+// The standard (15 Nov 2026): Approve posts live on Instagram, X and Facebook, any day, with no pattern; LinkedIn by hand.
+const noDb = { query: async () => { throw new Error('the approve rule must not read the database'); } };
+ok('an approval posts without a pattern', async () => {
+  const r = await m.autoPostFor(noDb, { pattern_ref: null, test: false }, 'x', new Date('2026-11-16T15:00:00Z'));
   assert.equal(r.post, true); assert.equal(r.mode, 'post');
 });
-ok('trial: a weekend approval only records', () => {
-  assert.equal(m.trialWindow(new Date('2026-11-08T15:00:00Z')).open, false);
-  assert.equal(m.trialWindow(new Date('2026-11-14T15:00:00Z')).open, false);
-});
-ok('trial: Friday evening in New York is still a weekday', () => assert.equal(m.trialWindow(new Date('2026-11-14T03:00:00Z')).open, true));
-ok('trial: LinkedIn stays by hand', async () => assert.equal((await m.autoPostFor(noDb, { pattern_ref: null, test: false }, 'linkedin', new Date('2026-11-10T15:00:00Z'))).post, false));
-ok('trial: a test draft only checks', async () => assert.equal((await m.autoPostFor(noDb, { pattern_ref: null, test: true }, 'instagram', new Date('2026-11-10T15:00:00Z'))).mode, 'check'));
-ok('after the trial the pattern gate holds again', async () => assert.equal((await m.autoPostFor(noDb, { pattern_ref: null, test: false }, 'x', new Date('2026-11-16T15:00:00Z'))).post, false));
+ok('a weekend approval posts too', async () => assert.equal((await m.autoPostFor(noDb, { pattern_ref: null, test: false }, 'facebook', new Date('2026-11-15T15:00:00Z'))).post, true));
+ok('LinkedIn stays by hand', async () => assert.equal((await m.autoPostFor(noDb, { pattern_ref: null, test: false }, 'linkedin', new Date('2026-11-16T15:00:00Z'))).post, false));
+ok('a test draft only checks', async () => assert.equal((await m.autoPostFor(noDb, { pattern_ref: null, test: true }, 'instagram', new Date('2026-11-16T15:00:00Z'))).mode, 'check'));
 // Each platform's news goes in its own card's thread (7 Nov 2026), and a draft from before then falls back to its first card.
 ok('a platform with its own card uses that card\'s thread', () => {
   const post = { slack_ts: 'LI', platforms: { linkedin: { slack_ts: 'LI', slack_thread_ts: 'LI' }, instagram: { slack_ts: 'IG2', slack_thread_ts: 'IG1' }, x: { slack_ts: 'X1' } } };

@@ -597,52 +597,24 @@ export async function decide(postId: string, input: DecideInput) {
   return out;
 }
 
-/* ----------------------------------------------------------------- Jason's gate on Approve */
+/* ----------------------------------------------------------------- Approve posts */
 
 /**
- * Approve posts live only for a pattern with a Codex entry and an explicit 'approved for automated reuse' mark; otherwise
- * it stays record-only and a person posts by hand (Jason, 6 Nov 2026, #bha-media-twin 1793927368.827389). A draft names
- * its pattern in `pattern_ref`, the Codex entry's natural id; the mark is a row in engine_media_pattern_marks, written
- * only by markPattern. Facebook joined on 6 Nov 2026, once Meta verified the business and the BHA Media Twin app went
- * Live (LOOP-1793989931043-HMJC). LinkedIn is not here: its API access is not approved. Add it when that changes.
- * A test draft runs the check, never a post.
+ * The standard (15 Nov 2026, Destiny, replacing the approver-of-record trial and the pattern gate before it): the Media
+ * Twin drafts, the cards come to Slack, Destiny or Jason approves, and the approved platform posts live. No date window,
+ * no weekend rule, no pattern needed. Approval stays the one step a person takes; posting without it comes later.
+ * Facebook joined on 6 Nov 2026, once Meta verified the business and the BHA Media Twin app went Live
+ * (LOOP-1793989931043-HMJC). LinkedIn is not here: its API access is not approved, so it is posted by hand. Add it when
+ * that changes. A test draft runs the check, never a post. The pattern marks are kept as history and read by nothing.
  */
 export const AUTO_POST_PLATFORMS: Platform[] = ['instagram', 'x', 'facebook'];
 const POST_PATH = process.env.MEDIA_POST_RUN_PATH?.trim() || '/webhook/media-twin-post';
 
 export type AutoPost = { post: boolean; mode: 'post' | 'check' | 'record_only'; reason: string };
 
-/**
- * The approver-of-record trial (Jason, 7 Nov 2026, #bha-coordination 1793995604.721569; Destiny the same day): from now
- * to the end of Saturday 14 Nov, Destiny is the media approver of record and his Approve (or Jason's) posts the platform
- * live, whatever pattern the draft names, so each day ends with the approved copy and its live links. No posting on a
- * weekend, in New York time. When the window ends, Approve falls back to Jason's pattern gate below until he rules on
- * auto-posting (planned for 16 Nov, after the readiness summary).
- */
-export const APPROVER_TRIAL = { until: '2026-11-15T05:00:00Z', label: 'the approver-of-record trial week (to Sat 14 Nov)' };
-
-export function trialWindow(now: Date = new Date()): { open: boolean; reason: string } {
-  if (now.getTime() >= Date.parse(APPROVER_TRIAL.until)) return { open: false, reason: 'The approver-of-record trial week has ended.' };
-  const day = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short' }).format(now);
-  if (day === 'Sat' || day === 'Sun') return { open: false, reason: 'No posting on weekends during the trial week, so Approve only records today. Post it on a weekday with the posting workflow or by hand.' };
-  return { open: true, reason: `Approved during ${APPROVER_TRIAL.label}.` };
-}
-
-export async function autoPostFor(db: Queryable, post: Pick<MediaPost, 'pattern_ref' | 'test'>, platform: Platform, now: Date = new Date()): Promise<AutoPost> {
-  const ref = post.pattern_ref;
-  if (now.getTime() < Date.parse(APPROVER_TRIAL.until)) {
-    if (!AUTO_POST_PLATFORMS.includes(platform)) return { post: false, mode: 'record_only', reason: `${platform} is posted by hand until its automated posting is public.` };
-    const w = trialWindow(now);
-    if (!w.open) return { post: false, mode: 'record_only', reason: w.reason };
-    return post.test ? { post: true, mode: 'check', reason: 'A test draft runs the check and posts nothing.' } : { post: true, mode: 'post', reason: w.reason };
-  }
-  if (!ref) return { post: false, mode: 'record_only', reason: 'This draft names no pattern, so Approve only records.' };
-  const mark = await db.query(`SELECT 1 FROM engine_media_pattern_marks WHERE pattern_ref = $1`, [ref]);
-  if (!mark.rows[0]) return { post: false, mode: 'record_only', reason: `Pattern ${ref} is not marked for automated reuse, so Approve only records.` };
-  const codex = await db.query(`SELECT 1 FROM engine_codex_submissions WHERE natural_id = $1 LIMIT 1`, [ref]);
-  if (!codex.rows[0]) return { post: false, mode: 'record_only', reason: `Pattern ${ref} has no Codex entry, so Approve only records.` };
+export async function autoPostFor(_db: Queryable, post: Pick<MediaPost, 'pattern_ref' | 'test'>, platform: Platform, _now: Date = new Date()): Promise<AutoPost> {
   if (!AUTO_POST_PLATFORMS.includes(platform)) return { post: false, mode: 'record_only', reason: `${platform} is posted by hand until its automated posting is public.` };
-  return post.test ? { post: true, mode: 'check', reason: 'A test draft runs the check and posts nothing.' } : { post: true, mode: 'post', reason: `Pattern ${ref} is marked for automated reuse.` };
+  return post.test ? { post: true, mode: 'check', reason: 'A test draft runs the check and posts nothing.' } : { post: true, mode: 'post', reason: 'Approved, so it posts.' };
 }
 
 /** Pure: the thread a platform's news goes in: its own card's thread, else the draft's first card (drafts before 7 Nov). */

@@ -15455,3 +15455,10 @@ Files:      server/src/slackAppUpdate.ts (new), server/src/mcp/slackAppUpdateToo
 Problem:    The dashboard could read every app's manifest (read_slack_apps) but change none.
 Fix:        Export the live manifest, apply only listed kinds of change (pure applyChanges), apps.manifest.validate, then apps.manifest.update only with confirm "UPDATE <app_id>", then export again and compare. Destiny or Jason, never an agent; audited with before and after.
 Decision:   Built from the live manifest, never a stored one (the registry's copy has its URLs cleaned and secrets redacted). A scope change says reinstall_needed; the picture stays manual (no API).
+
+## 2026-11-15 20:30 — Approve posts, as the standard
+Intent:     Destiny: no trial window. The Media Twin drafts, the cards come to Slack, we approve, it posts.
+Files:      server/src/mediaPosts.ts, server/test/media-claims.test.cjs, CLAUDE.md
+Problem:    The trial window ended Sat 14 Nov, so Approve fell back to the pattern gate and only recorded. MTP-1794769116757-B8AQ was approved and nothing posted; it went out by running Media Twin — Post Approved Draft by hand (execution 90685).
+Fix:        autoPostFor posts any approved Instagram, X or Facebook platform, any day, no pattern needed; LinkedIn by hand; a test draft only checks. APPROVER_TRIAL and trialWindow removed.
+Decision:   Approval stays the person's step. Posting straight from the draft comes later.
