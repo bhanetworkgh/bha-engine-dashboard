@@ -448,7 +448,9 @@ export async function create(input: CreateInput) {
     // The doctrine gate: every platform this draft sends answers the two questions, and one that fails never
     // reaches Jason. A platform carried over from the parent keeps the answer it was approved with.
     const sent = Object.keys(raw);
-    const doc = doctrineCheck(input.doctrine_check, sent, parent?.occasion ?? occasion);
+    // The rewrite path carries the check inside its sources; the daily draft sends it beside them.
+    const srcCheck = input.sources && typeof input.sources === 'object' ? (input.sources as Record<string, unknown>).doctrine_check : undefined;
+    const doc = doctrineCheck(input.doctrine_check ?? srcCheck, sent, parent?.occasion ?? occasion);
     if (doc.failures.length) refuse('doctrine_check_failed', `This draft fails Jason's vFarm doctrine checklist (SOPs ${DOCTRINE_SOPS.map((x) => x.slice(0, 8)).join(', ')}), so it does not go to Jason: ${doc.failures.join('; ')}. Rewrite those platforms, or on an occasion post say in occasion_exempt why the contrast does not fit.`);
     for (const k of Object.keys(platforms)) {
       if (!sent.includes(k) && parent?.doctrine?.platforms?.[k as Platform]) doc.record.platforms[k as Platform] = parent.doctrine.platforms[k as Platform];
@@ -469,7 +471,7 @@ export async function create(input: CreateInput) {
       images: [],
       platforms,
       claim_check_status: overall,
-      sources: (input.sources && typeof input.sources === 'object' ? input.sources : {}) as Record<string, unknown>,
+      sources: (() => { const x = { ...((input.sources && typeof input.sources === 'object' ? input.sources : {}) as Record<string, unknown>) }; delete x.doctrine_check; return x; })(),
       doctrine: doc.record,
       drafted_by: s(input.drafted_by, 80) ?? 'media_twin',
       slack_channel: null,
