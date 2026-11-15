@@ -49,6 +49,7 @@ import * as providers from './providers';
 import * as healthReport from './healthReport';
 import * as repairs from './repairs';
 import * as doctrineDrillTools from './mcp/doctrineDrillTools';
+import * as slackAppUpdateTools from './mcp/slackAppUpdateTools';
 import * as submitLogTestTools from './mcp/submitLogTestTools';
 import * as logstreamE2eTools from './mcp/logstreamE2eTools';
 import * as un9dTools from './mcp/un9dTools';
@@ -705,6 +706,15 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       const body = await readJson(req, 16 * 1024);
       const out = (await doctrineDrillTools.runDoctrineDrillTool.handler(body as Record<string, unknown>, { access: 'write' } as never)) as { ok: boolean; step?: string; reason?: string; message?: string };
       await mirror.logWrite({ endpoint, kind: 'doctrine_drill', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: 'QNDM-DRILL', outcome: out.ok ? 'updated' : 'rejected', detail: `${String(body.step ?? '')}${out.ok ? '' : `: ${out.reason} ${out.message ?? ''}`}`.slice(0, 400), ms: Date.now() - t0 });
+      return send(res, out.ok ? 200 : 422, out);
+    }
+    // update_slack_app's handler (15 Nov 2026), for when the connector's tool list has not picked the tool up.
+    // Same guards: Destiny or Jason, a reason, confirm "UPDATE <app_id>" to write; audited on engine_mcp_writes.
+    if (p === '/api/engine/slack-app-update') {
+      if (method !== 'POST') throw new HttpError(405, 'POST the update_slack_app arguments.');
+      const body = decodeBodyB64(await readJson(req, 64 * 1024));
+      const out = (await slackAppUpdateTools.updateSlackApp.handler(body as Record<string, unknown>, { access: 'write' } as never)) as { ok: boolean; applied?: boolean; reason?: string; message?: string };
+      await mirror.logWrite({ endpoint, kind: 'slack_apps', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: String((body as Record<string, unknown>).app_id ?? ''), outcome: out.ok ? (out.applied ? 'updated' : 'read') : 'rejected', detail: out.message ?? out.reason ?? null });
       return send(res, out.ok ? 200 : 422, out);
     }
     // prepare_code_check's own handler (3 Nov 2026), for when the connector's tool list has not picked the
