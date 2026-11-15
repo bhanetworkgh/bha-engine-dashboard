@@ -15462,3 +15462,10 @@ Files:      server/src/mediaPosts.ts, server/test/media-claims.test.cjs, CLAUDE.
 Problem:    The trial window ended Sat 14 Nov, so Approve fell back to the pattern gate and only recorded. MTP-1794769116757-B8AQ was approved and nothing posted; it went out by running Media Twin — Post Approved Draft by hand (execution 90685).
 Fix:        autoPostFor posts any approved Instagram, X or Facebook platform, any day, no pattern needed; LinkedIn by hand; a test draft only checks. APPROVER_TRIAL and trialWindow removed.
 Decision:   Approval stays the person's step. Posting straight from the draft comes later.
+
+## 2026-11-15 21:20 — Layer 1 no longer reads the code review
+Intent:     Destiny: keep the code review, but side by side with the normal review, so it never sets pay.
+Files:      n8n Bays — Submit Actions (YTpezWSOIN6TNYcX, Layer 1 prompt and the overview sticky), CLAUDE.md
+Problem:    Destiny's 15 Nov log pre-checked at 100% and came back at 65% on submission (U0AEW3TBYH1_1794773077314). The code review fed Layer 1 and held pay where it had no tool to see the proof (the Bays scheduled runs) and rated two parts one level lower. The pre-check never runs the code review, so the two could not agree.
+Fix:        The CODE REVIEW block was taken out of the Layer 1 prompt. The code review still runs in the same place, writes Code Review on the row, its paragraph on Jason's card, its record post in #bha-code-reviews and its section in the after-approval summary. Published as 3a026dea, read back: activeVersionId = versionId, no codeReview expression left in Layer 1. Restore point 92e63884.
+Decision:   The code review is a record beside the review, not an input to pay. Jason still sees it.
