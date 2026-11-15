@@ -15483,3 +15483,10 @@ Files:      server/src/paySuggest.ts, server/test/pay-suggest.test.cjs
 Problem:    Layer 1 wrote the claim on CODEX-20261114-destiny-arupi-same-day-logs-bha-rss with a level 3 proof (BAYS-SCHED-1794697211286-6RI0 to -W6OZ), but named the part "skill restoration real production event (held 5%)". matchReleases pairs claim and held part by word overlap (0.5 or more); against "Skill restoration, Bays to Sonnet, skill-watch hardening" it was 2 of 6 words, so the part read "this log does not bring proof for it".
 Fix:        When the hold has one held part and the claim on that named log has one part, they are paired whatever the wording. With more parts on either side the word match still decides. pay-suggest 23 of 23.
 Decision:   The log id is the strong key; the part name is the review's paraphrase.
+
+## 2026-11-15 21:48 — Review card refreshed with the release
+Intent:     Destiny: Jason's card for U0AEW3TBYH1_1794775030108 should show Saturday's 5% release before he approves.
+Files:      n8n Engine — Review Card Refresh Runner (WVMulAIXl7WivNWU, BHA Engine / Destiny, unpublished), BUILD_LOG.md
+Problem:    The card was posted before 1ed4973 re-scored the row, and no MCP tool calls /api/engine/review-card/refresh-pay.
+Fix:        A small runner (chat trigger, Read Request, Refresh On Dashboard with the inbound key, Answer) calls the route. Dry run 90791, then run 90792: the card now reads "Approve releases 5% of a day while the box is ticked" with the 7 scheduled runs as proof, and its buttons carry the release share, so Jason's Approve releases it and the pay card shows it.
+Decision:   Not released from the dashboard first: the card would then promise a release Approve could no longer make.
