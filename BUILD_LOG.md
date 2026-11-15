@@ -15408,3 +15408,10 @@ Intent:     Run Engine — Log Pre-Check on today's narration.
 Files:      server/src/logPrecheck.ts (codeReviewFill, resolvePrompt takes the request's description, session_url and summary), server/test/log-precheck.test.cjs (1 check).
 Problem:    Pre-check run 89776 refused: "The review's prompt now carries an expression the pre-check does not know how to fill ({{ ($json.codeReviewLog || {}).session_description || 'not given' }})". D2 put the code review, description, recording and summary into Layer 1's prompt, and the pre-check fills only the expressions it knows, by design.
 Fix:        A codeReviewLog expression reads the request's description, session_url or summary when given, else its own fallback, else "not given"; any other code review expression reads "No code review in a pre-check: it runs at submission, before this review." Any other unknown expression is still refused. log-precheck 7 of 7.
+
+## 2026-11-15 12:20 — /held-pay: held pay in Slack
+Intent:     Destiny: a command that lists a builder's held pay, why, and what releases it, so builders (Ahad first) can keep track of what proof they owe.
+Files:      server/src/heldPay.ts (new), server/src/index.ts (route /api/engine/held-pay), server/test/held-pay.test.cjs (new), package.json (test:held-pay), CLAUDE.md.
+Problem:    No local TypeScript (node_modules has no typescript or @types/node, and package installs are off); the global tsc is 7.0, which refuses moduleResolution Node10.
+Fix:        Typechecked with tsc 7 under moduleResolution bundler and no node types: the only error in heldPay.ts is the missing `process` type every file shares, and index.ts has the same error count before and after. Emitted heldPay and its imports to /tmp and ran the new test (6 checks) and pay-suggest (21) against it.
+Decision:   Reads payNote.held(), never a second list, so the command and the Held tab cannot disagree. Percent of a day only. Only Destiny or Jason may look at someone else; a builder naming someone else gets their own list and a line saying so, not a refusal.

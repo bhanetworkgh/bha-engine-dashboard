@@ -79,6 +79,7 @@ import * as systemFeeds from './systemFeeds';
 import * as genieBuilder from './genieBuilder';
 import * as mediaWeekly from './mediaWeekly';
 import * as payNote from './payNote';
+import * as heldPay from './heldPay';
 import * as payCard from './payCard';
 import * as narrationAudio from './narrationAudio';
 import * as outsideDigest from './outsideDigest';
@@ -1010,6 +1011,20 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         },
         describe: (r) => `${r.submission_id}: ${r.dry_run ? 'would rewrite' : 'rewrote'} its review card as approved`.slice(0, 400),
         hint: 'POST { submission_id, approver_user_id, channel?, ts?, approved_at?, early_reason?, missing?, notes_added?, dry_run? }. Rewrites the card to say whose log it was, the session, when, and who approved it.',
+      },
+      /** /held-pay (15 Nov 2026, Destiny; heldPay.ts): the asker's held pay, why, and what proof releases it, for Bays to post only to them. Reads; writes nothing. */
+      '/api/engine/held-pay': {
+        kind: 'pay_sessions',
+        store: async (b) => {
+          try {
+            return { ...(await heldPay.answer(b)), dry_run: true };
+          } catch (e) {
+            if (e instanceof heldPay.HeldPayError) throw new systemFeeds.FeedError(e.status, `${e.reason}: ${e.message}`);
+            throw e;
+          }
+        },
+        describe: (r) => `/held-pay for ${String(r.target)}: ${String(r.logs)} held log(s), ${String(r.held_share)} of a day`,
+        hint: 'POST { user_id (the Slack id that typed the command), text? (a name, a mention or "all"; only Destiny or Jason may name someone else) }. Answers { text } for an ephemeral reply.',
       },
       /** LogStream (9 Nov 2026): the builder's approved logs this one may repeat. Layer 0 asks before the completeness check. Reads; writes nothing. */
       '/api/engine/relog-check': {
