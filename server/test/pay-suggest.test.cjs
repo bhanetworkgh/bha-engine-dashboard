@@ -100,4 +100,14 @@ assert.equal(p.parseParts([{ what: 'a', kind: 'investigation' }])[0].kind, 'non_
 assert.equal(p.suggest({ 'Log Class': 'fresh_build', 'Work Parts': '[]' }), null); ok('no work parts and not a re-log: no suggestion');
 assert.deepEqual(p.parseParts('not json'), []); assert.equal(p.parseParts([{ what: 'a' }])[0].new_this_session, true); ok('work parts parse from a JSON string or an array');
 
+// 15 Nov 2026 (Destiny): one held part, one claimed part, the earlier log named by id: matched however it is worded.
+{
+  const hold = { submission_id: 'U_1', codex_entry_id: 'CODEX-20261114-x', held_share: 0.05, release_condition: 'Skill restoration, Bays to Sonnet, skill-watch hardening: one real production event for it, logged', reason_tag: 'NEEDS_LIVE_EVENT', released_parts: [], suggested: { parts: [{ what: 'Skill restoration, Bays to Sonnet, skill-watch hardening', status: 'live_pending', score: 0.5, tag: 'NEEDS_LIVE_EVENT' }] } };
+  const claim = [{ log: 'CODEX-20261114-x', parts: [{ what: 'skill restoration real production event (held 5%)', proof: 'BAYS-SCHED-1794697211286-6RI0, 7 of 7 runs', proof_level: 3, awaiting_customer: false }] }];
+  let r = p.matchReleases([hold], claim);
+  assert.equal(r.total_share, 0.05); assert.equal(r.items[0].parts[0].ok, true); ok('one held part and one claimed part on the named log are matched however worded');
+  r = p.matchReleases([{ ...hold, suggested: { parts: [hold.suggested.parts[0], { what: 'another thing entirely', status: 'held', score: 0, tag: 'INSUFFICIENT_PROOF' }] } }], claim);
+  assert.equal(r.items[0].parts.every((x) => !x.ok), true); ok('with two held parts, a reworded claim still has to match by its words');
+}
+
 console.log(`pay-suggest: ${n} passed`);

@@ -473,7 +473,8 @@ export function matchReleases(holds: HoldRow[], claims: ReleaseClaim[]): Release
       open.push({ submission_id: h.submission_id, codex_entry_id: h.codex_entry_id, held_share: h.held_share, ...about });
       continue;
     }
-    const parts: ReleasePart[] = heldParts(h).map((p) => {
+    const held = heldParts(h);
+    const parts: ReleasePart[] = held.map((p) => {
       let best: ReleaseClaimPart | null = null;
       let score = 0;
       for (const c of claim.parts) {
@@ -483,7 +484,12 @@ export function matchReleases(holds: HoldRow[], claims: ReleaseClaim[]): Release
           best = c;
         }
       }
-      if (!best || score < 0.5) return { ...p, ok: false, proof: '', why: 'this log does not bring proof for it' };
+      // One held part, one claimed part, and the log names that earlier log by its id (15 Nov 2026, Destiny): the
+      // claim is about that part however the review worded it. Layer 1 rewords the held part's name, so word overlap
+      // alone left Saturday's 5% held although the log named the log and a level 3 proof.
+      if ((!best || score < 0.5) && held.length === 1 && claim.parts.length === 1) best = claim.parts[0];
+      else if (!best || score < 0.5) best = null;
+      if (!best) return { ...p, ok: false, proof: '', why: 'this log does not bring proof for it' };
       if (!hasEvidence(best.proof)) return { ...p, ok: false, proof: '', why: 'claimed, but no proof is named' };
       const live = p.held_for === 'NEEDS_LIVE_EVENT' || p.held_for === 'TEST_ONLY';
       if (live) {

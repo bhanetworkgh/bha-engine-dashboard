@@ -15476,3 +15476,10 @@ Files:      server/src/index.ts
 Problem:    GET /api/pay/notes answered 404 in 1ms (search_logs, 20:21 to 20:22 UTC). Its handler sat inside the `if (method === 'POST')` block, so a GET never reached it; /api/pay/notes/history had the same fault.
 Fix:        Both GETs answered before the POST block, same handlers, same admin gate in front.
 Decision:   The old branches inside the POST block are left; they are unreachable for GET and harmless.
+
+## 2026-11-15 21:45 — A named earlier log's one held part is released however the review words it
+Intent:     Destiny: Saturday's 5% did not release although today's log has a whole arc of proof for it.
+Files:      server/src/paySuggest.ts, server/test/pay-suggest.test.cjs
+Problem:    Layer 1 wrote the claim on CODEX-20261114-destiny-arupi-same-day-logs-bha-rss with a level 3 proof (BAYS-SCHED-1794697211286-6RI0 to -W6OZ), but named the part "skill restoration real production event (held 5%)". matchReleases pairs claim and held part by word overlap (0.5 or more); against "Skill restoration, Bays to Sonnet, skill-watch hardening" it was 2 of 6 words, so the part read "this log does not bring proof for it".
+Fix:        When the hold has one held part and the claim on that named log has one part, they are paired whatever the wording. With more parts on either side the word match still decides. pay-suggest 23 of 23.
+Decision:   The log id is the strong key; the part name is the review's paraphrase.
