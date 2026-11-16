@@ -15497,3 +15497,10 @@ Files:      server/src/helpPages.ts, server/src/mcp/helpPageTools.ts, server/src
 Problem:    in_corpus needs a cst-help-manuals document id, and no code wrote to that workspace: helpPages.ts said so, set_help_page_stage only recorded an id it was given, and the dashboard held no key for the workspace.
 Fix:        helpPages.publish(): Destiny or Jason, the page at checked with its text still the checked text, BHARAG_CST_HELP_KEY set (Destiny made it in the BHARAG console today for that workspace only and put it on Render). It sends the exact checked text through the write guard (workspace label cst_help), reads the document back by id and compares it word for word, then records in_corpus through setStage. Every refusal leaves the page at checked; a document that landed but read back different is named. Tool publish_help_page on the write connection, no agent's scope, audited kind help_pages. ingestWithKey takes the guard's workspace label (default codex, so its callers are unchanged).
 Decision:   The key is not added to INGEST_KEY_VARS: that would open POST /api/engine/bharag-write to the library, and only a page Hardik checked may go in.
+
+## 2026-11-16 16:05 — publish_help_page has an engine route too
+Intent:     Run the publish on the two checked pages today.
+Files:      server/src/index.ts, BUILD_LOG.md
+Problem:    After the deploy the connector's tool list in the Claude session still held the old list (set_help_page_stage's old description), so publish_help_page could not be called.
+Fix:        POST /api/engine/help-page-publish (x-dashboard-key, body_b64 accepted like every engine POST), the same helpPages.publish, the pattern the other tools follow for this. Called from an unpublished n8n runner.
+Decision:   No new rule: the route is a second door to the same function.

@@ -981,6 +981,24 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         describe: (r) => `${r.dry_run ? 'would make' : 'making'} narration audio "${r.title}": ${r.pieces} pieces, ${r.characters} characters, to ${r.deliver_to}`.slice(0, 400),
         hint: 'POST { text or text_b64, title?, deliver_to? (Destiny or Jason), model?, voice?, dry_run? }. Answers at once; the mp3 arrives in the DM, or a DM saying where it stopped.',
       },
+      /** A checked help page into cst-help-manuals, the same handler as publish_help_page, for when the connector has not picked the tool up (16 Nov 2026). */
+      '/api/engine/help-page-publish': {
+        kind: 'help_pages',
+        store: async (b) => {
+          try {
+            const r = await helpPages.publish(
+              { page_id: String(b.page_id ?? ''), requester_user_id: String(b.requester_user_id ?? ''), body_sha256: typeof b.body_sha256 === 'string' ? b.body_sha256 : null, note: typeof b.note === 'string' ? b.note : null },
+              { dry_run: b.dry_run === true },
+            );
+            return { ...r, page: { page_id: r.page.page_id, stage: r.page.stage, bharag_doc_id: r.page.bharag_doc_id, body_sha256: r.page.body_sha256 }, inserted: 0, updated: r.written ? 1 : 0, unchanged: r.written ? 0 : 1 };
+          } catch (e) {
+            if (e instanceof helpPages.HelpPageError) throw new systemFeeds.FeedError(e.reason === 'not_found' ? 404 : e.reason === 'not_permitted' ? 403 : 422, `${e.reason}: ${e.message}`);
+            throw e;
+          }
+        },
+        describe: (r) => String(r.message ?? '').slice(0, 400),
+        hint: 'POST { page_id, requester_user_id (Destiny or Jason), body_sha256?, note?, dry_run? }. Only a page Hardik checked; sent, read back, then recorded in_corpus.',
+      },
       /** The pay part of a log's review card, rewritten in place from its Pay Suggestion (10 Nov 2026, reviewCard.ts). */
       '/api/engine/review-card/refresh-pay': {
         kind: 'codex',
