@@ -15551,3 +15551,10 @@ Fix:        optional sort "newest": most recently raised first and no Slack read
 Intent:     Destiny: give Genie what Claude and ChatGPT do in Slack (summarise, search, draft, recurring tasks, speak up unasked, channel memory, admin log and limits). Genie has no store of its own for the stateful parts, so they live here.
 Files:      server/src/genieControl.ts, server/src/migrations.ts (139), server/src/index.ts, src/screens/Genie/Controls.tsx, src/screens/Genie/index.tsx, src/data/*, CLAUDE.md
 Decision:   one route with an op rather than twelve routes; a recurring task is claimed and moved forward in one transaction so two Genie instances never run it twice; following, speaking up and limits are Destiny's or Jason's only.
+
+## 2026-11-16 19:20 — read_slack reads the threads that moved, and a search reads wider
+Intent:     Genie's "where did we decide the Form A retirement?" found nothing, though Destiny posted the decision at 13:27 that day in #bha-coordination.
+Files:      server/src/mcp/northStarTools.ts, CLAUDE.md
+Problem:    engine_writes 303407 and 303409: read_slack 168h "Form A, retire…" returned 23 of 56, and "retire, retiring…" 11 of 11, neither with the message. Threads were picked by when they started (newest 25 parents), so a reply today in the NZPQ thread opened 13 Nov was never read.
+Fix:        Threads are sorted by latest_reply. With keywords: 200 history messages a channel, 60 threads, 200 replies a thread. Answer filtering and the budget are unchanged.
+Decision:   The wider read only applies to keyword searches, whose answer is filtered anyway; the default digest keeps the 22 Sep caps.

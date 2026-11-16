@@ -44,7 +44,11 @@ export const PEOPLE: Record<string, string> = {
 /* The source's caps (RS - Collect Messages, RS - Build Digest, the HTTP nodes). */
 const HISTORY_LIMIT = 50;
 const MAX_THREADS = 25;
+/** A keyword search reads more of each channel and more threads (16 Nov 2026): its answer is filtered, so the wider read costs reads, not answer size. */
+const HISTORY_LIMIT_SEARCH = 200;
+const MAX_THREADS_SEARCH = 60;
 const REPLIES_LIMIT = 50;
+const REPLIES_LIMIT_SEARCH = 200;
 const SLACK_CHARS = 60_000;
 /** read_slack's default row count when neither since_hours nor slack_channel narrows it (2026-09-24). */
 const DEFAULT_MESSAGES = 40;
@@ -249,11 +253,12 @@ async function readSlackUncached(args: ReadSlackArgs): Promise<Record<string, un
     };
   }
   const plans = chans.map((c) => ({ channel_id: c.id, channel_name: c.name ?? c.id, oldest, hours }));
+  const searching = String(args.keywords || '').trim().length > 0;
 
   /* RS - Channel History */
   let res: Record<string, unknown>[];
   try {
-    res = await batched(plans, (p) => slackCall(tok, 'conversations.history', { channel: p.channel_id, oldest: p.oldest, limit: HISTORY_LIMIT }));
+    res = await batched(plans, (p) => slackCall(tok, 'conversations.history', { channel: p.channel_id, oldest: p.oldest, limit: searching ? HISTORY_LIMIT_SEARCH : HISTORY_LIMIT }));
   } catch (e) {
     if (e instanceof slack.SlackRateLimited) throw e;
     return { ok: false, reason: 'slack_error', step: 'conversations.history', message: e instanceof Error ? e.message : String(e) };
@@ -261,7 +266,7 @@ async function readSlackUncached(args: ReadSlackArgs): Promise<Record<string, un
 
   /* RS - Collect Messages */
   const parents: { channel_id: string; channel: string; ts: string; user: string; bot: boolean; bot_name: string; text: string; reply_count: number }[] = [];
-  const threads: { channel_id: string; channel: string; ts: string; oldest: number }[] = [];
+  const threads: { channel_id: string; channel: string; ts: string; oldest: number; latest: number }[] = [];
   const failed: string[] = [];
   res.forEach((r, i) => {
     const p = plans[i];
@@ -273,17 +278,20 @@ async function readSlackUncached(args: ReadSlackArgs): Promise<Record<string, un
     for (const m of (r.messages as SlackMsg[]) || []) {
       if (m.subtype && SKIP.includes(m.subtype)) continue;
       parents.push({ channel_id: p.channel_id, channel: p.channel_name, ts: m.ts, user: m.user || '', bot: !!m.bot_id, bot_name: (m.bot_profile && m.bot_profile.name) || m.username || '', text: String(m.text || '').slice(0, 2000), reply_count: m.reply_count || 0 });
-      if ((m.reply_count || 0) > 0 && parseFloat(m.latest_reply || '0') >= p.oldest) threads.push({ channel_id: p.channel_id, channel: p.channel_name, ts: m.ts, oldest: p.oldest });
+      if ((m.reply_count || 0) > 0 && parseFloat(m.latest_reply || '0') >= p.oldest) threads.push({ channel_id: p.channel_id, channel: p.channel_name, ts: m.ts, oldest: p.oldest, latest: parseFloat(m.latest_reply || m.ts) });
     }
   });
-  threads.sort((a, b) => parseFloat(b.ts) - parseFloat(a.ts));
+  // The threads replied to most recently, not the ones started most recently
+  // (16 Nov 2026): a decision made today in a thread opened three days ago was
+  // never read, so a search for it found nothing. A keyword search reads wider.
+  threads.sort((a, b) => b.latest - a.latest);
   const threadsTotal = threads.length;
-  const titems = threads.slice(0, MAX_THREADS);
+  const titems = threads.slice(0, searching ? MAX_THREADS_SEARCH : MAX_THREADS);
 
   /* RS - Thread Replies (the source's api.test placeholder, when there are no threads, calls nothing here) */
   let reps: Record<string, unknown>[];
   try {
-    reps = await batched(titems, (t) => slackCall(tok, 'conversations.replies', { channel: t.channel_id, ts: t.ts, oldest: t.oldest, limit: REPLIES_LIMIT }));
+    reps = await batched(titems, (t) => slackCall(tok, 'conversations.replies', { channel: t.channel_id, ts: t.ts, oldest: t.oldest, limit: searching ? REPLIES_LIMIT_SEARCH : REPLIES_LIMIT }));
   } catch (e) {
     if (e instanceof slack.SlackRateLimited) throw e;
     return { ok: false, reason: 'slack_error', step: 'conversations.replies', message: e instanceof Error ? e.message : String(e) };
@@ -341,7 +349,7 @@ async function readSlackUncached(args: ReadSlackArgs): Promise<Record<string, un
     channels_read: plans.length,
     channels_failed: failed,
     threads_expanded: titems.length,
-    threads_not_expanded: Math.max(0, threadsTotal - MAX_THREADS),
+    threads_not_expanded: Math.max(0, threadsTotal - (searching ? MAX_THREADS_SEARCH : MAX_THREADS)),
     messages_matched: kept.length,
     messages_returned: out.length,
     truncated: out.length < kept.length,
