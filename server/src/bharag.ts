@@ -487,10 +487,10 @@ export async function getDocument(ws: IngestWorkspace, id: string, keyVar?: stri
  * (`BHARAG_SOPS_KEY`), never a guessed one. An ingest goes through the write
  * guard first, as every ingest from this server does.
  */
-export async function ingestWithKey(keyVar: string, doc: IngestDocument, source: string): Promise<{ ok: boolean; id: string | null; detail: string }> {
+export async function ingestWithKey(keyVar: string, doc: IngestDocument, source: string, workspace = 'codex'): Promise<{ ok: boolean; id: string | null; detail: string }> {
   const key = process.env[keyVar]?.trim();
   if (!key) return { ok: false, id: null, detail: `${keyVar} is not set on this server, so nothing was sent to BHARAG.` };
-  const g = await guard({ workspace: 'codex', title: doc.title, content: doc.content, kind: 'record', source, metadata: doc.metadata, via: 'dashboard' });
+  const g = await guard({ workspace, title: doc.title, content: doc.content, kind: 'record', source, metadata: doc.metadata, via: 'dashboard' });
   if (!g.allow) return { ok: false, id: null, detail: `refused by the BHARAG write guard: ${g.reason}` };
   try {
     const r = await call<Record<string, unknown>>('/ingest', key, { ...doc, title: g.title, content: g.content, metadata: g.metadata });

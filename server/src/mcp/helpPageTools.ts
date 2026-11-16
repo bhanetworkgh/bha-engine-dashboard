@@ -8,6 +8,8 @@
  *   `set_help_page_stage`    — write connection, no agent's scope, refused on any agent token.
  *                              checked (on Hardik's own Slack message), in_corpus (with the BHARAG doc id),
  *                              or back_to_draft.
+ *   `publish_help_page`      — write connection, no agent's scope. Sends a checked page to cst-help-manuals,
+ *                              reads it back, then records in_corpus (16 Nov 2026).
  *
  * Every write call is on engine_mcp_writes, kind help_pages, refused ones included.
  */
@@ -116,7 +118,7 @@ export const writeHelpPage: ToolDefinition = {
 
 export const setHelpPageStage: ToolDefinition = {
   name: 'set_help_page_stage',
-  description: `Move a CST help page along: checked (Hardik passed this exact text against Honest Gate; evidence_link must be Hardik's own Slack message and Slack must confirm he posted it), in_corpus (the checked text is in BHARAG's cst-help-manuals; bharag_doc_id required, and only from checked), or back_to_draft (with a note). HELD HERE: Destiny, Jason or Hardik only; in_corpus by Destiny or Jason. Pass body_sha256 from read_help_pages so a check is never recorded against text that changed since. Nothing here writes to BHARAG. dry_run writes nothing. Refused on any agent token. Audited on engine_mcp_writes.`,
+  description: `Move a CST help page along: checked (Hardik passed this exact text against Honest Gate; evidence_link must be Hardik's own Slack message and Slack must confirm he posted it), in_corpus (the checked text is in BHARAG's cst-help-manuals; bharag_doc_id required, and only from checked), or back_to_draft (with a note). HELD HERE: Destiny, Jason or Hardik only; in_corpus by Destiny or Jason. Pass body_sha256 from read_help_pages so a check is never recorded against text that changed since. Nothing here writes to BHARAG: publish_help_page does, and records in_corpus itself. dry_run writes nothing. Refused on any agent token. Audited on engine_mcp_writes.`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -150,5 +152,35 @@ export const setHelpPageStage: ToolDefinition = {
     ),
 };
 
+export const publishHelpPage: ToolDefinition = {
+  name: 'publish_help_page',
+  description: `Put one checked CST help page into BHARAG's cst-help-manuals, the library CST answers customers from, and record it in_corpus. Only a page at checked whose text is still the text Hardik checked. The exact text is sent through the write guard with ${help.HELP_KEY_VAR}, read back from BHARAG by its document id and compared word for word, and only then is the page marked in_corpus with that id. Any refusal leaves the page at checked. HELD HERE: Destiny or Jason only (requester_user_id). Pass body_sha256 from read_help_pages. dry_run sends nothing. Refused on any agent token. Audited on engine_mcp_writes.`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      page_id: { type: 'string' },
+      body_sha256: { type: 'string', description: 'The body_sha256 you read. Optional, recommended.' },
+      note: { type: 'string' },
+      requester_user_id: { type: 'string', description: 'Destiny or Jason.' },
+      dry_run: { type: 'boolean' },
+    },
+    required: ['page_id', 'requester_user_id'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: 'Put a checked CST help page into cst-help-manuals' },
+  handler: (args, deps) =>
+    guarded('publish_help_page', args, deps, (dry) =>
+      help.publish(
+        {
+          page_id: str(args, 'page_id'),
+          requester_user_id: str(args, 'requester_user_id'),
+          body_sha256: str(args, 'body_sha256') || null,
+          note: str(args, 'note') || null,
+        },
+        { dry_run: dry },
+      ),
+    ),
+};
+
 export const HELP_READ_TOOLS: ToolDefinition[] = [readHelpPages];
-export const HELP_WRITE_TOOLS: ToolDefinition[] = [writeHelpPage, setHelpPageStage];
+export const HELP_WRITE_TOOLS: ToolDefinition[] = [writeHelpPage, setHelpPageStage, publishHelpPage];

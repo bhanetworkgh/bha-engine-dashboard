@@ -32,6 +32,16 @@ const reason = async (p, r) => assert.rejects(p, (x) => { assert.equal(x.reason,
   assert.equal(h.stageLabel({ stage: 'checked', gaps: [] }), 'Checked by Hardik');
   assert.equal(h.stageLabel({ stage: 'in_corpus', gaps: [] }), 'In cst-help-manuals');
   ok('the stage reads in words, and a draft with gaps says how many');
+  {
+    const pg = { page_id: 'what-cst-can-do', title: 'What it can do', body: 'Line one.\n\n- a', body_sha256: 'abc', checked_by: HARDIK, checked_at: '2026-11-05T00:00:00Z', check_evidence: HARDIK_MSG };
+    const d = h.helpDocument(pg, DESTINY);
+    assert.equal(d.content, '# What it can do\n\nLine one.\n\n- a');
+    assert.equal(d.metadata.page_id, 'what-cst-can-do');
+    assert.equal(d.metadata.body_sha256, 'abc');
+    assert.equal(d.metadata.checked_by, HARDIK);
+    assert.equal(h.HELP_KEY_VAR, 'BHARAG_CST_HELP_KEY');
+  }
+  ok('a page goes to cst-help-manuals as its title and the exact checked text, carrying its hash and Hardik\'s check');
 
   const url = process.env.DATABASE_URL || '';
   if (!/@(localhost|127\.0\.0\.1)[:/]/.test(url) || !/_test(\?|$)/.test(url)) {

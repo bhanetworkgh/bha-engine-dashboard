@@ -12,7 +12,7 @@
  *                text, so any edit afterwards puts the page back to draft and the old check stays in
  *                the history only.
  *   in_corpus  — the checked text is in BHARAG's cst-help-manuals workspace, with that doc's id.
- *                Only a checked page can get there. This file never writes to BHARAG itself.
+ *                Only a checked page can get there, and only through publish() below (16 Nov 2026).
  *
  * CST never reads these rows: it answers only from cst-help-manuals. Agents may read every stage,
  * and the read says which stage each page is at, so a draft is never quoted to a customer as final.
@@ -22,6 +22,7 @@ import { query, withTransaction, type Queryable } from './pg';
 import { record } from './engineEvents';
 import { changed } from './events';
 import { parseLink, slackAuthor, type MessageCheck } from './chargeGate';
+import * as bharag from './bharag';
 
 export const DESTINY = 'U0AEW3TBYH1';
 export const JASON = 'U0A9V97949F';
@@ -328,4 +329,87 @@ export async function read(): Promise<{ pages: Array<HelpPage & { stage_label: s
     counts.gaps_open += p.gaps.length;
   }
   return { pages: pages.map((p) => ({ ...p, stage_label: stageLabel(p), customer_safe: p.stage === 'in_corpus' })), counts, rules: RULES };
+}
+
+/* ------------------------------------------------------------- publish */
+
+/**
+ * Putting a checked page into cst-help-manuals (16 Nov 2026, Destiny — watch DW-1793105843791-H1WJ, Jason's
+ * ask of 27 Oct: at least one help page from draft to checked to in_corpus). Until this nothing wrote to that
+ * workspace, so in_corpus could not be reached. One key, BHARAG_CST_HELP_KEY, no default; the key Destiny made
+ * in the BHARAG console for this workspace only.
+ *
+ * In order, and each step refuses by name and leaves the page as it was: the caller is Destiny or Jason; the
+ * page is at checked and its text is still the text Hardik checked; the key is set. Then the exact checked text
+ * is sent through the write guard, the document is read back from BHARAG by its id and compared word for word
+ * (whitespace may differ, as BHARAG normalises it), and only then is the page recorded in_corpus with that
+ * document's id, through setStage, which checks the stage and the text again. A document that landed but did
+ * not read back the same is named, and the page stays at checked.
+ */
+export const HELP_KEY_VAR = 'BHARAG_CST_HELP_KEY';
+
+export interface PublishInput {
+  page_id: string;
+  requester_user_id: string;
+  body_sha256?: string | null;
+  note?: string | null;
+}
+
+export interface PublishDeps {
+  send?: (doc: bharag.IngestDocument) => Promise<{ ok: boolean; id: string | null; detail: string }>;
+  readBack?: (id: string) => Promise<{ title?: string | null; raw_content?: string | null } | null>;
+}
+
+/** The document a page becomes. Pure, so the text sent is the text the test checks. */
+export function helpDocument(p: HelpPage, who: string): bharag.IngestDocument {
+  return {
+    title: p.title,
+    content: `# ${p.title}\n\n${p.body}`,
+    source_type: 'manual',
+    content_type: 'doc',
+    project_tags: ['cst-help', 'vfarm-pilot'],
+    metadata: {
+      doc_type: 'cst_help_page',
+      page_id: p.page_id,
+      body_sha256: p.body_sha256,
+      checked_by: p.checked_by,
+      checked_at: p.checked_at,
+      check_evidence: p.check_evidence,
+      published_by: who,
+      published_via: 'mcp:publish_help_page',
+    },
+  };
+}
+
+const words = (t: string): string => t.split(/\s+/).filter(Boolean).join(' ');
+
+export async function publish(i: PublishInput, opts: { dry_run?: boolean } & PublishDeps = {}): Promise<{ ok: true; written: boolean; page: HelpPage; message: string; bharag_doc_id?: string; read_back?: string }> {
+  const who = (i.requester_user_id ?? '').trim();
+  if (who !== DESTINY && who !== JASON) throw new HelpPageError('not_permitted', 'Only Destiny or Jason puts a page into cst-help-manuals.');
+  const page = await get((i.page_id ?? '').trim());
+  if (!page) throw new HelpPageError('not_found', `No help page "${i.page_id}".`);
+  const sentSha = (i.body_sha256 ?? '').trim();
+  if (sentSha && sentSha !== page.body_sha256) throw new HelpPageError('text_changed', `${page.page_id} has changed since you read it. Read it again.`);
+  if (page.stage === 'in_corpus') throw new HelpPageError('already_in_corpus', `${page.page_id} is already in cst-help-manuals as ${page.bharag_doc_id}.`);
+  if (page.stage !== 'checked') throw new HelpPageError('wrong_stage', `${page.page_id} is ${stageLabel(page)}. Only a page Hardik has checked goes into cst-help-manuals.`);
+  if (page.checked_sha256 !== page.body_sha256) throw new HelpPageError('text_changed', `${page.page_id}'s text is not the text Hardik checked.`);
+  const send = opts.send ?? ((d: bharag.IngestDocument) => bharag.ingestWithKey(HELP_KEY_VAR, d, `mcp:publish_help_page:${page.page_id}`, 'cst_help'));
+  if (!opts.send && !process.env[HELP_KEY_VAR]?.trim()) throw new HelpPageError('not_configured', `${HELP_KEY_VAR} is not set on this server, so nothing can be sent to cst-help-manuals.`);
+  const doc = helpDocument(page, who);
+  if (opts.dry_run) return { ok: true, written: false, page, message: `Dry run: ${page.page_id} (${doc.content.length} characters, the text Hardik checked) would be sent to cst-help-manuals, read back, and recorded in_corpus. Nothing was sent.` };
+  const sent = await send(doc);
+  if (!sent.ok || !sent.id) throw new HelpPageError('ingest_failed', `cst-help-manuals did not take ${page.page_id}: ${sent.detail}. The page stays checked.`);
+  const readBack = opts.readBack ?? ((id: string) => bharag.getDocument('codex', id, HELP_KEY_VAR));
+  let back: { title?: string | null; raw_content?: string | null } | null = null;
+  try {
+    back = await readBack(sent.id);
+  } catch (e) {
+    throw new HelpPageError('not_verified', `${page.page_id} was sent as ${sent.id}, but reading it back failed (${e instanceof Error ? e.message : String(e)}). The page stays checked; read ${sent.id} before recording it.`);
+  }
+  if (!back) throw new HelpPageError('not_verified', `${page.page_id} was sent as ${sent.id}, but BHARAG has no such document on read-back. The page stays checked.`);
+  const exact = (back.raw_content ?? '') === doc.content;
+  if (!exact && words(back.raw_content ?? '') !== words(doc.content)) throw new HelpPageError('not_verified', `${page.page_id} was sent as ${sent.id}, but the stored text differs from the text Hardik checked. The page stays checked; that document should be removed.`);
+  const read_back = exact ? 'stored text matches exactly' : 'stored text matches word for word (BHARAG normalised some whitespace)';
+  const r = await setStage({ page_id: page.page_id, action: 'in_corpus', requester_user_id: who, bharag_doc_id: sent.id, body_sha256: page.body_sha256, note: (i.note ?? '').trim() || `Sent to cst-help-manuals and read back: ${read_back}.` });
+  return { ok: true, written: true, page: r.page, message: `${page.page_id} is in cst-help-manuals as ${sent.id}; ${read_back}.`, bharag_doc_id: sent.id, read_back };
 }
