@@ -83,7 +83,6 @@ export function parseError(b: Record<string, unknown>): RssErrorInput {
 
 /** Who the cards tag: Destiny, who looks after BHA RSS (16 Nov 2026: "tag me"). */
 const mention = () => (process.env.RSS_ALERT_MENTION || 'U0AEW3TBYH1').trim();
-const DASHBOARD = () => (process.env.PUBLIC_DASHBOARD_URL || 'https://dashboard.bhanetwork.org').replace(/\/+$/, '');
 
 /** The error card, in Bays' style (16 Nov 2026, Destiny): header, Destiny tagged, the facts as fields, what next, a button. */
 export function errorMessage(e: RssErrorInput): { text: string; blocks: unknown[] } {
