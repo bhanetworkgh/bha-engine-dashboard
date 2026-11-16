@@ -21,6 +21,7 @@
  * It reads and posts. It changes nothing on BHA RSS.
  */
 import { query } from './pg';
+import { getMeta, setMeta } from './db';
 import { record } from './engineEvents';
 import * as timers from './timers';
 
@@ -147,8 +148,44 @@ async function claimAndPost(
   return { posted: false, error: p.error };
 }
 
+/** A pause on the error cards (16 Nov 2026, Destiny: no noise overnight). Reports still land as held events and post nothing; it ends on its own at `until`. */
+export const PAUSE_KEY = 'rss.errors_paused_until';
+export const HELD_EVENT = 'rss_error_held';
+
+export async function pausedUntil(now = new Date()): Promise<string | null> {
+  const v = await getMeta(PAUSE_KEY).catch(() => null);
+  if (!v) return null;
+  const t = Date.parse(v);
+  return Number.isFinite(t) && t > now.getTime() ? new Date(t).toISOString() : null;
+}
+
+/** POST { until (ISO with its zone, at most 7 days ahead), by } or { resume: true, by }. Destiny or Jason. */
+export async function setPause(b: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const by = String(b.by ?? '').trim();
+  if (by !== 'U0AEW3TBYH1' && by !== 'U0A9V97949F') throw new RssReportError(403, 'Only Destiny or Jason can pause the BHA RSS error cards.');
+  if (b.resume === true) {
+    await setMeta(PAUSE_KEY, '');
+    await record({ event_type: 'rss_errors_resumed', subject_id: 'bha-rss', lane: 'GENIE', actor: by, source_ref: 'dashboard', detail: {} });
+    return { ok: true, paused: false };
+  }
+  const raw = String(b.until ?? '').trim();
+  const t = Date.parse(raw);
+  if (!/[zZ]|[+-]\d\d:?\d\d$/.test(raw) || !Number.isFinite(t)) throw new RssReportError(422, 'until must be a time with its zone, e.g. 2026-11-17T09:00:00+01:00.');
+  if (t <= Date.now() || t > Date.now() + 7 * 864e5) throw new RssReportError(422, 'until must be in the future and at most 7 days ahead.');
+  const until = new Date(t).toISOString();
+  await setMeta(PAUSE_KEY, until);
+  await record({ event_type: 'rss_errors_paused', subject_id: 'bha-rss', lane: 'GENIE', actor: by, source_ref: 'dashboard', detail: { until } });
+  return { ok: true, paused: true, until };
+}
+
 export async function reportError(b: Record<string, unknown>, opts: { now?: Date; post?: typeof post } = {}): Promise<Record<string, unknown>> {
   const e = parseError(b);
+  const held = b.dry_run === true ? null : await pausedUntil(opts.now);
+  if (held) {
+    const day = (opts.now ?? new Date()).toISOString().slice(0, 10);
+    await record({ event_type: HELD_EVENT, subject_id: e.subject, lane: 'GENIE', actor: 'bha-rss', source_ref: 'bha-rss', dedupe_key: `${HELD_EVENT}:${e.kind}:${e.subject}:${day}`, detail: { ...e, paused_until: held } });
+    return { ok: true, posted: false, reason: 'paused', paused_until: held, kind: e.kind, subject: e.subject };
+  }
   if (b.dry_run === true) return { ok: true, dry_run: true, kind: e.kind, subject: e.subject, would_post_to: errorChannel(), text: errorMessage(e).text };
   const day = (opts.now ?? new Date()).toISOString().slice(0, 10);
   const r = await claimAndPost(

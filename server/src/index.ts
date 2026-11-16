@@ -1007,6 +1007,21 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         describe: (r) => `${r.dry_run ? 'dry run ' : ''}rss error ${r.kind} ${r.subject}: ${r.posted ? `posted ${r.ts}` : String(r.reason ?? r.error ?? '')}`.slice(0, 400),
         hint: 'POST { kind (source_failed, enrichment_failed, digest_failed, digest_not_delivered, pass_failed), subject, error, source_name?, source_url?, digest_date?, at?, dry_run? }, or { body_b64 }. Said once per kind and subject per UTC day.',
       },
+      /** Pause or resume the BHA RSS error cards (16 Nov 2026); held reports are kept as rss_error_held events. */
+      '/api/engine/rss-error/pause': {
+        kind: 'outside_digests',
+        store: async (b) => {
+          try {
+            const r = await rssReports.setPause(b);
+            return { ...r, inserted: 0, updated: 1 };
+          } catch (e) {
+            if (e instanceof rssReports.RssReportError) throw new systemFeeds.FeedError(e.status, e.message);
+            throw e;
+          }
+        },
+        describe: (r) => (r.paused ? `rss error cards paused until ${r.until}` : 'rss error cards resumed'),
+        hint: 'POST { until (ISO time with zone, at most 7 days ahead), by } or { resume: true, by }. Destiny or Jason.',
+      },
       /** Narration to one mp3 in Destiny's or Jason's DM, made here because n8n ran out of memory joining it (11 Nov 2026, narrationAudio.ts). */
       '/api/engine/narration-audio': {
         kind: 'codex',
