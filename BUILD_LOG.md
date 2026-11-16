@@ -15579,3 +15579,10 @@ Files:      server/src/rssReports.ts, server/src/index.ts, server/test/rss-repor
 Problem:    The digest card showed only What moved outside, and the error card was a bold line and a list.
 Fix:        Both cards now open with a header, tag Destiny, carry the facts as fields, say what happens next and end with a button; the digest card carries all five sections. repostDigest posts a held digest again with confirm REPOST <date>.
 Decision:   Today's digest (16 Nov) is not forced: BHA RSS writes one digest per day, and forcing it now would lock 16 Nov to half a day of items. The newest held digest (15 Nov) is the one posted again.
+
+## 2026-11-16 20:30 — The outside digest is posted as Genie
+Intent:     Destiny: "Bays posted it instead of Genie, fix that."
+Files:      server/src/rssReports.ts, CLAUDE.md; Genie src/server.ts
+Problem:    The digest card went out on the dashboard's Slack token, which is Bays'.
+Fix:        Genie gained POST /api/genie/post-card, locked to the inbound key it already holds and to the channels on GENIE_CARD_CHANNELS (default #bha-engine-digests). rssReports posts the digest through it; a post Genie cannot make gives the claim back and is retried, never sent as Bays.
+Decision:   The RSS error cards stay on Bays' token: only the digest was asked for.
