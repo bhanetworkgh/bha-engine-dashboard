@@ -40,6 +40,15 @@ const ok = (m) => { n += 1; console.log('  ok  ' + m); };
   assert.match(ic.fieldChanges({ What: 'x' }, { 'Progress Note': 'pointer' }), /Progress Note \(empty now\) -> "pointer"/);
   assert.match(ic.fieldChanges({ 'Progress Note': 'old line' }, { 'Progress Note': 'new' }), /now "old line"/);
   assert.match(ic.fieldChanges(null, { Status: null }), /current value not read\) -> removed/);
+  {
+    const old = '13 Nov (Jegan) -- Round 1 evidence record.\n\n21 Oct: Stopped the stuck RDS.';
+    const desc = ic.fieldChanges({ 'Progress Note': old }, { 'Progress Note': '16 Nov (Jegan) -- Round 1 revision.\n\n' + old });
+    assert.match(desc, /keeps all of it word for word and adds, above it: "16 Nov \(Jegan\) -- Round 1 revision\."/);
+    assert.doesNotMatch(desc, /13 Nov/);
+    assert.equal(ic.addedText(old, old + '\n\n17 Nov: more.').where, 'below it');
+    assert.equal(ic.addedText(old, 'new text only'), null);
+    assert.equal(ic.addedText(old, old.replace('stuck', 'hung') + ' extra'), null);
+  }
   assert.match(ic.SYSTEM, /setting a field that is empty now adds to it/); ok('each field set shows what it holds now, so an append into an empty field reads as an append (INC-BAYS.AGENT-097)');
   const r = await ic.resolveAsk('update_record', { kind: 'loops', fields: {} });
   assert.equal(r.ok, false); assert.equal(r.reason, 'ask_required'); assert.match(r.message, /Nothing was written/); assert.match(r.message, /message_ts/);

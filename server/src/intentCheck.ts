@@ -111,10 +111,33 @@ async function watchRow(watchId: string): Promise<{ decision: string; owner: str
 export function fieldChanges(current: Record<string, unknown> | null, set: Args): string {
   const parts = Object.keys(set).map((k) => {
     const now = current ? current[k] : undefined;
+    const added = set[k] === null ? null : addedText(now, set[k]);
+    if (added) return `${k} (holds text now; this keeps all of it word for word and adds, ${added.where}: "${clip(added.text, 800)}")`;
     const was = now === undefined || now === null || now === '' ? (current ? 'empty now' : 'current value not read') : `now "${clip(now, 400)}"`;
     return `${k} (${was}) -> ${set[k] === null ? 'removed' : `"${clip(set[k], 800)}"`}`;
   });
   return parts.join('; ') || '(none)';
+}
+
+/**
+ * When a new value keeps the whole current text and only adds to it, the part added and where (16 Nov 2026,
+ * INC-BAYS.AGENT-102 and -103: Bays put a dated note above Jegan's 13 Nov note, the check saw both values cut at
+ * 400 and 800 characters, could not see the old note was still there, and refused it twice as a replace).
+ * Whitespace is not compared; every word and mark of the current text must be there, in order, untouched.
+ */
+export function addedText(current: unknown, next: unknown): { where: 'above it' | 'below it' | 'around it'; text: string } | null {
+  if (typeof current !== 'string' || typeof next !== 'string') return null;
+  const ws = (s: string) => s.replace(/\s+/g, ' ').trim();
+  const cur = ws(current);
+  const nxt = ws(next);
+  if (!cur || cur === nxt) return null;
+  const at = nxt.indexOf(cur);
+  if (at < 0) return null;
+  const before = nxt.slice(0, at).trim();
+  const after = nxt.slice(at + cur.length).trim();
+  if (!before && !after) return null;
+  const where = before && after ? 'around it' : before ? 'above it' : 'below it';
+  return { where, text: [before, after].filter(Boolean).join(' ... ') };
 }
 
 const loopLine = (l: { loop_id: string; what: string; status: string; assignee: string } | null, fallback: string): string =>
@@ -302,7 +325,7 @@ export const SYSTEM = `You check one action an AI assistant called Bays is about
 
 Rules:
 - The action matches when the message asked for it, or it plainly follows from the message (the person asked for the result and this is how it is done). The person need not use the tool's words.
-- Loops: the loop must be the one the message means (by id, short code or what it is), and what is done to it must be what was asked: open, close, hold, reassign, update. Closing a loop the message did not ask to close, or did not say was done, is a miss. Changing a loop's wording to say something the message did not say is a miss. Each field set is shown with what the loop holds in it now: setting a field that is empty now adds to it and drops nothing, so it satisfies an ask to append to that field; replacing a field that holds text with text that leaves that text out does not.
+- Loops: the loop must be the one the message means (by id, short code or what it is), and what is done to it must be what was asked: open, close, hold, reassign, update. Closing a loop the message did not ask to close, or did not say was done, is a miss. Changing a loop's wording to say something the message did not say is a miss. Each field set is shown with what the loop holds in it now: setting a field that is empty now adds to it and drops nothing, so it satisfies an ask to append to that field; a field shown as keeping all of its text and adding to it drops nothing either, so judge only the part added; replacing a field that holds text with text that leaves that text out does not.
 - Decision Watches: the owner must be the person the message puts the decision or reply on, never the person asking for it unless they asked to be watched themselves. The watch's wording must say what that person owes as the message states it, not more and not something else. A watch opened when the message asked for no follow-up is a miss.
 - Messages sent for someone (a DM or a post): the recipients must be who the message asked to reach, and the text must say only what the message, the thread or the records listed below support. A message that states facts neither the thread nor a listed record shows is a miss. A fact that matches a listed record (a loop's title, status, lane or owner as the dashboard holds it) is supported, even when the thread does not repeat it.
 - SOP edits: the change must be the one the message asked for.

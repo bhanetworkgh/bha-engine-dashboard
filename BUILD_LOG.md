@@ -15504,3 +15504,15 @@ Files:      server/src/index.ts, BUILD_LOG.md
 Problem:    After the deploy the connector's tool list in the Claude session still held the old list (set_help_page_stage's old description), so publish_help_page could not be called.
 Fix:        POST /api/engine/help-page-publish (x-dashboard-key, body_b64 accepted like every engine POST), the same helpPages.publish, the pattern the other tools follow for this. Called from an unpublished n8n runner.
 Decision:   No new rule: the route is a second door to the same function.
+
+## 2026-11-16 16:30 — The intent check sees a note added on top as an add
+Intent:     D2, INC-BAYS.AGENT-102 (06:27 UTC) and INC-BAYS.AGENT-103 (14:06 UTC): Bays refused twice each adding a dated note to Jegan's LOOP-1792470630689-8ZVR.
+Files:      server/src/intentCheck.ts, server/test/intent-check.test.cjs, BUILD_LOG.md
+Problem:    fieldChanges showed the Progress Note as now "<400 characters of the 13 Nov note>" -> "<800 characters of the new text>". Bays had put the 16 Nov note above the old one and kept it whole, but both values were cut, so Haiku could not see the old note was still there: "the action overwrites the existing Progress Note field, dropping the 13 Nov evidence-record text".
+Fix:        addedText(): when the new value holds the whole current text (whitespace aside), the field is described as "holds text now; this keeps all of it word for word and adds, above it / below it / around it: <the part added>", and the rule says to judge only the part added. Any other change is shown as before. intent-check 33 of 33 (run here on a stand-in pg).
+Decision:   The comparison is on the whole text, never a guess: one changed word in the old text and it reads as a replace again.
+
+## 2026-11-16 16:32 — publish_help_page proven on the two checked pages
+Intent:     Close the second half of DW-1793105843791-H1WJ.
+Files:      none (n8n Engine — Help Page Publish Runner, 3V4HsXBcd6kIVvrK, BHA Engine / Destiny, unpublished)
+Fix:        Dry run 91756, then 91757: operator-quickstart in cst-help-manuals as 7b8ce0b4-1bf7-4856-908a-14006fe62037, and 91758: what-cst-can-do as ae43d5d1-ca34-4d2f-bfa6-140aac1957e7, both read back exactly. read_help_pages: in_corpus 2, checked 0.
