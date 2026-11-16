@@ -15534,3 +15534,10 @@ Files:      server/src/rssReports.ts (new), server/src/outsideDigest.ts, server/
 Problem:    BHA RSS wrote a failed source, a failed enrichment or a failed digest delivery only to its own Supabase tables and its Render log; nobody was told, and the digest itself reached Slack nowhere.
 Fix:        POST /api/engine/rss-error (x-dashboard-key, body_b64) takes source_failed, enrichment_failed, digest_failed, digest_not_delivered and pass_failed; Bays posts each to #bha-pipeline-errors (RSS_ERROR_CHANNEL) once per kind, subject and UTC day, claimed by an engine event written first and given back when Slack refuses. A stored digest is posted once to #bha-engine-digests (RSS_DIGEST_CHANNEL): title, What moved outside, counts. A 30-minute timer posts once when no digest for the day before has arrived by 08:00 UTC, because a delivery that fails cannot report itself.
 Decision:   The digest goes to #bha-engine-digests, not #bha-engine-alerts, whose purpose is critical alerts only (Destiny, 16 Nov). The dashboard posts as Bays rather than giving BHA RSS a Slack token. npm run test:rss-reports, 15 checks.
+
+## 2026-11-16 17:50 — Genie reads the open loops
+Intent:     Destiny's sandbox test of Genie step 3.2 asked for "the three newest open loops on my table"; Genie had no loop read and answered from decision watches instead.
+Files:      server/src/mcp/index.ts, server/test/genie-doctrine.test.cjs
+Problem:    Genie's run 36769fc5 called bha_ledger_query and read_engine_events and replied "I couldn't pull a clean loop list for you, so these are the three newest decision watches".
+Fix:        read_open_loops added to Genie's token scope (READONLY_SECRETS_GENIE), the loop board North Star reads; Genie's side (genie-v3-migration e8211bb) registers the tool and routes loop asks to it.
+Decision:   read_open_loops rather than find_records: it is read only, budgeted, and already takes a builder's Slack id.

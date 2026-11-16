@@ -382,6 +382,9 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-11-13 (Destiny, Jason on 408M 2 Nov): the rack's outages by cause and whether each counts
         // against a run, so Genie answers reliability questions from the encoded rule, never a raw count.
         'classify_outages',
+        // 2026-11-16 (Destiny, Genie step 3.2 test): "list my open loops" is answered from the loop board,
+        // the same read North Star ranks from, never from decision watches or memory.
+        'read_open_loops',
       ]),
     },
   ] as Array<Omit<AgentKey, 'secret'>>
