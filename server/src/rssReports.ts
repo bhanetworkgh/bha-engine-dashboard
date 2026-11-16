@@ -10,6 +10,7 @@
  *   accepted). Bays posts it. One post per kind and subject per UTC day: a source that fails on every
  *   run is said once a day, not every minute. The claim is an engine event written before the post;
  *   a post Slack refuses gives the claim back, so the next report tries again.
+ * - The same check posts a held digest whose post did not land, so a refused post is retried every 30 minutes.
  * - A digest that never arrives cannot report itself (a delivery failure that reaches nobody), so this
  *   process checks too: once the digest hour plus the grace below has passed, a day with no digest held
  *   is posted to #bha-pipeline-errors once.
@@ -212,8 +213,12 @@ export function dueDate(now: Date): string | null {
 export async function checkMissing(opts: { now?: Date; post?: typeof post } = {}): Promise<Record<string, unknown>> {
   const date = dueDate(opts.now ?? new Date());
   if (!date) return { checked: false, reason: 'not_due' };
-  const held = await query('SELECT 1 FROM engine_outside_digests WHERE digest_date = $1', [date]);
-  if (held.rows.length) return { checked: true, date, missing: false };
+  const held = await query<{ digest_date: string; title: string; body: string; items_used: number; sources_used: number }>(
+    'SELECT digest_date::text, title, body, items_used, sources_used FROM engine_outside_digests WHERE digest_date = $1',
+    [date],
+  );
+  // A digest that is held but whose post did not land (or arrived before posting existed) is posted now, once.
+  if (held.rows.length) return { checked: true, date, missing: false, slack: await postDigest(held.rows[0], { post: opts.post }) };
   const e: RssErrorInput = { kind: 'digest_not_delivered', subject: date, digest_date: date, error: `no digest for ${date} has reached the dashboard by ${RULE.digest_due_hour_utc}:00 UTC` };
   const r = await claimAndPost(
     { event_type: MISSING_EVENT, subject_id: date, dedupe_key: `${MISSING_EVENT}:${date}`, detail: { date } },
