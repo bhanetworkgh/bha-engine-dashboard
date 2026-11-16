@@ -111,12 +111,12 @@ export function errorMessage(e: RssErrorInput): { text: string; blocks: unknown[
  * Genie subsystem): this dashboard holds no Genie bot token, so it asks Genie to post them, on POST /api/genie/post-card with the inbound key
  * Genie already holds. A post Genie cannot make is a failure, never handed to Bays instead.
  */
-async function postAsGenie(channel: string, text: string, blocks: unknown[]): Promise<{ ok: true; ts: string } | { ok: false; error: string }> {
+async function postAsGenie(channel: string, text: string, blocks: unknown[], updateTs?: string): Promise<{ ok: true; ts: string } | { ok: false; error: string }> {
   const key = process.env.DASHBOARD_INBOUND_KEY?.trim();
   if (!key) return { ok: false, error: 'DASHBOARD_INBOUND_KEY is not set, so Genie cannot be asked to post' };
   const url = `${(process.env.GENIE_URL || 'https://genie-v3-migration-u82u.onrender.com').replace(/\/+$/, '')}/api/genie/post-card`;
   try {
-    const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-dashboard-key': key }, body: JSON.stringify({ channel, text, blocks }), signal: AbortSignal.timeout(20_000) });
+    const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-dashboard-key': key }, body: JSON.stringify({ channel, text, blocks, ...(updateTs ? { update_ts: updateTs } : {}) }), signal: AbortSignal.timeout(20_000) });
     const j = (await res.json().catch(() => ({}))) as { ok?: boolean; ts?: string; error?: string };
     if (res.ok && j.ok && typeof j.ts === 'string') return { ok: true, ts: j.ts };
     return { ok: false, error: `Genie did not post it (HTTP ${res.status}): ${String(j.error ?? 'no reason given')}` };
@@ -254,7 +254,7 @@ export function digestMessage(d: { digest_date: string; title: string; body: str
 
 /**
  * Posts a held digest again in the current card (16 Nov 2026, Destiny: "trigger it so the digest shows up").
- * POST /api/engine/outside-digest/post { digest_date? (default the newest held), confirm "REPOST <date>", dry_run? }.
+ * POST /api/engine/outside-digest/post { digest_date? (default the newest held), confirm "REPOST <date>", update_ts? (rewrite Genie's card in place), dry_run? }.
  * Its own claim per call, so it never blocks or replaces the once-a-day post.
  */
 export async function repostDigest(b: Record<string, unknown>, opts: { post?: typeof post } = {}): Promise<Record<string, unknown>> {
@@ -269,6 +269,11 @@ export async function repostDigest(b: Record<string, unknown>, opts: { post?: ty
   if (!d) throw new RssReportError(404, want ? `No digest for ${want} is held.` : 'No digest is held yet.');
   if (b.dry_run === true) return { ok: true, dry_run: true, digest_date: d.digest_date, would_post_to: digestChannel(), blocks: digestMessage(d).blocks.length };
   if (str(b.confirm, 40) !== `REPOST ${d.digest_date}`) throw new RssReportError(422, `Send confirm "REPOST ${d.digest_date}" to post it again.`);
+  const updateTs = /^\d+\.\d+$/.test(str(b.update_ts, 30)) ? str(b.update_ts, 30) : undefined;
+  if (updateTs) {
+    const u = await postAsGenie(digestChannel(), digestMessage(d).text, digestMessage(d).blocks, updateTs);
+    return u.ok ? { ok: true, posted: true, updated: true, digest_date: d.digest_date, channel: digestChannel(), ts: u.ts } : { ok: false, posted: false, raise: true, error: u.error };
+  }
   const r = await claimAndPost(
     { event_type: DIGEST_EVENT, subject_id: d.digest_date, dedupe_key: `${DIGEST_EVENT}:${d.digest_date}:repost:${Date.now()}`, detail: { title: d.title, repost: true } },
     digestChannel(),
