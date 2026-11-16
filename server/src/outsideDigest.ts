@@ -14,6 +14,7 @@ import { query, withTransaction } from './pg';
 import { record } from './engineEvents';
 import { changed } from './events';
 import * as bharag from './bharag';
+import * as rssReports from './rssReports';
 
 export class DigestError extends Error {
   constructor(public status: number, message: string) {
@@ -119,10 +120,14 @@ export async function store(b: Record<string, unknown>): Promise<Record<string, 
     );
     await query('UPDATE engine_outside_digests SET bharag_doc_id = $2, bharag_detail = $3 WHERE digest_date = $1', [d.digest_date, bharagResult.ok ? bharagResult.id ?? 'ingested' : null, bharagResult.detail.slice(0, 500)]);
   }
+  // Genie rebuild step 4.3 (16 Nov 2026): the day's digest is posted to #bha-engine-digests once.
+  const slackPost = await rssReports.postDigest(d);
   return {
     ok: true,
     digest_date: d.digest_date,
     stored: had ? 'updated' : 'inserted',
+    posted_to_slack: slackPost.posted === true,
+    slack: slackPost,
     ingested_to_bharag: bharagResult.ok,
     bharag: bharagResult.detail,
     bharag_doc_id: bharagResult.ok ? bharagResult.id ?? null : null,

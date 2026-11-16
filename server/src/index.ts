@@ -84,6 +84,7 @@ import * as heldPay from './heldPay';
 import * as payCard from './payCard';
 import * as narrationAudio from './narrationAudio';
 import * as outsideDigest from './outsideDigest';
+import * as rssReports from './rssReports';
 import * as reviewCard from './reviewCard';
 import * as paySuggest from './paySuggest';
 import * as logPrecheck from './logPrecheck';
@@ -960,6 +961,21 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         },
         describe: (r) => `${r.dry_run ? 'dry run ' : ''}outside digest ${r.digest_date}${r.stored ? ` ${r.stored}, BHARAG ${r.ingested_to_bharag ? 'in' : `NOT in (${r.bharag})`}` : ''}`.slice(0, 400),
         hint: 'POST { digest_date (YYYY-MM-DD), title, body, period_start, period_end, items_used, sources_used, model?, items?: [{title,url,kind,source}], dry_run? }, or { body_b64 }. One row per day; a repeat replaces it.',
+      },
+      /** BHA RSS errors to #bha-pipeline-errors as Bays, once per kind and subject per day (16 Nov 2026, Genie rebuild step 4.2, rssReports.ts). */
+      '/api/engine/rss-error': {
+        kind: 'outside_digests',
+        store: async (b) => {
+          try {
+            const r = await rssReports.reportError(b);
+            return { ...r, inserted: r.posted ? 1 : 0, updated: 0 };
+          } catch (e) {
+            if (e instanceof rssReports.RssReportError) throw new systemFeeds.FeedError(e.status, e.message);
+            throw e;
+          }
+        },
+        describe: (r) => `${r.dry_run ? 'dry run ' : ''}rss error ${r.kind} ${r.subject}: ${r.posted ? `posted ${r.ts}` : String(r.reason ?? r.error ?? '')}`.slice(0, 400),
+        hint: 'POST { kind (source_failed, enrichment_failed, digest_failed, digest_not_delivered, pass_failed), subject, error, source_name?, source_url?, digest_date?, at?, dry_run? }, or { body_b64 }. Said once per kind and subject per UTC day.',
       },
       /** Narration to one mp3 in Destiny's or Jason's DM, made here because n8n ran out of memory joining it (11 Nov 2026, narrationAudio.ts). */
       '/api/engine/narration-audio': {
@@ -3648,6 +3664,7 @@ async function boot(): Promise<void> {
       .catch((e) => console.error(`[vfarm-customers] lead backfill failed: ${(e as Error).message}`));
     creditOut.startWatching();
     genieSkipWarn.startWatching();
+    rssReports.startWatching();
     modelSpend.startReading();
     publishGate.startSweeping();
     skillWatch.startSweeping();

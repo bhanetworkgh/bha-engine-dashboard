@@ -15527,3 +15527,10 @@ Decision:   Proven by a pinned test only. The incident carries no retry row (SCH
 Intent:     Destiny: Kaiqi is out of the system, so no reminder to him is meant to happen; close the open Bays incidents.
 Files:      n8n Bays — Scheduled Run Watch (8yerdU9JtXoN5clt), Build Re-run Requests; restore point fe2e8218
 Fix:        His Slack id, loop table and channel taken out of the re-run list (the expected list dropped him on 15 Nov; Bays' 11 tasks have none for him). Published fb2f4238. Closed INC-BAYS.AGENT-102 and -103 (proven live: intent check 15:20:26 UTC matched Bays' note on LOOP-1792470630689-8ZVR) and -101 and -104 (104 proven by pinned test 91779 only, said so in the close reason).
+
+## 2026-11-16 17:20 — BHA RSS errors and the daily digest reach Slack (Genie rebuild steps 4.2 and 4.3)
+Intent:     Nothing BHA RSS does, or fails to do, is silent, without giving it a Slack key.
+Files:      server/src/rssReports.ts (new), server/src/outsideDigest.ts, server/src/index.ts, server/src/timers.ts, server/test/rss-reports.test.cjs, package.json
+Problem:    BHA RSS wrote a failed source, a failed enrichment or a failed digest delivery only to its own Supabase tables and its Render log; nobody was told, and the digest itself reached Slack nowhere.
+Fix:        POST /api/engine/rss-error (x-dashboard-key, body_b64) takes source_failed, enrichment_failed, digest_failed, digest_not_delivered and pass_failed; Bays posts each to #bha-pipeline-errors (RSS_ERROR_CHANNEL) once per kind, subject and UTC day, claimed by an engine event written first and given back when Slack refuses. A stored digest is posted once to #bha-engine-digests (RSS_DIGEST_CHANNEL): title, What moved outside, counts. A 30-minute timer posts once when no digest for the day before has arrived by 08:00 UTC, because a delivery that fails cannot report itself.
+Decision:   The digest goes to #bha-engine-digests, not #bha-engine-alerts, whose purpose is critical alerts only (Destiny, 16 Nov). The dashboard posts as Bays rather than giving BHA RSS a Slack token. npm run test:rss-reports, 15 checks.
