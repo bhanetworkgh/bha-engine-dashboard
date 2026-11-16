@@ -289,9 +289,22 @@ export async function handle(b: Row): Promise<Row> {
       return taskResult(b);
     case 'log_nudge':
       return logNudge(b);
+    case 'people':
+      return people();
     default:
-      throw new GenieControlError(422, 'op is one of channel, set_channel, remember, forget, usage, followed, create_task, list_tasks, cancel_task, due_tasks, task_result, log_nudge.');
+      throw new GenieControlError(422, 'op is one of channel, set_channel, remember, forget, usage, followed, create_task, list_tasks, cancel_task, due_tasks, task_result, log_nudge, people.');
   }
+}
+
+/**
+ * Who is who (16 Nov 2026, Destiny: a summary called him "she"). Each Builder Profile's
+ * Slack id, name and pronouns, read live, so Genie refers to people as their profile says.
+ * Nothing else on the profile is returned.
+ */
+export async function people(): Promise<Row> {
+  const r = await query<Row>(`SELECT natural_id AS user_id, fields->>'name' AS name, NULLIF(TRIM(fields->>'pronouns'), '') AS pronouns
+      FROM engine_builder_profiles WHERE natural_id IS NOT NULL ORDER BY fields->>'name'`);
+  return { ok: true, people: r.rows };
 }
 
 /** What the Genie page's Controls tab shows: channels, recurring tasks and the last 100 control actions. */

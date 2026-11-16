@@ -15558,3 +15558,10 @@ Files:      server/src/mcp/northStarTools.ts, CLAUDE.md
 Problem:    engine_writes 303407 and 303409: read_slack 168h "Form A, retire…" returned 23 of 56, and "retire, retiring…" 11 of 11, neither with the message. Threads were picked by when they started (newest 25 parents), so a reply today in the NZPQ thread opened 13 Nov was never read.
 Fix:        Threads are sorted by latest_reply. With keywords: 200 history messages a channel, 60 threads, 200 replies a thread. Answer filtering and the budget are unchanged.
 Decision:   The wider read only applies to keyword searches, whose answer is filtered anyway; the default digest keeps the 22 Sep caps.
+
+## 2026-11-16 19:25 — Genie uses each person's pronouns from their builder profile
+Intent:     Genie's summary of the 25 Oct #workflow-logs-destiny thread called Destiny "she".
+Files:      server/src/genieControl.ts (op `people`), CLAUDE.md
+Problem:    Genie had no record of anyone's pronouns and guessed from the name.
+Fix:        genie-control op `people` returns each Builder Profile's Slack id, name and pronouns (nothing else). Genie reads it (held 10 minutes), adds it to every ask as `people`, and its voice rules say to use those pronouns and refer to anyone not listed by name.
+Decision:   Read live from Builder Profiles, so a profile edit is the whole change; no list in Genie's code.
