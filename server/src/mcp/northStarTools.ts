@@ -400,8 +400,11 @@ const LOG_ROWS = 60;
 const LOOPS_RETURNED = 40;
 const WHAT_CLIP = 160;
 
-export async function readOpenLoops(args: { builder_id?: unknown }): Promise<Record<string, unknown>> {
+export async function readOpenLoops(args: { builder_id?: unknown; sort?: unknown }): Promise<Record<string, unknown>> {
   const builder = typeof args.builder_id === 'string' ? args.builder_id.trim() : '';
+  // 16 Nov 2026 (Destiny, Genie): sort "newest" lists the most recently raised first and skips the
+  // seven-day Slack read, which took ~9.6s and timed Genie out; labels then come from work logs and age.
+  const newest = args.sort === 'newest';
 
   /*
    * ROL - Fetch Loops read `limit=1000`, newest first, and nothing past it. On
@@ -424,7 +427,7 @@ export async function readOpenLoops(args: { builder_id?: unknown }): Promise<Rec
   let sl: Record<string, unknown> = {};
   let slackError: string | null = null;
   try {
-    sl = await readSlack({ keywords: 'LOOP-', since_hours: 168 });
+    sl = newest ? {} : await readSlack({ keywords: 'LOOP-', since_hours: 168 });
     if (sl.ok === false) {
       slackError = `${String(sl.reason)}: ${String(sl.message)}`;
       sl = {};
@@ -493,7 +496,8 @@ export async function readOpenLoops(args: { builder_id?: unknown }): Promise<Rec
   });
 
   const RANK: Record<string, number> = { stalled: 0, moving: 1, 'maybe done': 2, new: 3 };
-  out.sort((a, b) => Number(b.jason_raised) - Number(a.jason_raised) || RANK[a.label] - RANK[b.label] || (b.age_days || 0) - (a.age_days || 0));
+  if (newest) out.sort((a, b) => (a.age_days ?? 1e9) - (b.age_days ?? 1e9));
+  else out.sort((a, b) => Number(b.jason_raised) - Number(a.jason_raised) || RANK[a.label] - RANK[b.label] || (b.age_days || 0) - (a.age_days || 0));
   const tally = (get: (l: (typeof out)[number]) => string) => out.reduce<Record<string, number>>((m, l) => { const k = get(l) || '(none)'; m[k] = (m[k] || 0) + 1; return m; }, {});
   const counts = tally((l) => l.label);
   const kept = out.slice(0, LOOPS_RETURNED);
@@ -508,7 +512,7 @@ export async function readOpenLoops(args: { builder_id?: unknown }): Promise<Rec
     counts_by_status: tally((l) => l.status),
     counts_by_owner: tally((l) => String(l.owner)),
     jason_raised: out.filter((l) => l.jason_raised).length,
-    sorted_by: 'Jason-raised first, then stalled, moving, maybe done, new; oldest first within each',
+    sorted_by: newest ? 'newest first (by Date Raised); Slack not read' : 'Jason-raised first, then stalled, moving, maybe done, new; oldest first within each',
     slack_checked: sl.mode === 'slack',
     slack_window_hours: (sl.window_hours as number) || null,
     // Not in the source, whose Slack failure stopped the whole run: here a
@@ -531,6 +535,7 @@ export const readOpenLoopsTool: ToolDefinition = {
     type: 'object',
     properties: {
       builder_id: { type: 'string', description: 'Optional. The builder’s Slack user id (Assignee Slack User ID), e.g. U0AEW3TBYH1.' },
+      sort: { type: 'string', enum: ['newest'], description: 'Optional. "newest": most recently raised first, and Slack is not read (fast; labels from work logs and age only).' },
       ...MAX_CHARS_ARG,
     },
     additionalProperties: false,

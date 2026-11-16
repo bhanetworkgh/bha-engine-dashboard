@@ -15541,3 +15541,8 @@ Files:      server/src/mcp/index.ts, server/test/genie-doctrine.test.cjs
 Problem:    Genie's run 36769fc5 called bha_ledger_query and read_engine_events and replied "I couldn't pull a clean loop list for you, so these are the three newest decision watches".
 Fix:        read_open_loops added to Genie's token scope (READONLY_SECRETS_GENIE), the loop board North Star reads; Genie's side (genie-v3-migration e8211bb) registers the tool and routes loop asks to it.
 Decision:   read_open_loops rather than find_records: it is read only, budgeted, and already takes a builder's Slack id.
+
+## 2026-11-16 18:00 — read_open_loops gets a fast newest-first mode
+Intent:     Genie's retest (C0ATTFED35E 1794847062.508969) timed out: read_open_loops took 9,641 ms (engine_writes 303113) against Genie's 10 s limit, almost all of it the seven-day Slack read.
+Files:      server/src/mcp/northStarTools.ts
+Fix:        optional sort "newest": most recently raised first and no Slack read; labels from work logs and age, and sorted_by says Slack was not read. North Star's calls send no sort and are unchanged.
