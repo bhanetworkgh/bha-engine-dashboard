@@ -4768,6 +4768,43 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
     name: 'Media Twin drafts carry the vFarm doctrine check: two questions per platform and any tension (15 Nov 2026, Destiny, YHGE)',
     statements: [`ALTER TABLE engine_media_posts ADD COLUMN IF NOT EXISTS doctrine jsonb`],
   },
+  {
+    id: 139,
+    name: "Genie's controls: channels (follow, speak up, daily limit, memory), daily usage and recurring tasks (16 Nov 2026, Destiny, genieControl.ts)",
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_genie_channels (
+        channel_id text PRIMARY KEY,
+        followed boolean NOT NULL DEFAULT false,
+        proactive boolean NOT NULL DEFAULT false,
+        daily_limit integer CHECK (daily_limit IS NULL OR daily_limit BETWEEN 1 AND 10000),
+        memory jsonb NOT NULL DEFAULT '[]'::jsonb,
+        updated_by text,
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )`,
+      `CREATE TABLE IF NOT EXISTS engine_genie_usage (
+        channel_id text NOT NULL,
+        day date NOT NULL,
+        asks integer NOT NULL DEFAULT 0,
+        PRIMARY KEY (channel_id, day)
+      )`,
+      `CREATE TABLE IF NOT EXISTS engine_genie_tasks (
+        id text PRIMARY KEY,
+        channel_id text NOT NULL,
+        thread_ts text,
+        created_by text NOT NULL,
+        prompt text NOT NULL,
+        schedule jsonb NOT NULL,
+        next_run_at timestamptz NOT NULL,
+        last_run_at timestamptz,
+        last_result text,
+        status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled')),
+        created_at timestamptz NOT NULL DEFAULT now(),
+        cancelled_by text,
+        cancelled_at timestamptz
+      )`,
+      `CREATE INDEX IF NOT EXISTS engine_genie_tasks_due ON engine_genie_tasks (next_run_at) WHERE status = 'active'`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

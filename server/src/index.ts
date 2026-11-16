@@ -85,6 +85,7 @@ import * as payCard from './payCard';
 import * as narrationAudio from './narrationAudio';
 import * as outsideDigest from './outsideDigest';
 import * as rssReports from './rssReports';
+import * as genieControl from './genieControl';
 import * as reviewCard from './reviewCard';
 import * as paySuggest from './paySuggest';
 import * as logPrecheck from './logPrecheck';
@@ -961,6 +962,20 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         },
         describe: (r) => `${r.dry_run ? 'dry run ' : ''}outside digest ${r.digest_date}${r.stored ? ` ${r.stored}, BHARAG ${r.ingested_to_bharag ? 'in' : `NOT in (${r.bharag})`}` : ''}`.slice(0, 400),
         hint: 'POST { digest_date (YYYY-MM-DD), title, body, period_start, period_end, items_used, sources_used, model?, items?: [{title,url,kind,source}], dry_run? }, or { body_b64 }. One row per day; a repeat replaces it.',
+      },
+      /** Genie's controls: channel settings and memory, daily usage, recurring tasks (16 Nov 2026, genieControl.ts). */
+      '/api/engine/genie-control': {
+        kind: 'genie_events',
+        store: async (b) => {
+          try {
+            return await genieControl.handle(b);
+          } catch (e) {
+            if (e instanceof genieControl.GenieControlError) throw new systemFeeds.FeedError(e.status, e.message);
+            throw e;
+          }
+        },
+        describe: (r) => `genie control: ${r.ok === false ? String(r.reason ?? 'refused') : 'ok'}`.slice(0, 400),
+        hint: 'POST { op, ... }: op is channel, set_channel, remember, forget, usage, followed, create_task, list_tasks, cancel_task, due_tasks, task_result or log_nudge. See server/src/genieControl.ts.',
       },
       /** BHA RSS errors to #bha-pipeline-errors as Bays, once per kind and subject per day (16 Nov 2026, Genie rebuild step 4.2, rssReports.ts). */
       '/api/engine/rss-error': {
@@ -2394,6 +2409,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       case '/api/genie':
         return send(res, 200, await systemFeeds.genieData());
       /** Genie Builder interactions on the rail, with the figures the proof is read from (2026-11-09). */
+      /** Genie's controls for its page: channels, recurring tasks, the admin log (16 Nov 2026). */
+      case '/api/genie/controls':
+        return send(res, 200, await genieControl.page());
       case '/api/genie/builder':
         return send(res, 200, await genieBuilder.read({ rail_id: url.searchParams.get('rail_id') }));
       /** Bays' own ledger: Slack turns, scheduled task runs and panel questions (2026-10-05). */

@@ -37,6 +37,7 @@ import {
 } from '../../components/ui';
 import RecordStatistics from '../../components/RecordStatistics';
 import Builder from './Builder';
+import Controls from './Controls';
 
 /**
  * Genie (2026-09-29, Destiny — D3). Until then a placeholder: nothing Genie did
@@ -65,7 +66,7 @@ import Builder from './Builder';
  * instant.
  */
 
-const TABS = ['Asks', 'Close-outs', 'Builder', 'Statistics'] as const;
+const TABS = ['Asks', 'Close-outs', 'Builder', 'Controls', 'Statistics'] as const;
 type Tab = (typeof TABS)[number];
 
 type Filter = 'all' | 'Answered' | 'Incomplete' | 'Failed' | 'handed';
@@ -516,6 +517,8 @@ export default function Genie() {
       />
       {tab === 'Builder' ? (
         <Builder />
+      ) : tab === 'Controls' ? (
+        <Controls />
       ) : status === 'loading' && !data ? (
         <Loading />
       ) : status === 'error' && !data ? (

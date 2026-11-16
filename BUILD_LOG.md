@@ -15546,3 +15546,8 @@ Decision:   read_open_loops rather than find_records: it is read only, budgeted,
 Intent:     Genie's retest (C0ATTFED35E 1794847062.508969) timed out: read_open_loops took 9,641 ms (engine_writes 303113) against Genie's 10 s limit, almost all of it the seven-day Slack read.
 Files:      server/src/mcp/northStarTools.ts
 Fix:        optional sort "newest": most recently raised first and no Slack read; labels from work logs and age, and sorted_by says Slack was not read. North Star's calls send no sort and are unchanged.
+
+## 2026-11-16 18:40 — Genie's controls on the dashboard
+Intent:     Destiny: give Genie what Claude and ChatGPT do in Slack (summarise, search, draft, recurring tasks, speak up unasked, channel memory, admin log and limits). Genie has no store of its own for the stateful parts, so they live here.
+Files:      server/src/genieControl.ts, server/src/migrations.ts (139), server/src/index.ts, src/screens/Genie/Controls.tsx, src/screens/Genie/index.tsx, src/data/*, CLAUDE.md
+Decision:   one route with an op rather than twelve routes; a recurring task is claimed and moved forward in one transaction so two Genie instances never run it twice; following, speaking up and limits are Destiny's or Jason's only.

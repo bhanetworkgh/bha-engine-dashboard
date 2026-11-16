@@ -4951,3 +4951,31 @@ export interface PaySuggestion {
   relog_delta?: string | null;
   parts?: { what: string; status: string; missing: string[]; evidence: string; silent_failure: string }[];
 }
+
+/** Genie's controls (16 Nov 2026, server/src/genieControl.ts). */
+export interface GenieControlNote { id: string; note: string; by: string; at: string }
+export interface GenieControlChannel {
+  channel_id: string;
+  followed: boolean;
+  proactive: boolean;
+  daily_limit: number | null;
+  notes: number;
+  memory: GenieControlNote[];
+  updated_by: string | null;
+  updated_at: string | null;
+  asks_today: number;
+}
+export interface GenieControlTask {
+  id: string;
+  channel_id: string;
+  created_by: string;
+  prompt: string;
+  schedule: { days: number[]; hour: number; minute: number; tz: string };
+  next_run_at: string;
+  last_run_at: string | null;
+  last_result: string | null;
+  status: 'active' | 'cancelled';
+  created_at: string;
+}
+export interface GenieControlAction { id: string; event_type: string; subject_id: string; actor: string | null; detail: Record<string, unknown> | null; at: string }
+export interface GenieControlsData { channels: GenieControlChannel[]; tasks: GenieControlTask[]; actions: GenieControlAction[] }
