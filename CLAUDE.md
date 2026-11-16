@@ -2195,8 +2195,9 @@ crash, when seven North Star runs read Slack at 08:00 at once.
 - **`read_slack`** (`RS -`): `users.conversations`, public and private only,
   DMs, group DMs and archived never; `since_hours` 72 by default and at most
   168; `keywords` any-word (over two characters); `slack_channel` by name or
-  id. 50 messages a channel, the 25 newest threads with replies in the window
-  expanded, 50 replies a thread, 60,000 characters out, bot posts cut to 300
+  id. 50 messages a channel, the 25 threads replied to most recently in the
+  window expanded (by latest reply, from 16 Nov 2026; a keyword search reads
+  200 messages a channel, 60 threads and 200 replies a thread), 50 replies a thread, 60,000 characters out, bot posts cut to 300
   and people's to 1,200, Slack called ten at a time with 1.5 s between
   batches. Names from the source's roster; mentions and links cleaned as
   `RS - Build Digest` does. `missing_scope` and "not a member of any channel"
