@@ -385,6 +385,9 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-11-16 (Destiny, Genie step 3.2 test): "list my open loops" is answered from the loop board,
         // the same read North Star ranks from, never from decision watches or memory.
         'read_open_loops',
+        // 2026-11-16 (Destiny, the Claude and ChatGPT Slack features): "where did we decide X?" is searched
+        // in Slack itself, read as North Star's bot, the same read North Star uses.
+        'read_slack',
       ]),
     },
   ] as Array<Omit<AgentKey, 'secret'>>
