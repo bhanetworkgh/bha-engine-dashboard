@@ -1111,7 +1111,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         kind: 'bays-asks',
         store: async (b) => ({ ...(await intentCheck.answerCheck(b)), dry_run: true }),
         describe: (r) => `reply ${r.answers ? 'answers' : 'does not answer'} (${r.checked}): ${String(r.reason ?? '')}`.slice(0, 400),
-        hint: 'POST { ask, reply } (or body_b64). Answers { answers, reason, checked: model | phrase | unchecked }. Writes nothing.',
+        hint: 'POST { ask, reply, agent? (Bays, Genie or North Star; default Bays) } (or body_b64). Answers { answers, reason, checked: model | phrase | unchecked }. Writes nothing.',
       },
       /** Loop closes from a log review (13 Nov 2026, intentCheck.ts; SOP 05ccd8ab): each proposed close checked against the log, held open when twice unbacked. Writes events only. */
       '/api/engine/loop-close-check': {

@@ -1834,6 +1834,7 @@ where an agent turns an ask into a decision, a loop move or a reply. `server/src
 - **Media Twin rewrites** (`Media Twin — Rewrite Draft`): `POST /api/engine/rewrite-check` checks each rewritten
   platform against Jason's note; a miss is asked once more on a fresh memory; a second miss saves nothing and
   raises.
+**Genie's replies use the same check** (16 Nov 2026, Genie rebuild step 4.6): Genie posts `agent: 'Genie'` to `POST /api/engine/answer-check` before a Slack reply, asks itself once more on a miss, and raises a second miss in #bha-pipeline-errors.
 Add a new intent-driven write tool to `intentCheck.CHECKED` with its `describe` line, or it is not checked.
 **A loop the action names is shown to the check as the dashboard holds it** (13 Nov 2026, Destiny — audit 6314: a nudge naming LOOP-1793620799001-3NBE by its own title was refused because the title was not in the thread). `recordsFor` reads each LOOP- id in the action (title, status, lane, owner) from `engine_loops`, never from Bays; a fact that matches is supported, one that neither the thread nor a record shows is still a miss.
 **A loop update shows each field with what it holds now** (15 Nov 2026, INC-BAYS.AGENT-097: Bays was refused twice appending a pointer to 6I62's empty Progress Note, because the check saw only the new text and read it as a replace). `fieldChanges` writes each field set as `name (empty now | now "…") -> "new"`, and the rule tells the model that setting an empty field is an append.

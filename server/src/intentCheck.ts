@@ -642,12 +642,14 @@ export async function answerCheck(b: Record<string, unknown>): Promise<AnswerVer
   if (!reply.trim()) return { answers: false, reason: 'The reply is empty.', checked: 'phrase', provider: null, error: null };
   if (NON_ANSWER.test(reply.slice(0, 400))) return { answers: false, reason: `The reply opens by saying there is nothing to answer: "${clip(reply.replace(/\s+/g, ' '), 160)}"`, checked: 'phrase', provider: null, error: null };
   if (!ask.trim()) return { answers: true, reason: 'No message was given to check against.', checked: 'unchecked', provider: null, error: 'no ask' };
-  const v = await askAnswerModel(`The message:\n${ask}\n\nBays' reply:\n${reply}`);
+  // Genie's replies are checked the same way (16 Nov 2026, Genie rebuild step 4.6); Bays is the default.
+  const agent = b.agent === 'Genie' || b.agent === 'North Star' ? b.agent : 'Bays';
+  const v = await askAnswerModel(`The message:\n${ask}\n\n${agent}'s reply:\n${reply}`, ANSWER_SYSTEM.replace('called Bays', `called ${agent}`));
   if (v.checked === 'unchecked') await uncheckedSeen('answer_check', v.error || 'unknown', `AC-${Date.now()}-${randomUUID().slice(0, 4)}`);
   return v;
 }
 
-async function askAnswerModel(user: string): Promise<AnswerVerdict> {
+async function askAnswerModel(user: string, system: string = ANSWER_SYSTEM): Promise<AnswerVerdict> {
   const errors: string[] = [];
   const routes = [
     { provider: 'anthropic', key: process.env.ANTHROPIC_API_KEY?.trim(), url: `${(process.env.ANTHROPIC_API_URL || 'https://api.anthropic.com/v1').replace(/\/+$/, '')}/messages` },
@@ -664,8 +666,8 @@ async function askAnswerModel(user: string): Promise<AnswerVerdict> {
         headers: anthropic ? { 'x-api-key': r.key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' } : { Authorization: `Bearer ${r.key}`, 'content-type': 'application/json', 'X-Title': 'BHA Engine Dashboard - answer check' },
         body: JSON.stringify(
           anthropic
-            ? { model: 'claude-haiku-5-5', max_tokens: MAX_TOKENS, system: ANSWER_SYSTEM, messages: [{ role: 'user', content: user }] }
-            : { model: 'anthropic/claude-haiku-5.5', max_tokens: MAX_TOKENS, messages: [{ role: 'system', content: ANSWER_SYSTEM }, { role: 'user', content: user }] },
+            ? { model: 'claude-haiku-5-5', max_tokens: MAX_TOKENS, system, messages: [{ role: 'user', content: user }] }
+            : { model: 'anthropic/claude-haiku-5.5', max_tokens: MAX_TOKENS, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] },
         ),
         signal: controller.signal,
       });

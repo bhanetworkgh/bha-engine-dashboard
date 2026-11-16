@@ -15565,3 +15565,10 @@ Files:      server/src/genieControl.ts (op `people`), CLAUDE.md
 Problem:    Genie had no record of anyone's pronouns and guessed from the name.
 Fix:        genie-control op `people` returns each Builder Profile's Slack id, name and pronouns (nothing else). Genie reads it (held 10 minutes), adds it to every ask as `people`, and its voice rules say to use those pronouns and refer to anyone not listed by name.
 Decision:   Read live from Builder Profiles, so a profile edit is the whole change; no list in Genie's code.
+
+## 2026-11-16 20:05 — The reply check takes Genie
+Intent:     Genie rebuild step 4.6: Genie's Slack replies checked against the ask the way Bays' are.
+Files:      server/src/intentCheck.ts, server/src/index.ts, CLAUDE.md
+Problem:    The answer check's prompt named Bays, so a Genie reply would have been judged as Bays'.
+Fix:        answerCheck takes `agent` (Bays, Genie or North Star; Bays by default) and names that agent in the system and user prompts.
+Decision:   One check for every agent rather than a copy for Genie, so the rule cannot drift.
