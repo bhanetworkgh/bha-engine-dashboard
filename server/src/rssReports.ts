@@ -81,24 +81,31 @@ export function parseError(b: Record<string, unknown>): RssErrorInput {
   };
 }
 
+/** Who the cards tag: Destiny, who looks after BHA RSS (16 Nov 2026: "tag me"). */
+const mention = () => (process.env.RSS_ALERT_MENTION || 'U0AEW3TBYH1').trim();
+const DASHBOARD = () => (process.env.PUBLIC_DASHBOARD_URL || 'https://dashboard.bhanetwork.org').replace(/\/+$/, '');
+
+/** The error card, in Bays' style (16 Nov 2026, Destiny): header, Destiny tagged, the facts as fields, what next, a button. */
 export function errorMessage(e: RssErrorInput): { text: string; blocks: unknown[] } {
   const facts: Array<[string, string | undefined]> = [
-    ['Source', e.source_name ? `${e.source_name}${e.source_url ? ` (${e.source_url})` : ''}` : e.source_url],
+    ['Source', e.source_name],
+    ['Kind', LABEL[e.kind]],
     ['Digest date', e.digest_date],
-    ['Subject', e.subject],
-    ['Error', e.error],
-    ['At', e.at],
+    ['Subject', e.source_name ? undefined : e.subject],
+    ['At', e.at ? e.at.replace('T', ' ').slice(0, 16) + ' UTC' : undefined],
   ];
-  const lines = facts.filter(([, v]) => v).map(([k, v]) => `*${k}:* ${esc(String(v))}`);
-  const title = `BHA RSS: ${LABEL[e.kind]}`;
-  return {
-    text: [title, ...lines.map((l) => l.replace(/\*/g, ''))].join('\n'),
-    blocks: [
-      { type: 'section', text: { type: 'mrkdwn', text: `*${esc(title)}*` } },
-      { type: 'section', text: { type: 'mrkdwn', text: lines.join('\n') } },
-      { type: 'context', elements: [{ type: 'mrkdwn', text: 'Said once per day for each source and kind. Its run history is in BHA RSS (rss.bhanetwork.org/status).' }] },
-    ],
-  };
+  const fields = facts.filter(([, v]) => v).map(([k, v]) => ({ type: 'mrkdwn', text: `*${k}*\n${esc(String(v))}` }));
+  const headline = LABEL[e.kind].charAt(0).toUpperCase() + LABEL[e.kind].slice(1);
+  const blocks: unknown[] = [
+    { type: 'header', text: { type: 'plain_text', text: ':warning: BHA RSS · Pipeline failure', emoji: true } },
+    { type: 'section', text: { type: 'mrkdwn', text: `<@${mention()}>  ·  *${esc(headline)}*` } },
+  ];
+  if (fields.length) blocks.push({ type: 'section', fields });
+  if (e.source_url) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*Address*\n${esc(e.source_url)}` } });
+  blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*What broke*\n${esc(e.error)}` } });
+  blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*What happens next*\n${e.kind === 'source_failed' || e.kind === 'enrichment_failed' ? 'The source is read again on its next run. This card is said once a day per source, so a source that keeps failing needs fixing or switching off.' : 'The digest step runs again on its next pass. If it is still missing by 08:00 UTC it is said here again.'}` } });
+  blocks.push({ type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'Open BHA RSS status' }, url: 'https://rss.bhanetwork.org/status' }] });
+  return { text: `BHA RSS: ${LABEL[e.kind]}${e.source_name ? ` (${e.source_name})` : ''}: ${e.error}`, blocks };
 }
 
 async function post(channel: string, text: string, blocks: unknown[]): Promise<{ ok: true; ts: string } | { ok: false; error: string }> {
@@ -164,26 +171,85 @@ export function section(body: string, heading: string): string | null {
   return text || null;
 }
 
+const DIGEST_SECTIONS: Array<{ heading: string; icon: string }> = [
+  { heading: 'What moved outside', icon: ':globe_with_meridians:' },
+  { heading: 'Post ideas for the Media Twin', icon: ':memo:' },
+  { heading: 'Questions for Research Twin', icon: ':mag:' },
+  { heading: 'Signals for North Star', icon: ':compass:' },
+  { heading: 'Context for Genie', icon: ':bulb:' },
+];
+
+/** Splits Slack mrkdwn into pieces under the section limit, at line ends. */
+function chunks(text: string, max = 2900): string[] {
+  const out: string[] = [];
+  let cur = '';
+  for (const line of text.split('\n')) {
+    if (cur && cur.length + line.length + 1 > max) {
+      out.push(cur);
+      cur = '';
+    }
+    cur = cur ? `${cur}\n${line}` : line.slice(0, max);
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+/**
+ * The daily digest card for #bha-engine-digests (16 Nov 2026, Destiny: "well styled"): a header with the
+ * day, the headline, the counts, then every section of the digest with its own heading, each line a
+ * bullet with its source linked, and a footer saying where the full digest lives.
+ */
 export function digestMessage(d: { digest_date: string; title: string; body: string; items_used: number; sources_used: number }): { text: string; blocks: unknown[] } {
+  const day = new Date(`${d.digest_date}T00:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+  const headline = d.title.replace(/^Outside digest\s*--\s*\d{4}-\d{2}-\d{2}:?\s*/i, '').trim();
+  const blocks: unknown[] = [
+    { type: 'header', text: { type: 'plain_text', text: `:newspaper: Outside digest · ${day}`.slice(0, 150), emoji: true } },
+    { type: 'section', text: { type: 'mrkdwn', text: `<@${mention()}>  ·  *${esc(headline || 'What moved outside')}*` } },
+    { type: 'context', elements: [{ type: 'mrkdwn', text: `${d.items_used} items read from ${d.sources_used} sources by BHA RSS` }] },
+  ];
+  let found = 0;
+  for (const s of DIGEST_SECTIONS) {
+    const text = section(d.body, s.heading);
+    if (!text) continue;
+    found += 1;
+    blocks.push({ type: 'divider' });
+    const pieces = chunks(`${s.icon} *${s.heading}*\n${toSlack(text)}`);
+    for (const piece of pieces) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: piece } });
+  }
+  if (!found) {
+    for (const piece of chunks(toSlack(d.body))) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: piece } });
+  }
+  blocks.push({ type: 'divider' });
+  blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: 'The full digest is in BHARAG. Media Twin, Research Twin, North Star, Genie and Bays read it with read_outside_digest.' }] });
+  blocks.push({ type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'Open BHA RSS status' }, url: 'https://rss.bhanetwork.org/status' }] });
   const moved = section(d.body, 'What moved outside');
-  const head = toSlack(moved ?? d.body).slice(0, 2900);
-  const others = ['Post ideas for the Media Twin', 'Questions for Research Twin', 'Signals for North Star', 'Context for Genie'].filter((h) => section(d.body, h));
-  return {
-    text: `${d.title}\n\n${moved ?? d.body.slice(0, 2900)}`,
-    blocks: [
-      { type: 'header', text: { type: 'plain_text', text: d.title.slice(0, 150) } },
-      { type: 'section', text: { type: 'mrkdwn', text: moved ? `*What moved outside*\n${head}` : head } },
-      {
-        type: 'context',
-        elements: [
-          {
-            type: 'mrkdwn',
-            text: `${d.items_used} items from ${d.sources_used} sources on ${d.digest_date}.${others.length ? ` The rest (${others.join(', ')}) is in BHARAG and read with read_outside_digest.` : ''}`,
-          },
-        ],
-      },
-    ],
-  };
+  return { text: `${d.title}\n\n${(moved ?? d.body).slice(0, 2900)}`, blocks: blocks.slice(0, 50) };
+}
+
+/**
+ * Posts a held digest again in the current card (16 Nov 2026, Destiny: "trigger it so the digest shows up").
+ * POST /api/engine/outside-digest/post { digest_date? (default the newest held), confirm "REPOST <date>", dry_run? }.
+ * Its own claim per call, so it never blocks or replaces the once-a-day post.
+ */
+export async function repostDigest(b: Record<string, unknown>, opts: { post?: typeof post } = {}): Promise<Record<string, unknown>> {
+  const want = str(b.digest_date, 10);
+  const held = await query<{ digest_date: string; title: string; body: string; items_used: number; sources_used: number }>(
+    want
+      ? 'SELECT digest_date::text, title, body, items_used, sources_used FROM engine_outside_digests WHERE digest_date = $1'
+      : 'SELECT digest_date::text, title, body, items_used, sources_used FROM engine_outside_digests ORDER BY digest_date DESC LIMIT 1',
+    want ? [want] : [],
+  );
+  const d = held.rows[0];
+  if (!d) throw new RssReportError(404, want ? `No digest for ${want} is held.` : 'No digest is held yet.');
+  if (b.dry_run === true) return { ok: true, dry_run: true, digest_date: d.digest_date, would_post_to: digestChannel(), blocks: digestMessage(d).blocks.length };
+  if (str(b.confirm, 40) !== `REPOST ${d.digest_date}`) throw new RssReportError(422, `Send confirm "REPOST ${d.digest_date}" to post it again.`);
+  const r = await claimAndPost(
+    { event_type: DIGEST_EVENT, subject_id: d.digest_date, dedupe_key: `${DIGEST_EVENT}:${d.digest_date}:repost:${Date.now()}`, detail: { title: d.title, repost: true } },
+    digestChannel(),
+    digestMessage(d),
+    opts.post ?? post,
+  );
+  return r.posted ? { ok: true, posted: true, digest_date: d.digest_date, channel: digestChannel(), ts: r.ts } : { ok: false, posted: false, raise: true, error: r.error };
 }
 
 /** Called once the day's digest is stored; posts it once per day. Never throws. */

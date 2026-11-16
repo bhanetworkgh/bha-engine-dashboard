@@ -15572,3 +15572,10 @@ Files:      server/src/intentCheck.ts, server/src/index.ts, CLAUDE.md
 Problem:    The answer check's prompt named Bays, so a Genie reply would have been judged as Bays'.
 Fix:        answerCheck takes `agent` (Bays, Genie or North Star; Bays by default) and names that agent in the system and user prompts.
 Decision:   One check for every agent rather than a copy for Genie, so the rule cannot drift.
+
+## 2026-11-16 20:25 — BHA RSS cards in Bays' style, and a repost route
+Intent:     Destiny asked for the RSS error card and the engine digest card to look like Bays' and tag him, and for the digest to be posted again.
+Files:      server/src/rssReports.ts, server/src/index.ts, server/test/rss-reports.test.cjs, CLAUDE.md
+Problem:    The digest card showed only What moved outside, and the error card was a bold line and a list.
+Fix:        Both cards now open with a header, tag Destiny, carry the facts as fields, say what happens next and end with a button; the digest card carries all five sections. repostDigest posts a held digest again with confirm REPOST <date>.
+Decision:   Today's digest (16 Nov) is not forced: BHA RSS writes one digest per day, and forcing it now would lock 16 Nov to half a day of items. The newest held digest (15 Nov) is the one posted again.

@@ -963,6 +963,21 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         describe: (r) => `${r.dry_run ? 'dry run ' : ''}outside digest ${r.digest_date}${r.stored ? ` ${r.stored}, BHARAG ${r.ingested_to_bharag ? 'in' : `NOT in (${r.bharag})`}` : ''}`.slice(0, 400),
         hint: 'POST { digest_date (YYYY-MM-DD), title, body, period_start, period_end, items_used, sources_used, model?, items?: [{title,url,kind,source}], dry_run? }, or { body_b64 }. One row per day; a repeat replaces it.',
       },
+      /** Post a held outside digest again in the current card (16 Nov 2026, rssReports.repostDigest). */
+      '/api/engine/outside-digest/post': {
+        kind: 'outside_digests',
+        store: async (b) => {
+          try {
+            const r = await rssReports.repostDigest(b);
+            return { ...r, inserted: r.posted ? 1 : 0, updated: 0 };
+          } catch (e) {
+            if (e instanceof rssReports.RssReportError) throw new systemFeeds.FeedError(e.status, e.message);
+            throw e;
+          }
+        },
+        describe: (r) => `outside digest ${r.digest_date ?? ''} ${r.dry_run ? 'dry run' : r.posted ? 'posted again' : `NOT posted: ${String(r.error ?? '')}`}`.slice(0, 400),
+        hint: 'POST { digest_date? (newest held by default), confirm "REPOST <date>", dry_run? }. Posts it to #bha-engine-digests once more.',
+      },
       /** Genie's controls: channel settings and memory, daily usage, recurring tasks (16 Nov 2026, genieControl.ts). */
       '/api/engine/genie-control': {
         kind: 'genie_events',
