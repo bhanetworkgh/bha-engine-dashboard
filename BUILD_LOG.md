@@ -15516,3 +15516,9 @@ Decision:   The comparison is on the whole text, never a guess: one changed word
 Intent:     Close the second half of DW-1793105843791-H1WJ.
 Files:      none (n8n Engine — Help Page Publish Runner, 3V4HsXBcd6kIVvrK, BHA Engine / Destiny, unpublished)
 Fix:        Dry run 91756, then 91757: operator-quickstart in cst-help-manuals as 7b8ce0b4-1bf7-4856-908a-14006fe62037, and 91758: what-cst-can-do as ae43d5d1-ca34-4d2f-bfa6-140aac1957e7, both read back exactly. read_help_pages: in_corpus 2, checked 0.
+
+## 2026-11-16 16:20 — A scheduled run's finish with no task name still closes its row
+Intent:     INC-BAYS.AGENT-104 (14:09 UTC): Bays' In-progress loops check-in posted to all 6 builders, then its finish call to Record_Scheduled_Run left task_name out and was refused, so the 14:00 start row BAYS-SCHED-1794837612581-H0SP stayed at started.
+Files:      n8n Bays — Record Scheduled Run (lIQmC333fz2TAcXX), Build Scheduled Run Row and the sticky note; restore point 165d6fa5
+Fix:        A finish with an empty task_name takes the one task started in the last 3 hours when there is exactly one, and the row says `Task Name From: only_open_start` (a new field name); two or none, or a start with no name, is refused as before. An empty list ("[]") in tool_issues no longer marks a run as having tool issues. Published 0b82c5a1, versionId equals activeVersionId. Pinned test 91779 on 91572's real input: PATCH to H0SP, Outcome Answered, Task Name From only_open_start.
+Decision:   Proven by a pinned test only. The incident carries no retry row (SCHEMA_VALIDATION), so 91572 cannot be resumed through the healer; the first live proof is the next real finish without a name.
