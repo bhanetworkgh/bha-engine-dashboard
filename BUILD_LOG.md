@@ -15522,3 +15522,8 @@ Intent:     INC-BAYS.AGENT-104 (14:09 UTC): Bays' In-progress loops check-in pos
 Files:      n8n Bays — Record Scheduled Run (lIQmC333fz2TAcXX), Build Scheduled Run Row and the sticky note; restore point 165d6fa5
 Fix:        A finish with an empty task_name takes the one task started in the last 3 hours when there is exactly one, and the row says `Task Name From: only_open_start` (a new field name); two or none, or a start with no name, is refused as before. An empty list ("[]") in tool_issues no longer marks a run as having tool issues. Published 0b82c5a1, versionId equals activeVersionId. Pinned test 91779 on 91572's real input: PATCH to H0SP, Outcome Answered, Task Name From only_open_start.
 Decision:   Proven by a pinned test only. The incident carries no retry row (SCHEMA_VALIDATION), so 91572 cannot be resumed through the healer; the first live proof is the next real finish without a name.
+
+## 2026-11-16 16:35 — Kaiqi out of the scheduled-run re-run list; 101 to 104 closed
+Intent:     Destiny: Kaiqi is out of the system, so no reminder to him is meant to happen; close the open Bays incidents.
+Files:      n8n Bays — Scheduled Run Watch (8yerdU9JtXoN5clt), Build Re-run Requests; restore point fe2e8218
+Fix:        His Slack id, loop table and channel taken out of the re-run list (the expected list dropped him on 15 Nov; Bays' 11 tasks have none for him). Published fb2f4238. Closed INC-BAYS.AGENT-102 and -103 (proven live: intent check 15:20:26 UTC matched Bays' note on LOOP-1792470630689-8ZVR) and -101 and -104 (104 proven by pinned test 91779 only, said so in the close reason).
