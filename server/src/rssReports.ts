@@ -22,7 +22,6 @@
  */
 import { query } from './pg';
 import { record } from './engineEvents';
-import * as slack from './slack';
 import * as timers from './timers';
 
 export const ERROR_EVENT = 'rss_error_reported';
@@ -96,7 +95,7 @@ export function errorMessage(e: RssErrorInput): { text: string; blocks: unknown[
   const fields = facts.filter(([, v]) => v).map(([k, v]) => ({ type: 'mrkdwn', text: `*${k}*\n${esc(String(v))}` }));
   const headline = LABEL[e.kind].charAt(0).toUpperCase() + LABEL[e.kind].slice(1);
   const blocks: unknown[] = [
-    { type: 'header', text: { type: 'plain_text', text: ':warning: BHA RSS · Pipeline failure', emoji: true } },
+    { type: 'header', text: { type: 'plain_text', text: ':warning: Genie · BHA RSS · Pipeline failure', emoji: true } },
     { type: 'section', text: { type: 'mrkdwn', text: `<@${mention()}>  ·  *${esc(headline)}*` } },
   ];
   if (fields.length) blocks.push({ type: 'section', fields });
@@ -108,8 +107,8 @@ export function errorMessage(e: RssErrorInput): { text: string; blocks: unknown[
 }
 
 /**
- * The digest card is Genie's (16 Nov 2026, Destiny: "Bays posted it instead of Genie"): this dashboard
- * holds no Genie bot token, so it asks Genie to post it, on POST /api/genie/post-card with the inbound key
+ * The BHA RSS cards are Genie's (16 Nov 2026, Destiny: "Bays posted it instead of Genie"; RSS is a
+ * Genie subsystem): this dashboard holds no Genie bot token, so it asks Genie to post them, on POST /api/genie/post-card with the inbound key
  * Genie already holds. A post Genie cannot make is a failure, never handed to Bays instead.
  */
 async function postAsGenie(channel: string, text: string, blocks: unknown[]): Promise<{ ok: true; ts: string } | { ok: false; error: string }> {
@@ -126,14 +125,8 @@ async function postAsGenie(channel: string, text: string, blocks: unknown[]): Pr
   }
 }
 
-async function post(channel: string, text: string, blocks: unknown[]): Promise<{ ok: true; ts: string } | { ok: false; error: string }> {
-  if (!slack.slackConfigured()) return { ok: false, error: `${slack.SLACK_TOKEN_VAR} is not set, so nothing can be posted` };
-  const msg = { channel, text, blocks, unfurl_links: false, unfurl_media: false };
-  let r = await slack.botCall('chat.postMessage', msg);
-  if (!r.ok && r.error === 'not_in_channel' && (await slack.botCall('conversations.join', { channel })).ok) r = await slack.botCall('chat.postMessage', msg);
-  if (r.ok && typeof r.ts === 'string') return { ok: true, ts: r.ts };
-  return { ok: false, error: `Slack refused the post: ${String(r.error ?? 'unknown error')}` };
-}
+/** Every BHA RSS card is Genie's: RSS is a Genie subsystem (16 Nov 2026, Destiny). */
+const post = postAsGenie;
 
 /** Claim once, post, and give the claim back if Slack refuses, so a post nobody received is retried. */
 async function claimAndPost(
@@ -197,25 +190,43 @@ const DIGEST_SECTIONS: Array<{ heading: string; icon: string }> = [
   { heading: 'Context for Genie', icon: ':bulb:' },
 ];
 
-/** Splits Slack mrkdwn into pieces under the section limit, at line ends. */
-function chunks(text: string, max = 2900): string[] {
-  const out: string[] = [];
-  let cur = '';
-  for (const line of text.split('\n')) {
-    if (cur && cur.length + line.length + 1 > max) {
-      out.push(cur);
-      cur = '';
-    }
-    cur = cur ? `${cur}\n${line}` : line.slice(0, max);
+type RichEl = Record<string, unknown>;
+
+/** Markdown inline ([title](url), **bold**) to Slack rich text elements. */
+export function richInline(md: string): RichEl[] {
+  const out: RichEl[] = [];
+  const re = /\[([^\]\n]+)\]\((https?:\/\/[^\s)<>]+)\)|\*\*([^*\n]+)\*\*/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(md))) {
+    if (m.index > last) out.push({ type: 'text', text: md.slice(last, m.index) });
+    if (m[1]) out.push({ type: 'link', url: m[2], text: m[1] });
+    else out.push({ type: 'text', text: m[3], style: { bold: true } });
+    last = m.index + m[0].length;
   }
-  if (cur) out.push(cur);
-  return out;
+  if (last < md.length) out.push({ type: 'text', text: md.slice(last) });
+  return out.length ? out : [{ type: 'text', text: md || ' ' }];
+}
+
+/** One digest section as a Slack rich text block: its heading in bold, then its lines as a bullet list. */
+export function richSection(icon: string, heading: string, md: string): RichEl {
+  const lines = md.split('\n').map((l) => l.trim()).filter(Boolean);
+  const bullets = lines.filter((l) => /^[-*]\s+/.test(l)).map((l) => l.replace(/^[-*]\s+/, ''));
+  const prose = lines.filter((l) => !/^[-*]\s+/.test(l));
+  const elements: RichEl[] = [
+    { type: 'rich_text_section', elements: [{ type: 'emoji', name: icon.replace(/:/g, '') }, { type: 'text', text: ` ${heading}`, style: { bold: true } }] },
+  ];
+  if (prose.length) elements.push({ type: 'rich_text_section', elements: richInline(`\n${prose.join('\n')}`) });
+  if (bullets.length) {
+    elements.push({ type: 'rich_text_list', style: 'bullet', indent: 0, elements: bullets.map((b) => ({ type: 'rich_text_section', elements: richInline(b) })) });
+  }
+  return { type: 'rich_text', elements };
 }
 
 /**
- * The daily digest card for #bha-engine-digests (16 Nov 2026, Destiny: "well styled"): a header with the
- * day, the headline, the counts, then every section of the digest with its own heading, each line a
- * bullet with its source linked, and a footer saying where the full digest lives.
+ * The daily digest card for #bha-engine-digests (16 Nov 2026, Destiny: "well styled", then "use rich
+ * text lists"): a header with the day, the headline, the counts, then every section of the digest as a
+ * rich text bullet list with its sources linked, and a footer saying where the full digest lives.
  */
 export function digestMessage(d: { digest_date: string; title: string; body: string; items_used: number; sources_used: number }): { text: string; blocks: unknown[] } {
   const day = new Date(`${d.digest_date}T00:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
@@ -231,12 +242,9 @@ export function digestMessage(d: { digest_date: string; title: string; body: str
     if (!text) continue;
     found += 1;
     blocks.push({ type: 'divider' });
-    const pieces = chunks(`${s.icon} *${s.heading}*\n${toSlack(text)}`);
-    for (const piece of pieces) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: piece } });
+    blocks.push(richSection(s.icon, s.heading, text));
   }
-  if (!found) {
-    for (const piece of chunks(toSlack(d.body))) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: piece } });
-  }
+  if (!found) blocks.push(richSection(':newspaper:', 'Digest', d.body));
   blocks.push({ type: 'divider' });
   blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: 'The full digest is in BHARAG. Media Twin, Research Twin, North Star, Genie and Bays read it with read_outside_digest.' }] });
   blocks.push({ type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'Open BHA RSS status' }, url: 'https://rss.bhanetwork.org/status' }] });
@@ -265,7 +273,7 @@ export async function repostDigest(b: Record<string, unknown>, opts: { post?: ty
     { event_type: DIGEST_EVENT, subject_id: d.digest_date, dedupe_key: `${DIGEST_EVENT}:${d.digest_date}:repost:${Date.now()}`, detail: { title: d.title, repost: true } },
     digestChannel(),
     digestMessage(d),
-    opts.post ?? postAsGenie,
+    opts.post ?? post,
   );
   return r.posted ? { ok: true, posted: true, digest_date: d.digest_date, channel: digestChannel(), ts: r.ts } : { ok: false, posted: false, raise: true, error: r.error };
 }
@@ -277,7 +285,7 @@ export async function postDigest(d: { digest_date: string; title: string; body: 
       { event_type: DIGEST_EVENT, subject_id: d.digest_date, dedupe_key: `${DIGEST_EVENT}:${d.digest_date}`, detail: { title: d.title } },
       digestChannel(),
       digestMessage(d),
-      opts.post ?? postAsGenie,
+      opts.post ?? post,
     );
     if (r.already) return { posted: false, reason: 'already_posted' };
     return r.posted ? { posted: true, channel: digestChannel(), ts: r.ts } : { posted: false, reason: 'slack_refused', error: r.error };

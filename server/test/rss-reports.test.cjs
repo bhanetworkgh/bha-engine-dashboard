@@ -19,6 +19,7 @@ const m = rr.errorMessage(e);
 assert.match(m.text, /^BHA RSS: a source could not be read/); ok('the post says what failed in plain words');
 assert.ok(JSON.stringify(m.blocks).includes('&lt;script&gt;')); ok('what a service wrote is escaped before it is posted');
 assert.ok(m.text.includes('(TechCrunch)')); ok('the source is named');
+assert.ok(JSON.stringify(m.blocks).includes('Genie · BHA RSS')); ok('the error card is Genie\'s');
 assert.ok(JSON.stringify(m.blocks).includes('https://techcrunch.com/feed')); ok('its address is on the card');
 assert.equal(m.blocks[0].type, 'header'); ok('the error card opens with a header, in Bays\' style');
 assert.ok(JSON.stringify(m.blocks).includes('<@U0AEW3TBYH1>')); ok('the error card tags Destiny');
@@ -33,8 +34,12 @@ assert.ok(d.blocks[0].text.text.includes('Sunday, 15 November 2026')); ok('the h
 assert.ok(d.blocks[1].text.text.includes('<@U0AEW3TBYH1>') && d.blocks[1].text.text.includes('*x*')); ok('the card tags Destiny with the headline');
 assert.ok(d.blocks[2].elements[0].text.includes('40 items read from 12 sources')); ok('the counts are on the card');
 const all = JSON.stringify(d.blocks);
-assert.ok(all.includes('*What moved outside*') && all.includes('• One <https://a.com|a>')); ok('What moved outside is on the card in Slack format');
-assert.ok(all.includes('*Post ideas for the Media Twin*') && all.includes('*Context for Genie*')); ok('every section the digest has is on the card');
+const moved = d.blocks.find((b) => b.type === 'rich_text' && JSON.stringify(b).includes('What moved outside'));
+assert.ok(moved); ok('What moved outside is a rich text block');
+const list = moved.elements.find((e) => e.type === 'rich_text_list');
+assert.equal(list.style, 'bullet'); assert.equal(list.elements.length, 2); ok('its lines are a rich text bullet list');
+assert.deepEqual(list.elements[0].elements[1], { type: 'link', url: 'https://a.com', text: 'a' }); ok('a source is a real link in the list');
+assert.ok(all.includes('Post ideas for the Media Twin') && all.includes('Context for Genie')); ok('every section the digest has is on the card');
 assert.ok(!all.includes('Questions for Research Twin')); ok('a section the digest lacks is left out');
 
 assert.equal(rr.dueDate(new Date('2026-11-16T07:59:00Z')), null); ok('before 08:00 UTC no digest counts as missing');

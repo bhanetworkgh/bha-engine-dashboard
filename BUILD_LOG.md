@@ -15586,3 +15586,9 @@ Files:      server/src/rssReports.ts, CLAUDE.md; Genie src/server.ts
 Problem:    The digest card went out on the dashboard's Slack token, which is Bays'.
 Fix:        Genie gained POST /api/genie/post-card, locked to the inbound key it already holds and to the channels on GENIE_CARD_CHANNELS (default #bha-engine-digests). rssReports posts the digest through it; a post Genie cannot make gives the claim back and is retried, never sent as Bays.
 Decision:   The RSS error cards stay on Bays' token: only the digest was asked for.
+
+## 2026-11-16 20:45 — RSS error cards as Genie, and the digest as rich text lists
+Intent:     Destiny: the digest did not use rich text lists; move the RSS errors to Genie too, RSS is a subsystem of Genie.
+Files:      server/src/rssReports.ts, server/test/rss-reports.test.cjs, CLAUDE.md; Genie src/server.ts
+Fix:        Every BHA RSS post goes through Genie's post-card route; the Bays path is removed from rssReports. Each digest section is a rich_text block, its heading in bold and its lines a rich_text_list of bullets with real link elements. Genie's allow-list adds #bha-pipeline-errors.
+Decision:   No fallback to Bays: a card Genie cannot post gives its claim back and is retried.
