@@ -142,11 +142,13 @@ export async function usage(b: Row): Promise<Row> {
     `INSERT INTO engine_genie_usage (channel_id, day, asks) VALUES ($1, (now() AT TIME ZONE 'UTC')::date, 1)
      ON CONFLICT (channel_id, day) DO UPDATE SET asks = engine_genie_usage.asks + 1 RETURNING asks`, [c]);
   const asks = Number(r.rows[0].asks);
-  const lim = await query<{ daily_limit: number | null }>(`SELECT daily_limit FROM engine_genie_channels WHERE channel_id = $1`, [c]);
+  const lim = await query<{ daily_limit: number | null; memory: unknown }>(`SELECT daily_limit, memory FROM engine_genie_channels WHERE channel_id = $1`, [c]);
   const limit = lim.rows[0]?.daily_limit ?? null;
+  // The channel's memory rides on the same call, so every ask in a channel carries its notes.
+  const memory = Array.isArray(lim.rows[0]?.memory) ? (lim.rows[0]?.memory as Row[]).map((n) => ({ id: n.id, note: n.note })) : [];
   const allowed = limit === null || asks <= limit;
   if (!allowed && asks === limit + 1) await log('genie_limit_reached', c, str(b.user_id, 40) || 'genie', { limit, asks });
-  return { ok: true, allowed, asks, limit };
+  return { ok: true, allowed, asks, limit, memory };
 }
 
 export async function followed(): Promise<Row> {
