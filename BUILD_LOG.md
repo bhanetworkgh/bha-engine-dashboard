@@ -15634,3 +15634,10 @@ Files:      server/src/sharedMemory.ts (new), server/src/mcp/sharedMemoryTools.t
 Problem:    Genie's memory stopped at a channel; Bays, North Star and Research Twin each kept their own; no agent could see what the others were doing without reading four ledgers.
 Fix:        engine_shared_memory with genie-control ops shared_remember / shared_recall / shared_forget, and the MCP tools read_shared_memory, write_shared_memory and read_engine_activity in the agents' scopes.
 Decision:   A note is a person's word with its source, never a record, so the true-home rule stands. North Star and Media Twin read only, because their tokens are read tokens.
+
+## 2026-11-17 19:20 — Genie off the dashboard's service reads; no low-confidence hop to Research Twin
+Intent:     Destiny: Genie has GitHub, Render, Twilio, ElevenLabs and Stripe directly, so it no longer reads them through the dashboard; and stop handing low-confidence answers to Research Twin for now.
+Files:      server/src/mcp/index.ts (Genie's AGENT_KEYS scope), server/test/genie-doctrine.test.cjs, CLAUDE.md. Genie repo: 3151e9f, 8a67cb1 (allowlist, tool set, planner routes, prompts, protocol, RT hop switch).
+Problem:    Two live Render deploy tests in #bha-builder-sandbox (requests faf56980, 488f64a8) answered "I can't tell you which commit it's running": the planner was pinned to read_render (lists services, not deploys), a lenient judge pass overrode the judge, and the low-confidence answer was handed to Research Twin, which said it had no tool for it.
+Fix:        Genie: the five proxies are removed; a service ask routes to that service's mcp__<server>__ tools (or says the server is not connected); the lenient pass never overrides a judge that names a better tool; the quality hop to Research Twin is off unless GENIE_RT_QUALITY_HOP=true. Dashboard: the five reads are off Genie's token.
+Decision:   Removed rather than kept as a fallback, on Destiny's word: two paths to one service let the planner pick the narrower one.

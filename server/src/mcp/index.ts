@@ -380,10 +380,8 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-10-28 (D3): the evidence store, so a decision's evidence is read from the one copy the
         // dashboard holds, by name, never from a link that can move. A read.
         'read_evidence',
-        // 2026-11-05 (RW4J): the five live service reads Bays has, read at the source, so Genie checks a
-        // claim against what is really deployed. Nothing is copied into BHARAG. Customer details stay masked
-        // on any agent token (serviceReads.ts).
-        'read_github', 'read_render', 'read_twilio', 'read_elevenlabs', 'read_stripe',
+        // 2026-11-05 (RW4J) gave Genie the five live service reads; removed 2026-11-17 (Destiny): Genie reads
+        // GitHub, Render, Twilio, ElevenLabs and Stripe through their own MCP servers, not through here.
         // 2026-11-08: Jason on the 7 Nov log. "What does X run on, and what is its backup?" is answered from
         // read_providers, each part read from its own source, never from memory.
         'read_providers',
