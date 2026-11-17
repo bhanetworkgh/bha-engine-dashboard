@@ -637,10 +637,11 @@ export async function decide(postId: string, input: DecideInput) {
  * Twin drafts, the cards come to Slack, Destiny or Jason approves, and the approved platform posts live. No date window,
  * no weekend rule, no pattern needed. Approval stays the one step a person takes; posting without it comes later.
  * Facebook joined on 6 Nov 2026, once Meta verified the business and the BHA Media Twin app went Live
- * (LOOP-1793989931043-HMJC). LinkedIn is not here: its API access is not approved, so it is posted by hand. Add it when
- * that changes. A test draft runs the check, never a post. The pattern marks are kept as history and read by nothing.
+ * (LOOP-1793989931043-HMJC). LinkedIn joined on 18 Nov 2026: the LinkedIn - BHA credential posts as the BHA Vertical
+ * Farm page on the Community Management starter tier (n8n Engine — LinkedIn Page Access Check, run 95292). A test draft runs
+ * the check, never a post. The pattern marks are kept as history and read by nothing.
  */
-export const AUTO_POST_PLATFORMS: Platform[] = ['instagram', 'x', 'facebook'];
+export const AUTO_POST_PLATFORMS: Platform[] = ['instagram', 'x', 'facebook', 'linkedin'];
 const POST_PATH = process.env.MEDIA_POST_RUN_PATH?.trim() || '/webhook/media-twin-post';
 
 export type AutoPost = { post: boolean; mode: 'post' | 'check' | 'record_only'; reason: string };

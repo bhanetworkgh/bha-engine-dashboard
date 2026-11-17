@@ -15641,3 +15641,10 @@ Files:      server/src/mcp/index.ts (Genie's AGENT_KEYS scope), server/test/geni
 Problem:    Two live Render deploy tests in #bha-builder-sandbox (requests faf56980, 488f64a8) answered "I can't tell you which commit it's running": the planner was pinned to read_render (lists services, not deploys), a lenient judge pass overrode the judge, and the low-confidence answer was handed to Research Twin, which said it had no tool for it.
 Fix:        Genie: the five proxies are removed; a service ask routes to that service's mcp__<server>__ tools (or says the server is not connected); the lenient pass never overrides a judge that names a better tool; the quality hop to Research Twin is off unless GENIE_RT_QUALITY_HOP=true. Dashboard: the five reads are off Genie's token.
 Decision:   Removed rather than kept as a fallback, on Destiny's word: two paths to one service let the planner pick the narrower one.
+
+## 2026-11-18 00:00 — LinkedIn posts on Approve
+Intent:     Destiny: the 18 Nov Media Twin posts go out on LinkedIn through the Approve button like the other three platforms.
+Files:      server/src/mediaPosts.ts (AUTO_POST_PLATFORMS), server/test/media-claims.test.cjs, CLAUDE.md. n8n: Media Twin — Post Approved Draft (published d3a27eac), Engine — LinkedIn Page Access Check (new, folder Destiny, DWImpNqLoXgRjd0N).
+Problem:    A LinkedIn Approve only redrew the Slack card (run 95160): autoPostFor kept LinkedIn record-only, and Post Approved Draft named the page as urn:li:organization:PENDING.
+Fix:        Destiny reconnected the LinkedIn - BHA credential. The access check (run 95292) posted a DRAFT as the BHA Vertical Farm page and deleted it (201, 204) and read 21 followers; the page profile, admin roles and post lists answer 403 on the starter tier. Post Approved Draft names urn:li:organization:112345164, uses LinkedIn-Version 202609 and checks the page by its follower count (check run 95293, all four accounts 200). LinkedIn joins AUTO_POST_PLATFORMS.
+Decision:   The 17 Nov LinkedIn post, made by hand, is recorded on MTP-1794948278902-W15V (audit 6949) and not posted again. The first real LinkedIn Approve is the production proof.

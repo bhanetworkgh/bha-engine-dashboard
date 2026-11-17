@@ -97,7 +97,7 @@ ok('an approval posts without a pattern', async () => {
   assert.equal(r.post, true); assert.equal(r.mode, 'post');
 });
 ok('a weekend approval posts too', async () => assert.equal((await m.autoPostFor(noDb, { pattern_ref: null, test: false }, 'facebook', new Date('2026-11-15T15:00:00Z'))).post, true));
-ok('LinkedIn stays by hand', async () => assert.equal((await m.autoPostFor(noDb, { pattern_ref: null, test: false }, 'linkedin', new Date('2026-11-16T15:00:00Z'))).post, false));
+ok('LinkedIn posts on Approve (18 Nov 2026)', async () => assert.equal((await m.autoPostFor(noDb, { pattern_ref: null, test: false }, 'linkedin', new Date('2026-11-18T15:00:00Z'))).mode, 'post'));
 ok('a test draft only checks', async () => assert.equal((await m.autoPostFor(noDb, { pattern_ref: null, test: true }, 'instagram', new Date('2026-11-16T15:00:00Z'))).mode, 'check'));
 // Each platform's news goes in its own card's thread (7 Nov 2026), and a draft from before then falls back to its first card.
 ok('a platform with its own card uses that card\'s thread', () => {
