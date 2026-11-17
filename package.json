@@ -90,6 +90,7 @@
     "test:intake2": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/intake2.test.cjs",
     "test:decision-watch": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/decision-watch.test.cjs",
     "test:decision-watch-unlink": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/decision-watch-unlink.test.cjs",
+    "test:decision-watch-add": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/decision-watch-add.test.cjs",
     "test:decision-watch-digest": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/decision-watch-digest.test.cjs",
     "test:outside-digest": "npm run build:server --silent && node server/test/outside-digest.test.cjs",
     "test:rss-reports": "npm run build:server --silent && node server/test/rss-reports.test.cjs",

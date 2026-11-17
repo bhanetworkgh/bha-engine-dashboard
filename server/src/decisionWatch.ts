@@ -42,6 +42,7 @@
  * switching this on reminds nobody about the past.
  */
 import * as engineEvents from './engineEvents';
+import { addedField, fieldLimit, tooLongMessage } from './watchText';
 import { query } from './pg';
 import * as quota from './quota';
 import * as slack from './slack';
@@ -462,12 +463,10 @@ export async function update(watchId: string, by: string, changes: Partial<Recor
     // Adds by default (14 Oct 2026): a replace dropped Jason's three-point next step on DW-1791901078077-O0B8.
     // Only `replace: true`, or an empty string to clear a field, takes what is held away.
     const append = opts.replace !== true && opts.append !== false;
-    if (to && append && from) {
-      if (from.toLowerCase().includes(to.toLowerCase())) to = from;
-      else to = field === 'next_step' ? `${from}\nUpdate ${now.toISOString().slice(0, 10)}: ${to}` : `${from}; ${to}`;
-    }
-    const limit = field === 'next_step' ? 3000 : 1200;
-    if (to && to.length > limit) return { ok: false, reason: 'too_long', message: `${field} would be ${to.length} characters; the limit is ${limit}. Send it with replace: true and a shorter text that keeps every part still owed.` };
+    const adding = Boolean(to && append && from);
+    if (to && append && from) to = addedField(field, from, to, now);
+    // 17 Nov 2026 (3ZQV, INC-BAYS.AGENT-105/106): 6,000 for next_step, and a full one is never rewritten shorter by an agent.
+    if (to && to.length > fieldLimit(field)) return { ok: false, reason: 'too_long', message: tooLongMessage(field, to.length, adding) };
     if (to !== from) changed.push({ field, from, to });
   }
   // close_on_reply is history since 26 Oct 2026: no reply closes a watch, so there is nothing to flip.

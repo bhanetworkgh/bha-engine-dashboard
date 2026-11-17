@@ -15592,3 +15592,10 @@ Intent:     Destiny: the digest did not use rich text lists; move the RSS errors
 Files:      server/src/rssReports.ts, server/test/rss-reports.test.cjs, CLAUDE.md; Genie src/server.ts
 Fix:        Every BHA RSS post goes through Genie's post-card route; the Bays path is removed from rssReports. Each digest section is a rich_text block, its heading in bold and its lines a rich_text_list of bullets with real link elements. Genie's allow-list adds #bha-pipeline-errors.
 Decision:   No fallback to Bays: a card Genie cannot post gives its claim back and is retried.
+
+## 2026-11-17 07:45 — A Decision Watch add is never pushed into a rewrite
+Intent:     INC-BAYS.AGENT-105 and -106: Jason asked for one line added to DW-1793021830042-3ZQV's next step, changing nothing else, and nothing was written.
+Files:      server/src/watchText.ts (new), server/src/decisionWatch.ts, server/test/decision-watch-add.test.cjs, package.json
+Problem:    next_step held 2,761 of 3,000 characters, so the add was refused as too_long with advice to send replace: true and shorter text. The intent check rightly refused that rewrite twice. The add also put "Update <date>:" in front of a line that already began with its own Update date, which is how 3ZQV holds "Update 2026-11-13: Update 2026-11-14".
+Fix:        next_step's limit is 6,000 (refs stay 1,200). A full next step on an add now says not to rewrite the held text and to ask Destiny or Jason to trim it; only a replace that is too long keeps the old advice. A line that already starts with "Update <date>" is added without a second label. test:decision-watch-add passes 8 of 8.
+Decision:   091, 107 and 108 are not this fault: in each the intent check stopped a write the message did not ask for, so they close as correct refusals. 3ZQV's existing doubled label is left as written: it is Jason's watch text.
