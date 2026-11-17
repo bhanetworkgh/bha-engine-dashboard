@@ -15606,3 +15606,10 @@ Files:      server/src/index.ts
 Problem:    Engine — Dashboard Call Runner sends every body as `body_b64`, and this route read the plain body, so it answered 422 `"NaN" is not a stage` (n8n run 93505). Fifteen other engine routes read the plain body the same way, although section 4 says the whole body may come as body_b64 on any engine POST.
 Fix:        `readJson` decodes `body_b64` for every route (`decodeBodyB64`). A route that already decoded it sees no body_b64 and is unchanged.
 Decision:   One decode in the reader, not one per route, so a new route cannot miss it.
+
+## 2026-11-17 09:30 — The reply check knows when the agent is only copied in
+Intent:     INC-BAYS.AGENT-109. Jason's 02:54 UTC message on DW-1793809858770-219J was addressed to Destiny with Bays cc'd; it asked Destiny for his next Media Twin step and two dates. Bays rightly did not invent them and recorded the asks on the watch (audit 6743). The reply check read every question as Bays' own and refused the reply twice, so Jason got a failure notice (execution 93109).
+Files:      server/src/intentCheck.ts
+Problem:    "Bays did not answer this message after two tries on fresh memory. First: The message asked for the next concrete step on Media Twin eval/visibility and a completion date for monitoring refresh and Pattern v1; the reply only describes updating the watch..."
+Fix:        ANSWER_SYSTEM gains one rule: a message addressed to someone else with the agent only copied in has questions that are that person's; a reply that notes it, records it or says who it waits on answers it, and one that answers for that person does not. The check is told each agent's Slack id (AGENT_SLACK_IDS: Bays U0BD5EA1F71, Genie U0ADAEB9JTH) so it can see who is addressed. The agent name swap no longer touches "Bays Horizon Advisory".
+Decision:   No phrase rule: whether a message is addressed to the agent is a reading, and the model already has the message.

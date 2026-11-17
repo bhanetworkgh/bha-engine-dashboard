@@ -623,10 +623,15 @@ It answers when it does what was asked, gives the information asked for, says it
 
 It does not answer when it says there is no request or question when the message plainly has one, asks the person what they want when the message already said, answers a different question from the one asked, or only describes an error or missing input instead of the message.
 
+A message can be addressed to someone else, with Bays only copied in (cc). Then its questions are that person's to answer, not Bays'. A reply that notes the message, records it on the right record, or says it is waiting on that person answers it. A reply that answers for that person, makes up their dates or commits them to anything does not.
+
 Return exactly one JSON object and nothing else: {"answers": true or false, "reason": "one short sentence"}.`;
 
 /** Phrases that are a non-answer whatever the model says, the summary chain's own list (12 Nov 2026). */
 const NON_ANSWER = /(i (do not|don't|don’t) have (a |any )?(new |pending )?(request|question)|nothing (new )?to act on|no (new |pending |actual )?(request|question) (in|to|here)|what would you like me to (pick up|do)|error payload)/i;
+
+/** Each agent's Slack id, so the reply check can tell when the agent is only copied in (17 Nov 2026, INC-BAYS.AGENT-109). */
+export const AGENT_SLACK_IDS: Record<string, string> = { Bays: 'U0BD5EA1F71', Genie: 'U0ADAEB9JTH' };
 
 export interface AnswerVerdict { answers: boolean; reason: string; checked: 'model' | 'phrase' | 'unchecked'; provider: string | null; error: string | null }
 
@@ -644,7 +649,9 @@ export async function answerCheck(b: Record<string, unknown>): Promise<AnswerVer
   if (!ask.trim()) return { answers: true, reason: 'No message was given to check against.', checked: 'unchecked', provider: null, error: 'no ask' };
   // Genie's replies are checked the same way (16 Nov 2026, Genie rebuild step 4.6); Bays is the default.
   const agent = b.agent === 'Genie' || b.agent === 'North Star' ? b.agent : 'Bays';
-  const v = await askAnswerModel(`The message:\n${ask}\n\n${agent}'s reply:\n${reply}`, ANSWER_SYSTEM.replace('called Bays', `called ${agent}`));
+  const id = AGENT_SLACK_IDS[agent];
+  const who = id ? `In the message, <@${id}> is ${agent}.\n\n` : '';
+  const v = await askAnswerModel(`${who}The message:\n${ask}\n\n${agent}'s reply:\n${reply}`, ANSWER_SYSTEM.replace(/\bBays\b(?! Horizon)/g, agent));
   if (v.checked === 'unchecked') await uncheckedSeen('answer_check', v.error || 'unknown', `AC-${Date.now()}-${randomUUID().slice(0, 4)}`);
   return v;
 }
