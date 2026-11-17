@@ -15613,3 +15613,10 @@ Files:      server/src/intentCheck.ts
 Problem:    "Bays did not answer this message after two tries on fresh memory. First: The message asked for the next concrete step on Media Twin eval/visibility and a completion date for monitoring refresh and Pattern v1; the reply only describes updating the watch..."
 Fix:        ANSWER_SYSTEM gains one rule: a message addressed to someone else with the agent only copied in has questions that are that person's; a reply that notes it, records it or says who it waits on answers it, and one that answers for that person does not. The check is told each agent's Slack id (AGENT_SLACK_IDS: Bays U0BD5EA1F71, Genie U0ADAEB9JTH) so it can see who is addressed. The agent name swap no longer touches "Bays Horizon Advisory".
 Decision:   No phrase rule: whether a message is addressed to the agent is a reading, and the model already has the message.
+
+## 2026-11-17 13:10 — A Media Twin rewrite keeps its parent's sources (VMZR)
+Intent:     LOOP-1794859197285-VMZR. A rewrite of MTP-1794826948085-195Q (MTP-1794839176882-WKJK, execution 91625) stored sources.codex empty, so the failure story lost CODEX-20261114-ahad-vfarm-sensor-debug, the record Jason's rule 1 needs.
+Files:      server/src/mediaPosts.ts, server/test/media-rewrite-sources.test.cjs, package.json, CLAUDE.md
+Problem:    create() built the rewrite's sources from the rewrite's input alone, and the failure-source check ran on those, before the parent was read. The agent's rewrite sends its own sources with empty lists.
+Fix:        mergeSources(parent, own), pure: codex, loops, news and slack from the parent first, the rewrite's own added after, each id once; execution, self_check, rewrite_of and the rest stay the rewrite's. create() reads the parent's sources before sourceIds() runs, so the failure-story check sees the carried ids. Six pure checks, including WKJK's real case.
+Decision:   Fixed on the dashboard, not in n8n's Rewrite Draft, so any door that writes a rewrite keeps the parent's records. A rewrite may add records but never rest on fewer than its draft did.

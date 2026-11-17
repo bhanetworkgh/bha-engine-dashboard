@@ -357,6 +357,33 @@ async function one(db: Queryable, id: string, lock = false): Promise<MediaPost |
   return r.rows[0] ? show(r.rows[0] as Record<string, unknown>) : null;
 }
 
+/** The record lists a rewrite inherits from the draft it replaces (17 Nov 2026, LOOP-1794859197285-VMZR). */
+export const INHERITED_SOURCE_LISTS = ['codex', 'loops', 'news', 'slack'] as const;
+
+/**
+ * A rewrite's sources: the parent's record lists carried over, with whatever the rewrite names added after
+ * them, each id once. Everything else (execution, self_check, rewrite_of, model_tokens) is the rewrite's own.
+ * A rewrite rewords what Jason rejected; it never makes the story rest on fewer records than the draft did,
+ * so a failure story keeps the loop or log Jason's rule 1 needs. Pure.
+ */
+export function mergeSources(parent: unknown, own: unknown): Record<string, unknown> {
+  const p = (parent && typeof parent === 'object' ? parent : {}) as Record<string, unknown>;
+  const out = { ...((own && typeof own === 'object' ? own : {}) as Record<string, unknown>) };
+  for (const k of INHERITED_SOURCE_LISTS) {
+    const from = Array.isArray(p[k]) ? (p[k] as unknown[]) : [];
+    const mine = Array.isArray(out[k]) ? (out[k] as unknown[]) : [];
+    if (!from.length && !Array.isArray(out[k])) continue;
+    const seen = new Set<string>();
+    out[k] = [...from, ...mine].filter((v) => {
+      const key = typeof v === 'string' ? v : JSON.stringify(v);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+  return out;
+}
+
 /* ----------------------------------------------------------------- create */
 
 export interface CreateInput {
@@ -388,6 +415,12 @@ export async function create(input: CreateInput) {
   const cardText = ['kicker', 'headline', 'sub', 'foot'].map((k) => String(card[k] ?? '')).join('\n');
   const cardCheck = claimCheck(cardText);
 
+  // A rewrite carries the parent's records, so its failure story is checked against them too.
+  const parentForSources = s(input.parent_post_id, 40);
+  if (parentForSources) {
+    const r = await query(`SELECT sources FROM engine_media_posts WHERE post_id = $1`, [parentForSources]);
+    if (r.rows[0]) input = { ...input, sources: mergeSources(r.rows[0].sources, input.sources) };
+  }
   // The records the sources name, read once: a failure story must rest on one that is held.
   const ids = sourceIds(input.sources);
   const found = ids.length
