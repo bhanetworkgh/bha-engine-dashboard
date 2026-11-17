@@ -4805,6 +4805,35 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `CREATE INDEX IF NOT EXISTS engine_genie_tasks_due ON engine_genie_tasks (next_run_at) WHERE status = 'active'`,
     ],
   },
+  {
+    id: 140,
+    name: "Genie's direct tools: every change waits on an Approve or Deny card, decided by Destiny or Jason (17 Nov 2026, Destiny, Genie rebuild 6.1, genieApprovals.ts)",
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_genie_approvals (
+        id text PRIMARY KEY,
+        server text NOT NULL,
+        tool text NOT NULL,
+        args jsonb NOT NULL DEFAULT '{}'::jsonb,
+        summary text NOT NULL,
+        channel_id text NOT NULL,
+        thread_ts text,
+        requester text,
+        request_id text,
+        digest text NOT NULL,
+        status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'denied', 'expired', 'done', 'failed')),
+        card_ts text,
+        decided_by text CHECK (decided_by IS NULL OR decided_by IN ('U0AEW3TBYH1', 'U0A9V97949F')),
+        decided_at timestamptz,
+        result text,
+        error text,
+        attempts jsonb NOT NULL DEFAULT '[]'::jsonb,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        expires_at timestamptz NOT NULL DEFAULT now() + interval '24 hours',
+        finished_at timestamptz
+      )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS engine_genie_approvals_pending ON engine_genie_approvals (digest) WHERE status = 'pending'`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

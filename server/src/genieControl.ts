@@ -19,6 +19,7 @@
  */
 import { query, withTransaction } from './pg';
 import * as engineEvents from './engineEvents';
+import * as approvals from './genieApprovals';
 
 export const CONTROL_EVENTS = ['genie_channel_updated', 'genie_memory_added', 'genie_memory_removed', 'genie_limit_reached', 'genie_task_created', 'genie_task_cancelled', 'genie_task_ran', 'genie_nudge_posted'];
 export const ADMINS = new Set(['U0AEW3TBYH1', 'U0A9V97949F']);
@@ -291,8 +292,19 @@ export async function handle(b: Row): Promise<Row> {
       return logNudge(b);
     case 'people':
       return people();
+    // Step 6.1 (17 Nov 2026): Genie's direct tools wait on Destiny or Jason (genieApprovals.ts).
+    case 'approval_request':
+      return approvals.request(b);
+    case 'approval_card':
+      return approvals.setCard(b);
+    case 'approval_decide':
+      return approvals.decide(b);
+    case 'approval_finish':
+      return approvals.finish(b);
+    case 'approval_expire':
+      return approvals.expire();
     default:
-      throw new GenieControlError(422, 'op is one of channel, set_channel, remember, forget, usage, followed, create_task, list_tasks, cancel_task, due_tasks, task_result, log_nudge, people.');
+      throw new GenieControlError(422, 'op is one of channel, set_channel, remember, forget, usage, followed, create_task, list_tasks, cancel_task, due_tasks, task_result, log_nudge, people, approval_request, approval_card, approval_decide, approval_finish, approval_expire.');
   }
 }
 
@@ -313,6 +325,6 @@ export async function page(): Promise<Row> {
       COALESCE(u.asks, 0) AS asks_today FROM engine_genie_channels c
       LEFT JOIN engine_genie_usage u ON u.channel_id = c.channel_id AND u.day = (now() AT TIME ZONE 'UTC')::date ORDER BY c.updated_at DESC NULLS LAST`);
   const tasks = await query<Row>(`SELECT id, channel_id, created_by, prompt, schedule, next_run_at, last_run_at, last_result, status, created_at FROM engine_genie_tasks ORDER BY status, next_run_at LIMIT 200`);
-  const actions = await query<Row>(`SELECT id, event_type, subject_id, actor, detail, at FROM engine_events WHERE event_type = ANY($1) AND lane = 'GENIE' ORDER BY at DESC LIMIT 100`, [CONTROL_EVENTS]);
-  return { channels: ch.rows, tasks: tasks.rows, actions: actions.rows };
+  const actions = await query<Row>(`SELECT id, event_type, subject_id, actor, detail, at FROM engine_events WHERE event_type = ANY($1) AND lane = 'GENIE' ORDER BY at DESC LIMIT 100`, [[...CONTROL_EVENTS, ...approvals.APPROVAL_EVENTS]]);
+  return { channels: ch.rows, tasks: tasks.rows, actions: actions.rows, approvals: await approvals.list() };
 }

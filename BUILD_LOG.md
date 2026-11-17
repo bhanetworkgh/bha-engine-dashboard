@@ -15620,3 +15620,10 @@ Files:      server/src/mediaPosts.ts, server/test/media-rewrite-sources.test.cjs
 Problem:    create() built the rewrite's sources from the rewrite's input alone, and the failure-source check ran on those, before the parent was read. The agent's rewrite sends its own sources with empty lists.
 Fix:        mergeSources(parent, own), pure: codex, loops, news and slack from the parent first, the rewrite's own added after, each id once; execution, self_check, rewrite_of and the rest stay the rewrite's. create() reads the parent's sources before sourceIds() runs, so the failure-story check sees the carried ids. Six pure checks, including WKJK's real case.
 Decision:   Fixed on the dashboard, not in n8n's Rewrite Draft, so any door that writes a rewrite keeps the parent's records. A rewrite may add records but never rest on fewer than its draft did.
+
+## 2026-11-17 14:10 — Genie's change-making tools wait on an Approve / Deny card (Genie rebuild 6.1)
+Intent:     Genie gets direct MCP tools (GitHub, Render, n8n, Supabase, Twilio, ElevenLabs; Stripe read only). Destiny: approvers are him and Jason, Stripe stays read only.
+Files:      server/src/genieApprovals.ts (new), server/src/genieControl.ts (five approval ops, approvals on the page read), server/src/migrations.ts (140), CLAUDE.md
+Problem:    Genie's MCP adapter called every listed tool directly, with no approval of any kind.
+Fix:        The request is held here: one row per call, digest-deduped while pending, decided only by U0AEW3TBYH1 or U0A9V97949F in one claim statement, expired after 24 hours. Genie (genie-v3-migration 7805b07) holds every tool that is not a read, posts the card in the asker's thread and runs the stored call only after an approve.
+Decision:   The request lives on the dashboard, not in Genie, so it outlives a Genie deploy and every outcome is on record.
