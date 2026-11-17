@@ -86,6 +86,8 @@ import * as narrationAudio from './narrationAudio';
 import * as outsideDigest from './outsideDigest';
 import * as rssReports from './rssReports';
 import * as genieControl from './genieControl';
+import * as sharedMemory from './sharedMemory';
+import * as genieApprovals from './genieApprovals';
 import * as reviewCard from './reviewCard';
 import * as paySuggest from './paySuggest';
 import * as logPrecheck from './logPrecheck';
@@ -994,6 +996,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
             return await genieControl.handle(b);
           } catch (e) {
             if (e instanceof genieControl.GenieControlError) throw new systemFeeds.FeedError(e.status, e.message);
+            if (e instanceof sharedMemory.SharedMemoryError || e instanceof genieApprovals.ApprovalError) throw new systemFeeds.FeedError(e.status, e.message);
             throw e;
           }
         },

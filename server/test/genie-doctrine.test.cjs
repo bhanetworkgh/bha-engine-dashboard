@@ -104,8 +104,8 @@ let server;
   const ok = (name) => { passed++; console.log(`  ok  ${name}`); };
   try {
     // 1. Genie's tool list, exactly.
-    assert.deepEqual(await listOf(TOKENS.genie), ['classify_outages', 'get_vfarm_gates', 'read_buyer_flow', 'read_elevenlabs', 'read_engine_events', 'read_engine_strain', 'read_evidence', 'read_github', 'read_help_pages', 'read_logstream', 'read_media_doctrine', 'read_monitoring_twin', 'read_open_loops', 'read_outside_digest', 'read_providers', 'read_publication_decision', 'read_record_history', 'read_render', 'read_slack', 'read_sop', 'read_stripe', 'read_true_home', 'read_twilio', 'read_vfarm_history']);
-    ok("Genie's token lists exactly read_logstream, read_engine_events, read_media_doctrine, read_publication_decision, read_buyer_flow, read_sop, read_monitoring_twin, get_vfarm_gates, read_vfarm_history, read_engine_strain, read_help_pages, read_evidence, the five service reads, read_providers, classify_outages, read_true_home, read_record_history and read_outside_digest");
+    assert.deepEqual(await listOf(TOKENS.genie), ['classify_outages', 'get_vfarm_gates', 'read_buyer_flow', 'read_elevenlabs', 'read_engine_activity', 'read_engine_events', 'read_engine_strain', 'read_evidence', 'read_github', 'read_help_pages', 'read_logstream', 'read_media_doctrine', 'read_monitoring_twin', 'read_open_loops', 'read_outside_digest', 'read_providers', 'read_publication_decision', 'read_record_history', 'read_render', 'read_slack', 'read_shared_memory', 'read_sop', 'read_stripe', 'read_true_home', 'read_twilio', 'read_vfarm_history']);
+    ok("Genie's token lists exactly read_logstream, read_engine_events, read_media_doctrine, read_publication_decision, read_buyer_flow, read_sop, read_monitoring_twin, get_vfarm_gates, read_vfarm_history, read_engine_strain, read_help_pages, read_evidence, the five service reads, read_providers, classify_outages, read_true_home, read_record_history, read_outside_digest, read_shared_memory and read_engine_activity");
 
     // 2. Refusals: an unrelated read, the gap summary it was not given, and writes.
     for (const name of ['find_records', 'read_doctrine_gap_summary']) {

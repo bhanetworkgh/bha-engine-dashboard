@@ -15627,3 +15627,10 @@ Files:      server/src/genieApprovals.ts (new), server/src/genieControl.ts (five
 Problem:    Genie's MCP adapter called every listed tool directly, with no approval of any kind.
 Fix:        The request is held here: one row per call, digest-deduped while pending, decided only by U0AEW3TBYH1 or U0A9V97949F in one claim statement, expired after 24 hours. Genie (genie-v3-migration 7805b07) holds every tool that is not a read, posts the card in the asker's thread and runs the stored call only after an approve.
 Decision:   The request lives on the dashboard, not in Genie, so it outlives a Genie deploy and every outcome is on record.
+
+## 2026-11-17 14:40 — Shared memory and engine awareness (Genie rebuild 7 and 8)
+Intent:     One memory across the engine, and every part able to see what the others are doing.
+Files:      server/src/sharedMemory.ts (new), server/src/mcp/sharedMemoryTools.ts (new), server/src/genieControl.ts, server/src/index.ts, server/src/mcp/tools.ts, server/src/mcp/index.ts (scopes), server/src/migrations.ts (141), server/test/shared-memory.test.cjs, server/test/genie-doctrine.test.cjs, package.json, CLAUDE.md
+Problem:    Genie's memory stopped at a channel; Bays, North Star and Research Twin each kept their own; no agent could see what the others were doing without reading four ledgers.
+Fix:        engine_shared_memory with genie-control ops shared_remember / shared_recall / shared_forget, and the MCP tools read_shared_memory, write_shared_memory and read_engine_activity in the agents' scopes.
+Decision:   A note is a person's word with its source, never a record, so the true-home rule stands. North Star and Media Twin read only, because their tokens are read tokens.

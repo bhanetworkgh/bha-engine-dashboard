@@ -4834,6 +4834,24 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `CREATE UNIQUE INDEX IF NOT EXISTS engine_genie_approvals_pending ON engine_genie_approvals (digest) WHERE status = 'pending'`,
     ],
   },
+  {
+    id: 141,
+    name: 'Shared memory: what a person asked any agent to remember, read by every agent (17 Nov 2026, Destiny, Genie rebuild 7, sharedMemory.ts)',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_shared_memory (
+        id text PRIMARY KEY,
+        about text,
+        note text NOT NULL,
+        said_by text,
+        written_by text NOT NULL,
+        source_ref text,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        removed_at timestamptz,
+        removed_by text
+      )`,
+      `CREATE INDEX IF NOT EXISTS engine_shared_memory_live ON engine_shared_memory (created_at DESC) WHERE removed_at IS NULL`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

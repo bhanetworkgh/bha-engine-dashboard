@@ -20,6 +20,7 @@
 import { query, withTransaction } from './pg';
 import * as engineEvents from './engineEvents';
 import * as approvals from './genieApprovals';
+import * as shared from './sharedMemory';
 
 export const CONTROL_EVENTS = ['genie_channel_updated', 'genie_memory_added', 'genie_memory_removed', 'genie_limit_reached', 'genie_task_created', 'genie_task_cancelled', 'genie_task_ran', 'genie_nudge_posted'];
 export const ADMINS = new Set(['U0AEW3TBYH1', 'U0A9V97949F']);
@@ -303,8 +304,17 @@ export async function handle(b: Row): Promise<Row> {
       return approvals.finish(b);
     case 'approval_expire':
       return approvals.expire();
+    // Steps 7 and 8 (17 Nov 2026): one memory across the engine, and what every part is doing.
+    case 'shared_remember':
+      return shared.remember({ ...b, written_by: 'genie', said_by: b.requester });
+    case 'shared_recall':
+      return shared.recall(b);
+    case 'shared_forget':
+      return shared.forget(b);
+    case 'activity':
+      return shared.activity(b);
     default:
-      throw new GenieControlError(422, 'op is one of channel, set_channel, remember, forget, usage, followed, create_task, list_tasks, cancel_task, due_tasks, task_result, log_nudge, people, approval_request, approval_card, approval_decide, approval_finish, approval_expire.');
+      throw new GenieControlError(422, 'op is one of channel, set_channel, remember, forget, usage, followed, create_task, list_tasks, cancel_task, due_tasks, task_result, log_nudge, people, approval_request, approval_card, approval_decide, approval_finish, approval_expire, shared_remember, shared_recall, shared_forget, activity.');
   }
 }
 
