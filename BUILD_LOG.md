@@ -15599,3 +15599,10 @@ Files:      server/src/watchText.ts (new), server/src/decisionWatch.ts, server/t
 Problem:    next_step held 2,761 of 3,000 characters, so the add was refused as too_long with advice to send replace: true and shorter text. The intent check rightly refused that rewrite twice. The add also put "Update <date>:" in front of a line that already began with its own Update date, which is how 3ZQV holds "Update 2026-11-13: Update 2026-11-14".
 Fix:        next_step's limit is 6,000 (refs stay 1,200). A full next step on an add now says not to rewrite the held text and to ask Destiny or Jason to trim it; only a replace that is too long keeps the old advice. A line that already starts with "Update <date>" is added without a second label. test:decision-watch-add passes 8 of 8.
 Decision:   091, 107 and 108 are not this fault: in each the intent check stopped a write the message did not ask for, so they close as correct refusals. 3ZQV's existing doubled label is left as written: it is Jason's watch text.
+
+## 2026-11-17 08:00 — body_b64 is read on every route
+Intent:     Move Shibu's two Early Access leads back to Stage 1 (Jason, 6 Nov, C0C36GPEB3L 1793967724.204449) through `POST /api/engine/vfarm-leads/stage`.
+Files:      server/src/index.ts
+Problem:    Engine — Dashboard Call Runner sends every body as `body_b64`, and this route read the plain body, so it answered 422 `"NaN" is not a stage` (n8n run 93505). Fifteen other engine routes read the plain body the same way, although section 4 says the whole body may come as body_b64 on any engine POST.
+Fix:        `readJson` decodes `body_b64` for every route (`decodeBodyB64`). A route that already decoded it sees no body_b64 and is unchanged.
+Decision:   One decode in the reader, not one per route, so a new route cannot miss it.

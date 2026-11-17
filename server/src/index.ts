@@ -259,7 +259,15 @@ async function readJson(req: IncomingMessage, limit = 64 * 1024): Promise<Record
       if (!text.trim()) return resolve({});
       try {
         const v = JSON.parse(text) as unknown;
-        resolve(v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
+        const obj = v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+        // 17 Nov 2026: body_b64 is decoded here for every route, not route by route. The lead stage move
+        // (/api/engine/vfarm-leads/stage) and fifteen other engine routes read the plain body, so a call sent
+        // as body_b64 reached them as an empty body ("NaN" is not a stage, n8n run 93505).
+        try {
+          resolve(decodeBodyB64(obj));
+        } catch (e) {
+          reject(e);
+        }
       } catch {
         reject(new HttpError(400, 'The request body was not JSON.'));
       }
