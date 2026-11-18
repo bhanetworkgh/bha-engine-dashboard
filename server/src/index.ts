@@ -1099,6 +1099,20 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         describe: (r) => `${r.submission_id ?? ''}: SOP check ${r.dry_run ? '(dry run) ' : ''}${(r.verdict as { result?: string } | undefined)?.result ?? r.reason ?? ''}`.slice(0, 400),
         hint: 'POST { submission_id, dry_run? }. Checks the log against SOP -- vFarm Hardware Modularity and Swapability; a conflict flags it and asks the author why in their log channel.',
       },
+      /** The suggested pay the Approve pop-up opens on, read live from the Codex row (18 Nov 2026, reviewCard.ts). Reads only. */
+      '/api/engine/review-card/suggestion': {
+        kind: 'codex',
+        store: async (b) => {
+          try {
+            return { ...(await reviewCard.suggestionFor(b)), dry_run: true, inserted: 0, updated: 0, unchanged: 1 };
+          } catch (e) {
+            if (e instanceof reviewCard.CardError) throw new systemFeeds.FeedError(e.status, `${e.reason}: ${e.message}`);
+            throw e;
+          }
+        },
+        describe: (r) => `${r.submission_id}: suggested pay for the Approve pop-up ${r.sg ? 'read' : 'none on the row'}`.slice(0, 400),
+        hint: 'POST { submission_id }. Answers { sg } in the shape the review card button carries ({ r, s, c, h, t, n, k, l, x }), or null.',
+      },
       /** The review card rewritten as approved: whose log, the session, when, and who approved it (11 Nov 2026, reviewCard.ts). */
       '/api/engine/review-card/approved': {
         kind: 'codex',

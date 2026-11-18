@@ -290,3 +290,19 @@ export async function refreshPay(b: Obj): Promise<Obj> {
   if (!u.ok) throw new CardError('slack_refused', `Slack refused the update: ${u.error}.`, 502);
   return { ok: true, updated: true, submission_id: id, channel, ts, line, link: `https://bayshorizonnetwork.slack.com/archives/${channel}/p${ts.replace('.', '')}` };
 }
+
+/**
+ * The suggestion the Approve pop-up opens on, read from the Codex row at the moment Jason clicks
+ * (18 Nov 2026, Destiny). The button carries a copy, but a card posted before the suggestion was
+ * worked out, or before it was scored again, carries none or an old one (Ahad's 17 Nov log opened
+ * on Full while the review suggested less). Reads only; `sg` is null when the row holds none.
+ */
+export async function suggestionFor(b: Obj): Promise<Obj> {
+  const id = flat(b.submission_id);
+  if (!id) throw new CardError('submission_id_required', 'submission_id is the Codex row the card belongs to.');
+  const r = await query<{ fields: Obj }>(`SELECT fields FROM engine_codex_submissions WHERE natural_id = $1 OR fields->>'Submission ID' = $1 ORDER BY updated_at DESC LIMIT 2`, [id]);
+  if (!r.rows.length) throw new CardError('not_found', `No Codex row ${id}.`, 404);
+  if (r.rows.length > 1) throw new CardError('ambiguous', `${id} matches two Codex rows.`, 409);
+  const part = sugPart(paySuggest.fromRow(r.rows[0].fields));
+  return { ok: true, submission_id: id, sg: part ? JSON.parse(part.slice(1)) : null };
+}
