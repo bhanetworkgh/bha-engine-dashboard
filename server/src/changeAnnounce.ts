@@ -32,7 +32,7 @@ import * as slack from './slack';
 import * as timers from './timers';
 
 export const RULE = {
-  channel: process.env.CHANGE_ANNOUNCE_CHANNEL?.trim() || 'C0ASMPYQLG3', // #bha-coordination
+  channel: process.env.CHANGE_ANNOUNCE_CHANNEL?.trim() || 'C0CJUTHBBH8', // #bha-loop-updates (18 Nov 2026; was #bha-coordination)
   every_minutes: 5,
   settle_seconds: 60,
   lookback_hours: 6,
@@ -274,9 +274,9 @@ type Block = Record<string, unknown>;
 const txt = (text: string, style?: Record<string, boolean>): Block => (style ? { type: 'text', text, style } : { type: 'text', text });
 const section = (...elements: Block[]): Block => ({ type: 'rich_text_section', elements });
 const bullets = (lines: string[]): Block => ({ type: 'rich_text_list', style: 'bullet', elements: lines.map((l) => section(txt(l))) });
-const lagos = (iso: string): string => {
+const utc = (iso: string): string => {
   const d = new Date(iso);
-  return isNaN(d.getTime()) ? iso : `${d.toLocaleString('en-GB', { timeZone: 'Africa/Lagos', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })} Lagos`;
+  return isNaN(d.getTime()) ? iso : `${d.toLocaleString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })} UTC`;
 };
 
 /** One change as Block Kit: header, the record, its facts, what changed as a list, why, next, a button. */
@@ -286,7 +286,7 @@ export function blocks(i: Item): Block[] {
     { type: 'mrkdwn', text: `*Owner*\n${i.owner_id ? `<@${i.owner_id}>` : i.owner}` },
     { type: 'mrkdwn', text: `*Changed by*\n${i.changed_by || 'not recorded'}` },
     { type: 'mrkdwn', text: `*Where it stands*\n${i.stands}` },
-    { type: 'mrkdwn', text: `*When*\n${lagos(i.at)}` },
+    { type: 'mrkdwn', text: `*When*\n${utc(i.at)}` },
   ];
   if (i.lane) facts.push({ type: 'mrkdwn', text: `*Lane*\n${i.lane}` });
   const out: Block[] = [

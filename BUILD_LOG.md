@@ -15699,3 +15699,10 @@ Fix:        The heading is now a bold mrkdwn section ending in <!channel> (combi
 ## 2026-11-18 — Restyle flag keyed on the full message ts
 Problem:    "1794995350.350669 already done": Jegan's two posts share the second 1794995350, and the restyle flag used only the seconds, so marking 8ZVR done skipped FRWX.
 Fix:        The flag is change_announce.restyled4.<full ts>. Posts already rewritten are rewritten once more with the same content, which changes nothing visible.
+
+## 2026-11-18 13:40 — Loop updates move to #bha-loop-updates, times in UTC, and a Genie task stops in plain words
+Intent:     Destiny: the loop and watch reports fill #bha-coordination, so send them to the new #bha-loop-updates (C0CJUTHBBH8), and show When in UTC, not Lagos. Separately, "please stop this recurring task" should be enough for Genie, without copying the task id.
+Files:      server/src/changeAnnounce.ts, server/test/change-announce.test.cjs, server/src/genieControl.ts, CLAUDE.md
+Problem:    Genie answered "you can turn off this recurring task now" with "I don't have a cancel tool of my own here" and asked for "cancel task GT-1794851970484-3RQ4": the parser only knew the id form and cancel_task required an id.
+Fix:        RULE.channel defaults to C0CJUTHBBH8; the When field formats in UTC. cancel_task with no id resolves the task: the thread it is asked in (a task's own post, matched on the ts its genie_task_ran event carries), else the asker's only active task in the channel; two or more answers which_task with the list. Genie's parser (bhanetworkgh/genie) sends that for plain stop/cancel/turn off phrasings.
+Decision:   Never guess between two tasks: a question is cheaper than cancelling the wrong one. Posts already in #bha-coordination stay where they are.

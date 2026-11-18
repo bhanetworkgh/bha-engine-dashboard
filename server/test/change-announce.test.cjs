@@ -98,7 +98,7 @@ assert.ok(ca.RULE.batch_over < many.length);
 ok('more than four changes in a pass are one combined post listing each');
 
 // 11. the channel is #bha-coordination by default
-assert.equal(ca.RULE.channel, process.env.CHANGE_ANNOUNCE_CHANNEL?.trim() || 'C0ASMPYQLG3');
+assert.equal(ca.RULE.channel, process.env.CHANGE_ANNOUNCE_CHANNEL?.trim() || 'C0CJUTHBBH8');
 ok('the posts go to #bha-coordination');
 
 // 12. added() and newestLine()
@@ -116,7 +116,7 @@ ok('only the added text is quoted, and the date stamp is dropped');
   const list = b.find((x) => x.type === 'rich_text' && x.elements.some((e) => e.type === 'rich_text_list'));
   assert.equal(list.elements[1].elements.length, 2);
   assert.ok(b.some((x) => x.type === 'rich_text' && x.elements.some((e) => e.type === 'rich_text_quote')));
-  assert.ok(JSON.stringify(b).includes('Changed by') && JSON.stringify(b).includes('CAPITAL') && JSON.stringify(b).includes('10:27 Lagos'));
+  assert.ok(JSON.stringify(b).includes('Changed by') && JSON.stringify(b).includes('CAPITAL') && JSON.stringify(b).includes('09:27 UTC'));
   assert.equal(b[b.length - 1].elements[0].url, bi.link);
   assert.ok(b[0].text.text.endsWith('<!channel>') && JSON.stringify(b).includes('<@U1>'));
   const bb = ca.batchBlocks([bi, { ...bi, id: 'LOOP-8', kind: 'completion' }]);

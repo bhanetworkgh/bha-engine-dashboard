@@ -222,9 +222,41 @@ export async function listTasks(b: Row): Promise<Row> {
   return { ok: true, tasks: r.rows };
 }
 
+/**
+ * Which task "stop this recurring task" means when no id is given (18 Nov 2026, Destiny: copying the id
+ * back made no sense). Asked in the thread of a task's own post, that task: the post's ts is on its
+ * genie_task_ran event. Otherwise the asker's only active task in the channel. Two or more is a question,
+ * never a guess.
+ */
+export async function resolveTask(b: Row, who: string): Promise<{ id?: string; candidates?: Row[] }> {
+  const c = str(b.channel_id, 40);
+  const thread = str(b.thread_ts, 40);
+  if (thread) {
+    const r = await query<{ id: string }>(
+      `SELECT t.id FROM engine_events e JOIN engine_genie_tasks t ON t.id = e.subject_id
+        WHERE e.event_type = 'genie_task_ran' AND e.detail->>'ts' = $1 ORDER BY e.id DESC LIMIT 1`, [thread]);
+    if (r.rows[0]) return { id: r.rows[0].id };
+  }
+  if (!c) return { candidates: [] };
+  const r = await query<Row>(
+    `SELECT id, prompt, schedule FROM engine_genie_tasks WHERE status = 'active' AND channel_id = $1 AND created_by = $2 ORDER BY created_at`, [c, who]);
+  if (r.rows.length === 1) return { id: String(r.rows[0].id) };
+  return { candidates: r.rows };
+}
+
 export async function cancelTask(b: Row): Promise<Row> {
   const who = requesterOf(b);
-  const id = str(b.id, 60);
+  let id = str(b.id, 60);
+  if (!id) {
+    const found = await resolveTask(b, who);
+    if (!found.id) {
+      const list = found.candidates ?? [];
+      return list.length === 0
+        ? { ok: false, reason: 'no_task', message: 'You have no recurring task running in this channel.' }
+        : { ok: false, reason: 'which_task', candidates: list, message: `You have ${list.length} recurring tasks here. Say which: ${list.map((t) => `${String(t.id)} (${String(t.prompt)})`).join('; ')}.` };
+    }
+    id = found.id;
+  }
   const r = await query<Row>(`SELECT id, created_by, channel_id, prompt, status FROM engine_genie_tasks WHERE id = $1`, [id]);
   const t = r.rows[0];
   if (!t) return { ok: false, reason: 'not_found', message: `No task ${id}.` };
@@ -232,7 +264,7 @@ export async function cancelTask(b: Row): Promise<Row> {
   if (t.created_by !== who && !ADMINS.has(who)) throw new GenieControlError(403, 'Only the person who set up a task, Destiny or Jason can cancel it.');
   await query(`UPDATE engine_genie_tasks SET status = 'cancelled', cancelled_by = $2, cancelled_at = now() WHERE id = $1`, [id, who]);
   await log('genie_task_cancelled', id, who, { channel_id: t.channel_id, prompt: t.prompt });
-  return { ok: true, cancelled: id };
+  return { ok: true, cancelled: id, prompt: t.prompt };
 }
 
 /** Claims every due task and moves each to its next run, in one transaction. */
