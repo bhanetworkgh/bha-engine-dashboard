@@ -244,11 +244,11 @@ const label = (i: Item) => `${i.record === 'loop' ? 'loop' : 'decision watch'} $
 
 /** One change, as its own post. */
 export function render(i: Item): string {
-  const head = i.kind === 'completion' ? `*Completion report* on ${label(i)}` : `*Progress report* on ${label(i)}`;
+  const head = `<!channel> ${i.kind === 'completion' ? '*Completion report*' : '*Progress report*'} on ${label(i)}`;
   const lines = [
     head,
     `*${clip(i.title, 200)}*`,
-    `Owner: ${i.owner}`,
+    `Owner: ${i.owner_id ? `<@${i.owner_id}>` : i.owner}`,
     `What changed: ${i.changes.join('; ')}`,
     `Why: ${i.why}`,
     `Where it stands: ${i.stands}`,
@@ -261,7 +261,7 @@ export function render(i: Item): string {
 /** Several changes in one pass, as one post. */
 export function renderBatch(items: Item[]): string {
   const done = items.filter((i) => i.kind === 'completion').length;
-  const head = `*Engine updates*: ${items.length} changes (${done} closed, ${items.length - done} moved)`;
+  const head = `<!channel> *Engine updates*: ${items.length} changes (${done} closed, ${items.length - done} moved)`;
   const body = items.map((i) => {
     const tag = i.kind === 'completion' ? 'Closed' : 'Progress';
     const tail = i.kind === 'progress' && i.next ? ` Next: ${clip(i.next, 160)}` : '';
@@ -283,7 +283,7 @@ const lagos = (iso: string): string => {
 export function blocks(i: Item): Block[] {
   const what = i.record === 'loop' ? 'Loop' : 'Decision watch';
   const facts: Block[] = [
-    { type: 'mrkdwn', text: `*Owner*\n${i.owner}` },
+    { type: 'mrkdwn', text: `*Owner*\n${i.owner_id ? `<@${i.owner_id}>` : i.owner}` },
     { type: 'mrkdwn', text: `*Changed by*\n${i.changed_by || 'not recorded'}` },
     { type: 'mrkdwn', text: `*Where it stands*\n${i.stands}` },
     { type: 'mrkdwn', text: `*When*\n${lagos(i.at)}` },
@@ -291,7 +291,7 @@ export function blocks(i: Item): Block[] {
   if (i.lane) facts.push({ type: 'mrkdwn', text: `*Lane*\n${i.lane}` });
   const out: Block[] = [
     { type: 'header', text: { type: 'plain_text', text: i.kind === 'completion' ? 'Completion report' : 'Progress report', emoji: false } },
-    { type: 'section', text: { type: 'mrkdwn', text: `${what} <${i.link}|${i.id}>\n*${clip(i.title, 280)}*` } },
+    { type: 'section', text: { type: 'mrkdwn', text: `<!channel> ${what} <${i.link}|${i.id}>\n*${clip(i.title, 280)}*` } },
     { type: 'section', fields: facts },
     { type: 'rich_text', elements: [section(txt('What changed', { bold: true })), bullets(i.changes.map((c) => clip(c, 300)))] },
     { type: 'rich_text', elements: [section(txt('Why', { bold: true })), { type: 'rich_text_quote', elements: [txt(clip(i.why, RULE.why_chars))] }] },
@@ -309,10 +309,10 @@ export function batchBlocks(items: Item[]): Block[] {
   const done = items.filter((i) => i.kind === 'completion').length;
   const out: Block[] = [
     { type: 'header', text: { type: 'plain_text', text: 'Engine updates', emoji: false } },
-    { type: 'context', elements: [{ type: 'mrkdwn', text: `${items.length} changes: ${done} closed, ${items.length - done} moved` }] },
+    { type: 'context', elements: [{ type: 'mrkdwn', text: `<!channel> ${items.length} changes: ${done} closed, ${items.length - done} moved` }] },
   ];
   for (const i of items.slice(0, 40)) {
-    out.push({ type: 'section', text: { type: 'mrkdwn', text: `*${i.kind === 'completion' ? 'Closed' : 'Progress'}* <${i.link}|${i.id}> ${clip(i.title, 140)}\nOwner: ${i.owner}${i.changed_by ? ` · changed by ${i.changed_by}` : ''} · ${i.stands}` } });
+    out.push({ type: 'section', text: { type: 'mrkdwn', text: `*${i.kind === 'completion' ? 'Closed' : 'Progress'}* <${i.link}|${i.id}> ${clip(i.title, 140)}\nOwner: ${i.owner_id ? `<@${i.owner_id}>` : i.owner}${i.changed_by ? ` · changed by ${i.changed_by}` : ''} · ${i.stands}` } });
     const lines = [...i.changes.map((c) => clip(c, 200)), `Why: ${clip(i.why, 260)}`];
     if (i.kind === 'progress' && i.next) lines.push(`Next: ${clip(i.next, 200)}`);
     out.push({ type: 'rich_text', elements: [bullets(lines)] });
@@ -508,7 +508,7 @@ export async function restyleFirstPost(now = new Date()): Promise<string> {
   const out: string[] = [];
   let items: Item[] | null = null;
   for (const p of PLAIN_POSTS) {
-    const flag = `change_announce.restyled.${p.ts.split('.')[0]}`;
+    const flag = `change_announce.restyled2.${p.ts.split('.')[0]}`;
     if (await getMeta(flag)) { out.push(`${p.ts} already done`); continue; }
     items ??= await collect(now, 'change_announce.since', async () => new Set());
     const it = items.find((i) => i.keys.includes(p.key));

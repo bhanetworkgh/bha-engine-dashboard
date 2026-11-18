@@ -15684,3 +15684,8 @@ Problem:    The first card (HPR-145469) showed "Loop LOOP-1792827895094-JD68: Wi
 Fix:        The evidence text now starts with the note and the card quotes that line whole. The announcement is Block Kit. Once after this deploy, each first post is rewritten in place with chat.update (meta flags change_announce.restyled.1794994282 and held_pay_watch.restyled.145469); the card is redrawn only while undecided and keeps its buttons.
 Decision:   Rewrite in place rather than delete and repost, so the channel keeps one post per change.
 - 11:10: the A2OW completion report (ts 1794994880.245829) went out plain from the old instance during the hand-over; added to the one-off restyle list (PLAIN_POSTS), meta key per post.
+
+## 2026-11-18 — Change announcements tag the channel and the owner
+Intent:     Destiny: the Progress report / Completion report posts in #bha-coordination should tag @channel at the head and tag the builder under Owner.
+Files:      server/src/changeAnnounce.ts, server/test/change-announce.test.cjs
+Fix:        Every post (single and combined, text and blocks) opens with <!channel>; Owner is <@Slack id> where the loop or watch carries one. The two posts already sent (JD68 1794994282.960389, A2OW 1794994880.245829) are rewritten in place once on boot (flag change_announce.restyled2.<ts>).
