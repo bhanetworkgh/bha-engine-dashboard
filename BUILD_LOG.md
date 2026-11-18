@@ -15695,3 +15695,7 @@ Intent:     Destiny: the @channel tag belongs on the heading line ("Progress rep
 Files:      server/src/changeAnnounce.ts, server/test/change-announce.test.cjs
 Problem:    A Block Kit header block is plain text, so it cannot carry a mention; the tag had been put on the record line below it.
 Fix:        The heading is now a bold mrkdwn section ending in <!channel> (combined posts: "Engine updates <!channel>"); the fallback text follows the same order. Owner stays <@Slack id>. All four posts so far (JD68 1794994282.960389, A2OW 1794994880.245829, 8ZVR 1794995350.047099, FRWX 1794995350.350669) are rewritten in place once on boot (flag change_announce.restyled3.<ts>). 14 checks pass.
+
+## 2026-11-18 — Restyle flag keyed on the full message ts
+Problem:    "1794995350.350669 already done": Jegan's two posts share the second 1794995350, and the restyle flag used only the seconds, so marking 8ZVR done skipped FRWX.
+Fix:        The flag is change_announce.restyled4.<full ts>. Posts already rewritten are rewritten once more with the same content, which changes nothing visible.

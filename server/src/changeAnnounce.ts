@@ -511,7 +511,7 @@ export async function restyleFirstPost(now = new Date()): Promise<string> {
   const out: string[] = [];
   let items: Item[] | null = null;
   for (const p of PLAIN_POSTS) {
-    const flag = `change_announce.restyled3.${p.ts.split('.')[0]}`;
+    const flag = `change_announce.restyled4.${p.ts}`;
     if (await getMeta(flag)) { out.push(`${p.ts} already done`); continue; }
     items ??= await collect(now, 'change_announce.since', async () => new Set());
     const it = items.find((i) => i.keys.includes(p.key));
