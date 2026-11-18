@@ -496,21 +496,29 @@ export async function pass(opts: { now?: Date; dry_run?: boolean; post?: Post } 
 }
 
 /**
- * The first announcement (JD68, 18 Nov 2026, history row 1638) went out as plain text before the
- * Block Kit post existed. Once, after the deploy that brought the blocks, it is rewritten in place
- * with them. Guarded by its own meta key, so it runs once whatever the number of restarts.
+ * The posts that went out as plain text before the Block Kit post existed (18 Nov 2026): JD68
+ * (history row 1638) and A2OW (1639, posted by the old instance during the deploy's hand-over).
+ * Once each, they are rewritten in place with the blocks, guarded by a meta key per post.
  */
-const FIRST_POST = { channel: 'C0ASMPYQLG3', ts: '1794994282.960389', key: 'change_announce:loop_history:1638' };
+const PLAIN_POSTS = [
+  { channel: 'C0ASMPYQLG3', ts: '1794994282.960389', key: 'change_announce:loop_history:1638' },
+  { channel: 'C0ASMPYQLG3', ts: '1794994880.245829', key: 'change_announce:loop_history:1639' },
+];
 export async function restyleFirstPost(now = new Date()): Promise<string> {
-  const flag = 'change_announce.restyled.1794994282';
-  if (await getMeta(flag)) return 'already done';
-  const items = await collect(now, 'change_announce.since', async () => new Set());
-  const it = items.find((i) => i.keys.includes(FIRST_POST.key));
-  if (!it) return 'the change is no longer in the window';
-  const r = await slack.botCall('chat.update', { channel: FIRST_POST.channel, ts: FIRST_POST.ts, text: render(it), blocks: blocks(it) });
-  if (!r.ok) return `Slack refused the update: ${String(r.error)}`;
-  await setMetaIfAbsent(flag, now.toISOString());
-  return 'rewritten';
+  const out: string[] = [];
+  let items: Item[] | null = null;
+  for (const p of PLAIN_POSTS) {
+    const flag = `change_announce.restyled.${p.ts.split('.')[0]}`;
+    if (await getMeta(flag)) { out.push(`${p.ts} already done`); continue; }
+    items ??= await collect(now, 'change_announce.since', async () => new Set());
+    const it = items.find((i) => i.keys.includes(p.key));
+    if (!it) { out.push(`${p.ts} no longer in the window`); continue; }
+    const r = await slack.botCall('chat.update', { channel: p.channel, ts: p.ts, text: render(it), blocks: blocks(it) });
+    if (!r.ok) { out.push(`${p.ts} refused: ${String(r.error)}`); continue; }
+    await setMetaIfAbsent(flag, now.toISOString());
+    out.push(`${p.ts} rewritten`);
+  }
+  return out.join('; ');
 }
 
 /* ----------------------------------------------------------------- timer */

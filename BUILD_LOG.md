@@ -15683,3 +15683,4 @@ Files:      server/src/changeAnnounce.ts (blocks(), batchBlocks(), changed_by an
 Problem:    The first card (HPR-145469) showed "Loop LOOP-1792827895094-JD68: Wire the charge gate ..." and cut off before the note naming event 118905; the first announcement (ts 1794994282.960389) was plain text.
 Fix:        The evidence text now starts with the note and the card quotes that line whole. The announcement is Block Kit. Once after this deploy, each first post is rewritten in place with chat.update (meta flags change_announce.restyled.1794994282 and held_pay_watch.restyled.145469); the card is redrawn only while undecided and keeps its buttons.
 Decision:   Rewrite in place rather than delete and repost, so the channel keeps one post per change.
+- 11:10: the A2OW completion report (ts 1794994880.245829) went out plain from the old instance during the hand-over; added to the one-off restyle list (PLAIN_POSTS), meta key per post.
