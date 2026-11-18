@@ -193,7 +193,15 @@ export async function describe(tool: string, args: Args): Promise<string | null>
       return `Open a Decision Watch with owner ${person(str(args.owner_user_id))}, who is to owe: "${clip(args.decision, 1200)}". Next step: "${clip(args.next_step, 600)}".`;
     case 'update_decision_watch': {
       const w = await watchRow(str(args.watch_id));
-      const change = ['next_step', 'sop_refs', 'ns_refs', 'close_on_reply', 'unlink_record', 'replace'].filter((k) => args[k] !== undefined).map((k) => `${k}: ${clip(args[k], 600)}`).join('; ');
+      // A watch's next step and references are added to by default (14 Oct 2026); only replace: true takes text
+      // away (18 Nov 2026: an add to OWYM was refused once as "may replace" because the view did not say so).
+      const replacing = args.replace === true || args.append === false;
+      const change = ['next_step', 'sop_refs', 'ns_refs', 'close_on_reply', 'unlink_record', 'replace']
+        .filter((k) => args[k] !== undefined)
+        .map((k) => ['next_step', 'sop_refs', 'ns_refs'].includes(k) && typeof args[k] === 'string' && args[k] !== ''
+          ? `${k} ${replacing ? 'replaced with' : 'gains, below everything it holds now (which stays word for word)'}: ${clip(args[k], 600)}`
+          : `${k}: ${clip(args[k], 600)}`)
+        .join('; ');
       return `Change Decision Watch ${str(args.watch_id)}${watchLine(w)}. This changes only: ${change || 'nothing named'}.`;
     }
     case 'close_decision_watch': {

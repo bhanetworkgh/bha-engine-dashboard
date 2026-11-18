@@ -40,6 +40,10 @@ const ok = (m) => { n += 1; console.log('  ok  ' + m); };
   const huge = 'x'.repeat(7000);
   assert.match(ic.shown(huge, 6000), /shortened for the check: the full text is 7000 characters and is sent whole/); ok('a longer one says it is shortened and sent whole');
   assert.match(ic.SYSTEM, /as it stands now, before this action/); assert.match(ic.SYSTEM, /never call it cut off/); ok('the check is told what is context and what is shortened');
+  const add = await ic.describe('update_decision_watch', { watch_id: 'DW-1', next_step: 'Pilot 1 v1.0 spec' });
+  assert.match(add, /gains, below everything it holds now \(which stays word for word\)/); ok('a watch next step is shown as added, not replaced (the OWYM refusal, check 438)');
+  const rep = await ic.describe('update_decision_watch', { watch_id: 'DW-1', next_step: 'x', replace: true });
+  assert.match(rep, /replaced with/); ok('replace: true is shown as a replace');
   const watch = await ic.describe('open_decision_watch', { owner_user_id: 'U0BKT6MAW2Y', decision: 'Update 6I62 with PR #24 state' });
   assert.match(watch, /Hardik/); assert.match(watch, /6I62/); ok('a watch is described by its owner and what they owe');
 
