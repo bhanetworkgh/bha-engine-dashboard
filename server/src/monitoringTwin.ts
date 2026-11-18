@@ -313,7 +313,7 @@ export function checkReadings(latest: unknown, targets: Record<string, Range> | 
   return out;
 }
 
-const SUBSYSTEM: Record<string, string> = { offline: 'SENSOR', out_of_range: 'ENVIRONMENT', feed_silent: 'FEED', ledger_refused: 'LEDGER' };
+const SUBSYSTEM: Record<string, string> = { offline: 'SENSOR', out_of_range: 'ENVIRONMENT', feed_silent: 'FEED', ledger_refused: 'LEDGER', rover_pass: 'ROVER' };
 
 /**
  * Why an open incident is closing. A fault that stopped being true is "cleared"; one whose device
@@ -337,7 +337,7 @@ const newIncidentId = (kind: string) => `INC-VFARM.${SUBSYSTEM[kind] ?? 'MONITOR
 interface Fault {
   farm_id: string;
   device_id: string | null;
-  kind: 'offline' | 'out_of_range' | 'feed_silent' | 'ledger_refused';
+  kind: 'offline' | 'out_of_range' | 'feed_silent' | 'ledger_refused' | 'rover_pass';
   metric: string | null;
   severity: 'warning' | 'critical';
   detail: string;
@@ -460,6 +460,34 @@ let lastStandDownLog = 0;
  * from the snapshot route and the minute tick at once: the second caller waits
  * on the same advisory lock rather than judging twice.
  */
+
+/**
+ * The rover's own state (INC-BAYS.MONITORING-632, 18 Nov 2026). The rover sleeps between
+ * scheduled passes, so "not heard from" is not "offline". vFarm judges it from the pass start
+ * and end (backend `rover_state.judge`) and sends one row per rover in
+ * `history.sections.rover_state`. Read here, a fresh row decides the rover:
+ *   - in_pass, resting, off_rover: no offline fault, whatever presence says;
+ *   - stalled, missed_pass, ended_away (`alarm: true`): one `rover_pass` fault, metric the state;
+ *   - unknown, or a row older than ROVER_STATE_FRESH_S: nothing is decided here and the
+ *     presence rule stands, so a vFarm that stops sending the row is still watched.
+ */
+export const ROVER_STATE_FRESH_S = 900;
+export const ROVER_QUIET_STATES = ['in_pass', 'resting', 'off_rover'] as const;
+export type RoverStateRow = { state?: unknown; alarm?: unknown; reason?: unknown; at?: unknown; overdue_s?: unknown; pass_id?: unknown };
+export function roverVerdict(row: RoverStateRow | null | undefined, now: number): { decides: boolean; quiet: boolean; fault: { metric: string; detail: string; value: number | null } | null; why: string } {
+  if (!row) return { decides: false, quiet: false, fault: null, why: 'no rover_state row from vFarm' };
+  const at = typeof row.at === 'string' ? Date.parse(row.at) : NaN;
+  if (!Number.isFinite(at) || (now - at) / 1000 > ROVER_STATE_FRESH_S) return { decides: false, quiet: false, fault: null, why: 'the rover_state row is stale, so presence decides' };
+  const state = String(row.state ?? '');
+  if (row.alarm === true) {
+    const reason = typeof row.reason === 'string' && row.reason ? row.reason : `the rover is ${state.replace(/_/g, ' ')}`;
+    const overdue = typeof row.overdue_s === 'number' ? row.overdue_s : null;
+    return { decides: true, quiet: false, fault: { metric: state || 'pass_fault', detail: `${reason}${row.pass_id ? ` (pass ${String(row.pass_id)})` : ''}.`, value: overdue }, why: `rover ${state}` };
+  }
+  if ((ROVER_QUIET_STATES as readonly string[]).includes(state)) return { decides: true, quiet: true, fault: null, why: `rover ${state}` };
+  return { decides: false, quiet: false, fault: null, why: `rover ${state || 'unknown'}, so presence decides` };
+}
+
 export async function evaluate(trigger: 'snapshot' | 'tick' | 'manual' = 'manual') {
   const now = Date.now();
   const nowIso = new Date(now).toISOString();
@@ -500,6 +528,21 @@ export async function evaluate(trigger: 'snapshot' | 'tick' | 'manual' = 'manual
          FROM engine_monitoring_cycles c JOIN engine_monitoring_profiles p ON p.profile_id = c.profile_id AND p.version = c.profile_version`,
     );
   const cycleOf = new Map(cycles.rows.map((c) => [c.farm_id, c]));
+    // The rover's own state (INC-BAYS.MONITORING-632). Read on its own, so a database without
+    // the section costs this rule and never the pass.
+    const roverState = new Map<string, RoverStateRow>();
+    await db.query('SAVEPOINT rover_state');
+    try {
+      const rs = await db.query<{ farm_id: string; device_id: string; row: RoverStateRow }>(
+        `SELECT farm_id, coalesce(device_id, source_id) AS device_id, row FROM engine_vfarm_history
+          WHERE section = 'rover_state' AND gone_at IS NULL AND farm_id IS NOT NULL`,
+      );
+      for (const r of rs.rows) roverState.set(`${r.farm_id}|${r.device_id}`, r.row);
+      await db.query('RELEASE SAVEPOINT rover_state');
+    } catch (e) {
+      await db.query('ROLLBACK TO SAVEPOINT rover_state');
+      console.log(`[monitoring-twin] rover_state not read: ${(e as Error).message}`);
+    }
     const faults: Fault[] = [];
     const unlistedFarms = new Set<string>();
     const goneDevices = new Set<string>();
@@ -533,7 +576,11 @@ export async function evaluate(trigger: 'snapshot' | 'tick' | 'manual' = 'manual
           age = fr.age_s;
         }
         const checks = state === 'LIVE' || state === 'STALE' ? checkReadings(d.latest, st?.stage?.targets ?? null) : [];
-        if (state === 'OFFLINE') {
+        const rover = d.gone || f.unlisted || feedSilent ? null : roverState.has(`${f.farm_id}|${d.device_id}`) ? roverVerdict(roverState.get(`${f.farm_id}|${d.device_id}`), now) : null;
+        if (rover?.fault) {
+          faults.push({ farm_id: f.farm_id, device_id: d.device_id, kind: 'rover_pass', metric: rover.fault.metric, severity: 'warning', detail: rover.fault.detail, value: rover.fault.value, min: null, max: null, stage: st?.stage?.stage ?? null, synthetic: f.synthetic });
+        }
+        if (state === 'OFFLINE' && !rover?.decides) {
           faults.push({ farm_id: f.farm_id, device_id: d.device_id, kind: 'offline', metric: null, severity: 'warning', detail: (d.status ?? '').trim().toLowerCase() === 'offline' ? `vFarm reports it offline${age !== null ? ` (last seen ${Math.round(age / 60)} min before vFarm looked)` : ''}.` : `No reading for ${Math.round((age ?? 0) / 60)} min when vFarm last looked (offline after ${THRESHOLDS.offline_s / 60} min).`, value: age, min: null, max: THRESHOLDS.offline_s, stage: st?.stage?.stage ?? null, synthetic: f.synthetic });
         }
         for (const c of checks.filter((x) => !x.ok)) {
@@ -614,7 +661,7 @@ export async function evaluate(trigger: 'snapshot' | 'tick' | 'manual' = 'manual
  */
 export const LEDGER_LANE = 'bays';
 export const LEDGER_SUBSYSTEM = 'MONITORING';
-const LEDGER_CLASS: Record<string, string> = { offline: 'SENSOR_OFFLINE', out_of_range: 'ENVIRONMENT_OUT_OF_RANGE', feed_silent: 'FEED_SILENT', ledger_refused: 'LEDGER_WRITE_REFUSED' };
+const LEDGER_CLASS: Record<string, string> = { offline: 'SENSOR_OFFLINE', out_of_range: 'ENVIRONMENT_OUT_OF_RANGE', feed_silent: 'FEED_SILENT', ledger_refused: 'LEDGER_WRITE_REFUSED', rover_pass: 'ROVER_PASS_FAULT' };
 const LEDGER_SEVERITY: Record<string, string> = { warning: 'warning', critical: 'critical' };
 
 type LedgerRow = {
@@ -642,7 +689,7 @@ type LedgerRow = {
  */
 export function ledgerBody(r: LedgerRow) {
   const where = r.device_id ? `${r.farm_id} / ${r.device_id}` : r.farm_id;
-  const what = r.kind === 'offline' ? 'sensor offline' : r.kind === 'out_of_range' ? `${r.metric ?? 'reading'} out of range` : r.kind === 'ledger_refused' ? `ledger refused writes on ${r.metric ?? 'a lane'}` : 'vFarm feed silent';
+  const what = r.kind === 'offline' ? 'sensor offline' : r.kind === 'out_of_range' ? `${r.metric ?? 'reading'} out of range` : r.kind === 'ledger_refused' ? `ledger refused writes on ${r.metric ?? 'a lane'}` : r.kind === 'rover_pass' ? `rover ${(r.metric ?? 'pass fault').replace(/_/g, ' ')}` : 'vFarm feed silent';
   const sim = r.synthetic ? '[SIMULATED] ' : '';
   return {
     type: 'INC' as const,

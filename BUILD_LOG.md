@@ -15713,3 +15713,10 @@ Files:      server/src/changeAnnounce.ts, CLAUDE.md
 Problem:    Slack cannot move a message.
 Fix:        moveOldPosts, run at the top of each sweep until done (meta change_announce.moved_all): each change_announced event still on C0ASMPYQLG3 is claimed (detail.moving), rebuilt from its own record, posted in RULE.channel without @channel so nobody is pinged twice, its event re-pointed to the new post (moved_from keeps the old one), and only then the original deleted. A refused post (not_in_channel) gives the claim back and the move waits for the next pass.
 Decision:   Oldest first, so the new channel reads in order. Replies under an original are not carried; Destiny accepted that.
+
+## 2026-11-18 — The rover judged on its passes, not its presence (INC-BAYS.MONITORING-632)
+Intent:     Jason and Jegan, C0ASMPYQLG3 1794986400.960859: the rover sleeps between scheduled passes, so the Monitoring Twin read it as offline. Consume the backend's rover state so a resting rover is quiet and a broken one alarms.
+Files:      server/src/monitoringTwin.ts, server/test/monitoring-rover-state.test.cjs, package.json, CLAUDE.md
+Problem:    Presence was the only signal, and a rover asleep between six-hourly passes looks exactly like a dead one.
+Fix:        vFarm now sends history.sections.rover_state (bhavfarm PR #115: pass-start route, off-rover on the schedule, rover_state.judge, engine_snapshot section; vfarm-edge PR #29: the Pi posts the start). roverVerdict reads the fresh row: in_pass, resting and off_rover hold back the offline fault; stalled, missed_pass and ended_away open one rover_pass incident, ledger class ROVER_PASS_FAULT. A stale (over 900 s), missing or unknown row decides nothing, so presence still watches if vFarm stops sending it. The read is in its own savepoint, so a database without the section costs only this rule.
+Decision:   The verdict is computed in the backend, where Jegan wanted Jason's four tests, and the dashboard reads only its alarm flag, so the two cannot disagree about when a pass is due. Dormant until both PRs are merged and deployed.
