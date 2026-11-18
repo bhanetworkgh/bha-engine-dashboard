@@ -524,6 +524,46 @@ export async function restyleFirstPost(now = new Date()): Promise<string> {
   return out.join('; ');
 }
 
+/**
+ * The reports posted in #bha-coordination on the morning of 18 Nov 2026, moved to #bha-loop-updates
+ * (Destiny: so coordination stays clean). Slack cannot move a message, so each is rebuilt from its own
+ * record, posted in the new channel without @channel (nobody is pinged twice), and only once that post
+ * lands is the original deleted. A post refused (Bays not yet in the channel) is tried again next pass.
+ */
+const OLD_CHANNEL = 'C0ASMPYQLG3';
+const NO_TS: Record<string, string> = Object.fromEntries(PLAIN_POSTS.map((p) => [p.key, p.ts]));
+export async function moveOldPosts(now = new Date()): Promise<string> {
+  if (RULE.channel === OLD_CHANNEL) return 'nothing to move';
+  if (await getMeta('change_announce.moved_all')) return 'already moved';
+  const r = await query<{ id: string; dedupe_key: string; ts: string | null }>(
+    `SELECT id, dedupe_key, detail->>'ts' AS ts FROM engine_events
+      WHERE event_type = 'change_announced' AND detail->>'channel' = $1 ORDER BY id`, [OLD_CHANNEL]);
+  const posts = r.rows.map((e) => ({ id: e.id, key: e.dedupe_key, ts: e.ts ?? NO_TS[e.dedupe_key] ?? null }));
+  if (!posts.length) { await setMetaIfAbsent('change_announce.moved_all', now.toISOString()); return 'nothing left in the old channel'; }
+  const items = await collect(now, 'change_announce.since', async () => new Set());
+  const out: string[] = [];
+  let left = 0;
+  for (const p of posts.sort((a, b) => Number(a.ts ?? 0) - Number(b.ts ?? 0))) {
+    const it = items.find((i) => i.keys.includes(p.key));
+    if (!it || !p.ts) { out.push(`${p.key} could not be rebuilt`); left += 1; continue; }
+    const mine = await query(`UPDATE engine_events SET detail = detail || '{"moving": true}'::jsonb
+      WHERE id = $1 AND detail->>'channel' = $2 AND NOT (detail ? 'moving') RETURNING id`, [p.id, OLD_CHANNEL]);
+    if (!mine.rows.length) { out.push(`${p.ts} taken by another pass`); left += 1; continue; }
+    const quiet = JSON.parse(JSON.stringify(blocks(it)).replace(/ <!channel>/g, ''));
+    const sent = await slack.botCall('chat.postMessage', { channel: RULE.channel, text: render(it).replace(/ <!channel>/g, ''), blocks: quiet, unfurl_links: false });
+    if (!sent.ok) {
+      await query(`UPDATE engine_events SET detail = detail - 'moving' WHERE id = $1`, [p.id]);
+      out.push(`${p.ts} not posted: ${String(sent.error)}`); left += 1; if (sent.error === 'not_in_channel' || sent.error === 'channel_not_found') break;
+      continue;
+    }
+    await query(`UPDATE engine_events SET detail = detail || $2::jsonb WHERE id = $1`, [p.id, JSON.stringify({ channel: RULE.channel, ts: String(sent.ts), moving: null, moved_from: { channel: OLD_CHANNEL, ts: p.ts } })]);
+    const del = await slack.botCall('chat.delete', { channel: OLD_CHANNEL, ts: p.ts });
+    out.push(`${p.ts} moved${del.ok || del.error === 'message_not_found' ? '' : `, original not deleted: ${String(del.error)}`}`);
+  }
+  if (!left) await setMetaIfAbsent('change_announce.moved_all', now.toISOString());
+  return `${posts.length - left} of ${posts.length} moved; ${out.join('; ')}`;
+}
+
 /* ----------------------------------------------------------------- timer */
 
 let timer: NodeJS.Timeout | null = null;
@@ -534,7 +574,10 @@ export function startSweeping(): void {
     timers.beat('change announcements');
     if (busy) return;
     busy = true;
-    pass()
+    moveOldPosts()
+      .then((m) => { if (!/^(already moved|nothing)/.test(m)) console.log(`[change-announce] move to the new channel: ${m}`); })
+      .catch((e) => console.error(`[change-announce] move failed: ${e instanceof Error ? e.message : String(e)}`))
+      .then(() => pass())
       .then((r) => {
         if (r.posted || r.failed) console.log(`[change-announce] ${r.pending} changes, ${r.posted} posted${r.batched ? ' in one combined post' : ''}${r.failed ? `, refused: ${r.failed}` : ''}`);
       })

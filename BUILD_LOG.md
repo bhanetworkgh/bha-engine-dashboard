@@ -15706,3 +15706,10 @@ Files:      server/src/changeAnnounce.ts, server/test/change-announce.test.cjs, 
 Problem:    Genie answered "you can turn off this recurring task now" with "I don't have a cancel tool of my own here" and asked for "cancel task GT-1794851970484-3RQ4": the parser only knew the id form and cancel_task required an id.
 Fix:        RULE.channel defaults to C0CJUTHBBH8; the When field formats in UTC. cancel_task with no id resolves the task: the thread it is asked in (a task's own post, matched on the ts its genie_task_ran event carries), else the asker's only active task in the channel; two or more answers which_task with the list. Genie's parser (bhanetworkgh/genie) sends that for plain stop/cancel/turn off phrasings.
 Decision:   Never guess between two tasks: a question is cheaper than cancelling the wrong one. Posts already in #bha-coordination stay where they are.
+
+## 2026-11-18 13:50 — The morning's 22 reports move from #bha-coordination to #bha-loop-updates
+Intent:     Destiny: post the earlier reports again in the new channel and delete the originals, so coordination is clean.
+Files:      server/src/changeAnnounce.ts, CLAUDE.md
+Problem:    Slack cannot move a message.
+Fix:        moveOldPosts, run at the top of each sweep until done (meta change_announce.moved_all): each change_announced event still on C0ASMPYQLG3 is claimed (detail.moving), rebuilt from its own record, posted in RULE.channel without @channel so nobody is pinged twice, its event re-pointed to the new post (moved_from keeps the old one), and only then the original deleted. A refused post (not_in_channel) gives the claim back and the move waits for the next pass.
+Decision:   Oldest first, so the new channel reads in order. Replies under an original are not carried; Destiny accepted that.
