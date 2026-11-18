@@ -105,6 +105,7 @@ import * as decisionWatch from './decisionWatch';
 import * as patternCapture from './patternCapture';
 import * as codexGap from './codexGap';
 import * as changeAnnounce from './changeAnnounce';
+import * as heldPayWatch from './heldPayWatch';
 import * as acceptanceCheckTools from './mcp/acceptanceCheckTools';
 import * as renewalReminder from './renewalReminder';
 import * as skillWatch from './skillWatch';
@@ -1723,7 +1724,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       }
       // A vFarm gate card (2026-10-09, 7S0O) uses the same two buttons; its id starts VFP-.
       // A code check card (2 Nov 2026) has one button, Mark reviewed; its id starts CCR-.
-      const r = codeCheckDraft.isDraftId(approvalId)
+      // A held pay release card (18 Nov 2026, D7): Release / Not yet; its id starts HPR-.
+      const r = heldPayWatch.isCardId(approvalId)
+        ? await heldPayWatch.decide({ id: approvalId, decision, user_id: userId })
+        : codeCheckDraft.isDraftId(approvalId)
         ? await codeCheckDraft.click({ id: approvalId, decision, user_id: userId })
         : codeCheckWatch.isReviewId(approvalId)
         ? await codeCheckWatch.markReviewed({ id: approvalId, user_id: userId })
@@ -3735,6 +3739,7 @@ async function boot(): Promise<void> {
     patternCapture.startSweeping();
     codexGap.startSweeping();
     changeAnnounce.startSweeping();
+  heldPayWatch.startSweeping();
     renewalReminder.startSweeping();
     codeCheckWatch.startSweeping();
     slackApps.startReading();

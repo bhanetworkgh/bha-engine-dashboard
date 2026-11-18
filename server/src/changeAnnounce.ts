@@ -61,6 +61,10 @@ export interface Item {
   link: string;
   keys: string[]; // dedupe keys, one per change row
   at: string;
+  /** The Slack id of who made the change, where the record says (an MCP write's requester, a watch event's by), else the owner's. */
+  author: string | null;
+  /** The record's owner (a loop's assignee, a watch's owner), whose held pay a change may speak for. */
+  owner_id: string | null;
 }
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
@@ -152,6 +156,8 @@ export function loopItem(loopId: string, now: Record<string, unknown>, changes: 
     link: `${DASHBOARD()}/open-loops/${encodeURIComponent(loopId)}`,
     keys: sorted.map((c) => `change_announce:loop_history:${c.history_id}`),
     at: sorted[sorted.length - 1].at,
+    author: by || a1 || null,
+    owner_id: a1 || null,
   };
 }
 
@@ -164,6 +170,7 @@ export interface WatchEvent {
 
 export type WatchRow = {
   watch_id: string;
+  owner_user_id?: string | null;
   decision: string;
   owner_name: string | null;
   status: string;
@@ -180,8 +187,10 @@ export function watchItem(w: WatchRow, events: WatchEvent[], byName: (id: string
   const whys: string[] = [];
   let closed = false;
   let reason = '';
+  let author: string | null = null;
   for (const e of sorted) {
     const by = str(e.detail.by);
+    if (by) author = by;
     const who = by ? byName(by) : '';
     if (e.event_type === 'decision_watch_closed') {
       closed = true;
@@ -217,6 +226,8 @@ export function watchItem(w: WatchRow, events: WatchEvent[], byName: (id: string
     link: w.thread_link || `${DASHBOARD()}/bays?tab=decision-watch`,
     keys: sorted.map((e) => `change_announce:watch_event:${e.event_id}`),
     at: sorted[sorted.length - 1].at,
+    author: author || w.owner_user_id || null,
+    owner_id: w.owner_user_id || null,
   };
 }
 
@@ -265,7 +276,16 @@ async function held(keys: string[]): Promise<Set<string>> {
 
 /** Everything waiting to be announced, oldest first. */
 export async function pending(now = new Date()): Promise<Item[]> {
-  const since = (await getMeta('change_announce.since')) ?? now.toISOString();
+  return collect(now, 'change_announce.since', held);
+}
+
+/**
+ * The changes in the window, as items, skipping the ones `isHeld` says were already handled. The held-pay
+ * watch reads the same changes under its own claims (`heldPayWatch.ts`), so the two never consume each
+ * other's. An item's keys are always this module's own change_announce keys; a caller maps them.
+ */
+export async function collect(now: Date, sinceKey: string, isHeld: (keys: string[]) => Promise<Set<string>>): Promise<Item[]> {
+  const since = (await getMeta(sinceKey)) ?? now.toISOString();
   const from = new Date(Math.max(new Date(since).getTime(), now.getTime() - RULE.lookback_hours * 3_600_000)).toISOString();
   const to = new Date(now.getTime() - RULE.settle_seconds * 1000).toISOString();
   const nm = await names();
@@ -284,7 +304,7 @@ export async function pending(now = new Date()): Promise<Item[]> {
       ORDER BY at`,
     [from, to],
   );
-  const already = await held([...h.rows.map((r) => `change_announce:loop_history:${r.id}`), ...ev.rows.map((r) => `change_announce:watch_event:${r.id}`)]);
+  const already = await isHeld([...h.rows.map((r) => `change_announce:loop_history:${r.id}`), ...ev.rows.map((r) => `change_announce:watch_event:${r.id}`)]);
 
   const items: Item[] = [];
   const byLoop = new Map<string, { fields: Record<string, unknown>; changes: LoopChange[] }>();
@@ -323,7 +343,7 @@ export async function pending(now = new Date()): Promise<Item[]> {
   }
   if (byWatch.size) {
     const w = await query<WatchRow>(
-      `SELECT watch_id, decision, owner_name, status, next_step, thread_link, coalesce(fixture, false) AS fixture FROM engine_decision_watches WHERE watch_id = ANY($1::text[])`,
+      `SELECT watch_id, owner_user_id, decision, owner_name, status, next_step, thread_link, coalesce(fixture, false) AS fixture FROM engine_decision_watches WHERE watch_id = ANY($1::text[])`,
       [[...byWatch.keys()]],
     );
     for (const row of w.rows) {
