@@ -104,6 +104,7 @@ import * as draftEval from './draftEval';
 import * as decisionWatch from './decisionWatch';
 import * as patternCapture from './patternCapture';
 import * as codexGap from './codexGap';
+import * as changeAnnounce from './changeAnnounce';
 import * as acceptanceCheckTools from './mcp/acceptanceCheckTools';
 import * as renewalReminder from './renewalReminder';
 import * as skillWatch from './skillWatch';
@@ -3733,6 +3734,7 @@ async function boot(): Promise<void> {
     decisionWatch.startSweeping();
     patternCapture.startSweeping();
     codexGap.startSweeping();
+    changeAnnounce.startSweeping();
     renewalReminder.startSweeping();
     codeCheckWatch.startSweeping();
     slackApps.startReading();

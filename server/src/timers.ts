@@ -35,6 +35,7 @@ const KNOWN: Array<{ name: string; what: string; every: string }> = [
   { name: 'pattern capture', what: 'Turns a failure the repair bridge found no build pattern for into one pattern candidate per fault', every: '10 minutes' },
   { name: 'decision watch', what: 'Checks watched decisions and posts a reminder where one has gone quiet past its wait', every: '5 minutes' },
   { name: 'draft eval orphan sweep', what: 'Marks a draft eval interrupted when no live process holds it, so a deploy cannot leave one running for good', every: '1 minute' },
+  { name: 'change announcements', what: 'Posts a progress or completion report in #bha-coordination when a loop or Decision Watch changes', every: '5 minutes' },
   { name: 'codex log gap', what: 'DMs a regular builder once when no Codex log of theirs has reached the engine in 30 hours, with a copy to Destiny', every: '1 hour' },
   { name: 'renewal reminder', what: 'Posts a card in #bha-engine-alerts 7, 3 and 1 day before a paid tool renews, and rolls passed renewal dates forward', every: '1 hour' },
   { name: 'code check watch', what: 'DMs Destiny when Jason approves a log that is owed a code check, then reminds every 3 hours until the check is recorded, and records a prepared check when it is sent', every: '2 minutes' },
