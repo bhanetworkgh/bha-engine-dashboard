@@ -79,7 +79,8 @@ export function fromItem(i: changeAnnounce.Item): Evidence {
     key: `item:${i.keys.join(',')}`,
     builders,
     source: `${i.record === 'loop' ? 'loop' : 'decision watch'} ${i.id}`,
-    text: clip([`${i.record === 'loop' ? 'Loop' : 'Decision watch'} ${i.id}: ${i.title}`, `What changed: ${i.changes.join('; ')}`, `Why: ${i.why}`, `Where it stands: ${i.stands}`].join('\n'), RULE.evidence_chars),
+    // The note itself first: a long loop title must never push the proof out of the card (18 Nov 2026).
+    text: clip([`${i.why}`, `What changed: ${i.changes.join('; ')}`, `${i.record === 'loop' ? 'Loop' : 'Decision watch'} ${i.id}: ${clip(i.title, 200)}`, `Where it stands: ${i.stands}`].join('\n'), RULE.evidence_chars),
     link: i.link,
     at: i.at,
   };
@@ -258,7 +259,7 @@ export function cardBlocks(c: CardInput, cardId: string | null, decided?: { by: 
       ],
     },
     { type: 'section', text: { type: 'mrkdwn', text: `*It was waiting for*\n${clip(c.match.needs, 600)}` } },
-    { type: 'section', text: { type: 'mrkdwn', text: `*The evidence*\n<${c.evidence.link}|${c.evidence.source}>: ${clip(c.evidence.text.split('\n').slice(0, 3).join(' · '), 700)}` } },
+    { type: 'section', text: { type: 'mrkdwn', text: `*The evidence*\n<${c.evidence.link}|${c.evidence.source}>\n>${clip(c.evidence.text.split('\n')[0] || '', 900)}` } },
     { type: 'section', text: { type: 'mrkdwn', text: `*Why it matches*\n${c.match.why || 'not given'}` } },
   ];
   if (decided) {
@@ -354,6 +355,42 @@ export async function pass(opts: { now?: Date; dry_run?: boolean; post?: Poster;
   return out;
 }
 
+/** A stored card's claim, back into the card's input. */
+async function inputFrom(d: Obj): Promise<CardInput> {
+  const ev = d.evidence as Obj;
+  return {
+    match: { submission_id: String(d.submission_id), codex_entry_id: (d.codex_entry_id as string) ?? null, part: String(d.part), share: Number(d.share), needs: String(d.needs ?? ''), met: true, confidence: 'high', why: String(d.why ?? '') },
+    builder: String(d.builder),
+    builderName: await nameOf(String(d.builder)),
+    rate: d.rate === null || d.rate === undefined ? null : Number(d.rate),
+    rateFrom: (d.rate_from as string) ?? null,
+    evidence: { key: '', builders: [], source: String(ev?.source ?? ''), text: String(ev?.text ?? ''), link: String(ev?.link ?? ''), at: '' },
+  };
+}
+
+/**
+ * The first card (HPR-145469, 18 Nov 2026) was posted before the evidence line put the note first.
+ * Once, while it is still undecided, it is redrawn with the note leading, buttons kept.
+ */
+export async function restyleFirstCard(): Promise<string> {
+  const id = 145469;
+  const flag = 'held_pay_watch.restyled.145469';
+  if (await getMeta(flag)) return 'already done';
+  const r = await query<{ detail: Obj }>(`SELECT detail FROM engine_events WHERE id = $1 AND event_type = 'held_pay_release_proposed'`, [id]);
+  const d = r.rows[0]?.detail;
+  if (!d || typeof d.ts !== 'string') return 'no card';
+  if (d.decided) return 'already decided, left as it is';
+  const ev = { ...(d.evidence as Obj) };
+  const lines = String(ev.text ?? '').split('\n');
+  const why = lines.find((l) => l.startsWith('Why: '));
+  if (why) ev.text = [why.slice(5), ...lines.filter((l) => l !== why)].join('\n');
+  const c = cardBlocks(await inputFrom({ ...d, evidence: ev }), `${PREFIX}${id}`);
+  const u = await slack.botCall('chat.update', { channel: String(d.channel ?? PAY_CHANNEL), ts: d.ts, text: c.text, blocks: c.blocks });
+  if (!u.ok) return `Slack refused the update: ${String(u.error)}`;
+  await setMetaIfAbsent(flag, new Date().toISOString());
+  return 'redrawn';
+}
+
 /** A click on a release card. Only Destiny or Jason; once only. */
 export async function decide(input: { id: string; decision: 'approve' | 'deny'; user_id: string }): Promise<{ status: number; body: Obj }> {
   const id = Number(input.id.slice(PREFIX.length));
@@ -392,16 +429,7 @@ export async function decide(input: { id: string; decision: 'approve' | 'deny'; 
   await query(`UPDATE engine_events SET detail = detail || $2::jsonb WHERE id = $1`, [id, JSON.stringify({ outcome: { released, message } })]);
   await record({ event_type: released ? 'held_pay_release_card_released' : input.decision === 'deny' ? 'held_pay_release_card_declined' : 'held_pay_release_card_failed', subject_id: String(d.codex_entry_id ?? d.submission_id), lane: 'BAYS', actor: input.user_id, detail: { card_id: input.id, part: d.part, share: d.share, message } });
   if (typeof d.ts === 'string' && !raise) {
-    const ev = d.evidence as Obj;
-    const input2: CardInput = {
-      match: { submission_id: String(d.submission_id), codex_entry_id: (d.codex_entry_id as string) ?? null, part: String(d.part), share: Number(d.share), needs: String(d.needs ?? ''), met: true, confidence: 'high', why: String(d.why ?? '') },
-      builder: String(d.builder),
-      builderName: await nameOf(String(d.builder)),
-      rate: d.rate === null || d.rate === undefined ? null : Number(d.rate),
-      rateFrom: (d.rate_from as string) ?? null,
-      evidence: { key: '', builders: [], source: String(ev?.source ?? ''), text: String(ev?.text ?? ''), link: String(ev?.link ?? ''), at: '' },
-    };
-    const c = cardBlocks(input2, null, { by: input.user_id, at: new Date().toISOString(), released, message });
+    const c = cardBlocks(await inputFrom(d), null, { by: input.user_id, at: new Date().toISOString(), released, message });
     const u = await slack.botCall('chat.update', { channel, ts: d.ts, text: c.text, blocks: c.blocks });
     if (!u.ok) console.error(`[held-pay-watch] card ${input.id} not updated: ${String(u.error)}`);
   }
@@ -425,5 +453,10 @@ export function startSweeping(): void {
     }
   };
   setTimeout(() => void tick(), 45_000).unref?.();
+  setTimeout(() => {
+    restyleFirstCard()
+      .then((r) => console.log(`[held-pay-watch] first card restyle: ${r}`))
+      .catch((e) => console.error(`[held-pay-watch] first card restyle failed: ${e instanceof Error ? e.message : String(e)}`));
+  }, 25_000).unref?.();
   setInterval(() => void tick(), RULE.every_minutes * 60_000).unref?.();
 }

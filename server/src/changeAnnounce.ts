@@ -65,6 +65,10 @@ export interface Item {
   author: string | null;
   /** The record's owner (a loop's assignee, a watch's owner), whose held pay a change may speak for. */
   owner_id: string | null;
+  /** Who made the change, by name, where the record says; null when it does not. */
+  changed_by?: string | null;
+  /** The loop's lane, where it has one. */
+  lane?: string | null;
 }
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
@@ -158,6 +162,8 @@ export function loopItem(loopId: string, now: Record<string, unknown>, changes: 
     at: sorted[sorted.length - 1].at,
     author: by || a1 || null,
     owner_id: a1 || null,
+    changed_by: by ? ownerName(by) : null,
+    lane: str(now['lane_tag']) || null,
   };
 }
 
@@ -188,9 +194,10 @@ export function watchItem(w: WatchRow, events: WatchEvent[], byName: (id: string
   let closed = false;
   let reason = '';
   let author: string | null = null;
+  let changedBy: string | null = null;
   for (const e of sorted) {
     const by = str(e.detail.by);
-    if (by) author = by;
+    if (by) { author = by; changedBy = byName(by); }
     const who = by ? byName(by) : '';
     if (e.event_type === 'decision_watch_closed') {
       closed = true;
@@ -228,6 +235,8 @@ export function watchItem(w: WatchRow, events: WatchEvent[], byName: (id: string
     at: sorted[sorted.length - 1].at,
     author: author || w.owner_user_id || null,
     owner_id: w.owner_user_id || null,
+    changed_by: changedBy,
+    lane: null,
   };
 }
 
@@ -259,6 +268,57 @@ export function renderBatch(items: Item[]): string {
     return `• *${tag}* <${i.link}|${i.id}> ${clip(i.title, 110)} (${i.owner}): ${i.changes.join('; ')}. Why: ${clip(i.why, 220)}.${tail}`;
   });
   return [head, ...body, 'Keep them moving, and close each one on the dashboard once it lands.'].join('\n');
+}
+
+type Block = Record<string, unknown>;
+const txt = (text: string, style?: Record<string, boolean>): Block => (style ? { type: 'text', text, style } : { type: 'text', text });
+const section = (...elements: Block[]): Block => ({ type: 'rich_text_section', elements });
+const bullets = (lines: string[]): Block => ({ type: 'rich_text_list', style: 'bullet', elements: lines.map((l) => section(txt(l))) });
+const lagos = (iso: string): string => {
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? iso : `${d.toLocaleString('en-GB', { timeZone: 'Africa/Lagos', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })} Lagos`;
+};
+
+/** One change as Block Kit: header, the record, its facts, what changed as a list, why, next, a button. */
+export function blocks(i: Item): Block[] {
+  const what = i.record === 'loop' ? 'Loop' : 'Decision watch';
+  const facts: Block[] = [
+    { type: 'mrkdwn', text: `*Owner*\n${i.owner}` },
+    { type: 'mrkdwn', text: `*Changed by*\n${i.changed_by || 'not recorded'}` },
+    { type: 'mrkdwn', text: `*Where it stands*\n${i.stands}` },
+    { type: 'mrkdwn', text: `*When*\n${lagos(i.at)}` },
+  ];
+  if (i.lane) facts.push({ type: 'mrkdwn', text: `*Lane*\n${i.lane}` });
+  const out: Block[] = [
+    { type: 'header', text: { type: 'plain_text', text: i.kind === 'completion' ? 'Completion report' : 'Progress report', emoji: false } },
+    { type: 'section', text: { type: 'mrkdwn', text: `${what} <${i.link}|${i.id}>\n*${clip(i.title, 280)}*` } },
+    { type: 'section', fields: facts },
+    { type: 'rich_text', elements: [section(txt('What changed', { bold: true })), bullets(i.changes.map((c) => clip(c, 300)))] },
+    { type: 'rich_text', elements: [section(txt('Why', { bold: true })), { type: 'rich_text_quote', elements: [txt(clip(i.why, RULE.why_chars))] }] },
+  ];
+  if (i.kind === 'progress') {
+    const next = i.next ? `${i.next.replace(/[.\s]+$/, '')}. Close it once that lands.` : 'Keep it moving and close it once it is done.';
+    out.push({ type: 'rich_text', elements: [section(txt('Next: ', { bold: true }), txt(clip(next, 400)))] });
+  }
+  out.push({ type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: i.record === 'loop' ? 'Open the loop' : 'Open the watch' }, url: i.link, action_id: 'change_announce_open' }] });
+  return out;
+}
+
+/** Several changes as one Block Kit post: a header, then each change as its own list item. */
+export function batchBlocks(items: Item[]): Block[] {
+  const done = items.filter((i) => i.kind === 'completion').length;
+  const out: Block[] = [
+    { type: 'header', text: { type: 'plain_text', text: 'Engine updates', emoji: false } },
+    { type: 'context', elements: [{ type: 'mrkdwn', text: `${items.length} changes: ${done} closed, ${items.length - done} moved` }] },
+  ];
+  for (const i of items.slice(0, 40)) {
+    out.push({ type: 'section', text: { type: 'mrkdwn', text: `*${i.kind === 'completion' ? 'Closed' : 'Progress'}* <${i.link}|${i.id}> ${clip(i.title, 140)}\nOwner: ${i.owner}${i.changed_by ? ` · changed by ${i.changed_by}` : ''} · ${i.stands}` } });
+    const lines = [...i.changes.map((c) => clip(c, 200)), `Why: ${clip(i.why, 260)}`];
+    if (i.kind === 'progress' && i.next) lines.push(`Next: ${clip(i.next, 200)}`);
+    out.push({ type: 'rich_text', elements: [bullets(lines)] });
+  }
+  out.push({ type: 'context', elements: [{ type: 'mrkdwn', text: 'Keep them moving, and close each one on the dashboard once it lands.' }] });
+  return out;
 }
 
 /* --------------------------------------------------------------- reading */
@@ -364,10 +424,10 @@ export interface PassResult {
   previews?: string[];
 }
 
-type Post = (channel: string, text: string) => Promise<{ ok: boolean; error?: string; ts?: string }>;
+type Post = (channel: string, text: string, blocks?: Block[]) => Promise<{ ok: boolean; error?: string; ts?: string }>;
 
-const defaultPost: Post = async (channel, text) => {
-  const r = await slack.botCall('chat.postMessage', { channel, text, unfurl_links: false, unfurl_media: false });
+const defaultPost: Post = async (channel, text, blocks) => {
+  const r = await slack.botCall('chat.postMessage', { channel, text, ...(blocks ? { blocks } : {}), unfurl_links: false, unfurl_media: false });
   return { ok: r.ok, error: r.error, ts: typeof r.ts === 'string' ? r.ts : undefined };
 };
 
@@ -408,7 +468,7 @@ export async function pass(opts: { now?: Date; dry_run?: boolean; post?: Post } 
       if (ids) claimed.push({ i, ids });
     }
     if (!claimed.length) return { pending: items.length, posted: 0, batched, failed: null };
-    const r = await post(RULE.channel, renderBatch(claimed.map((c) => c.i)));
+    const r = await post(RULE.channel, renderBatch(claimed.map((c) => c.i)), batchBlocks(claimed.map((c) => c.i)));
     if (!r.ok) {
       await query(`DELETE FROM engine_events WHERE id = ANY($1::bigint[])`, [claimed.flatMap((c) => c.ids)]);
       console.error(`[change-announce] the combined post of ${claimed.length} changes was refused, will retry: ${r.error}`);
@@ -422,16 +482,35 @@ export async function pass(opts: { now?: Date; dry_run?: boolean; post?: Post } 
   for (const i of items) {
     const ids = await claim(i);
     if (!ids) continue;
-    const r = await post(RULE.channel, render(i));
+    const r = await post(RULE.channel, render(i), blocks(i));
     if (!r.ok) {
       await query(`DELETE FROM engine_events WHERE id = ANY($1::bigint[])`, [ids]);
       failed = r.error ?? 'refused';
       console.error(`[change-announce] the post for ${i.id} was refused, will retry: ${failed}`);
       continue;
     }
+    if (r.ts) await query(`UPDATE engine_events SET detail = detail || $2::jsonb WHERE id = ANY($1::bigint[])`, [ids, JSON.stringify({ ts: r.ts })]).catch(() => undefined);
     posted += 1;
   }
   return { pending: items.length, posted, batched: false, failed };
+}
+
+/**
+ * The first announcement (JD68, 18 Nov 2026, history row 1638) went out as plain text before the
+ * Block Kit post existed. Once, after the deploy that brought the blocks, it is rewritten in place
+ * with them. Guarded by its own meta key, so it runs once whatever the number of restarts.
+ */
+const FIRST_POST = { channel: 'C0ASMPYQLG3', ts: '1794994282.960389', key: 'change_announce:loop_history:1638' };
+export async function restyleFirstPost(now = new Date()): Promise<string> {
+  const flag = 'change_announce.restyled.1794994282';
+  if (await getMeta(flag)) return 'already done';
+  const items = await collect(now, 'change_announce.since', async () => new Set());
+  const it = items.find((i) => i.keys.includes(FIRST_POST.key));
+  if (!it) return 'the change is no longer in the window';
+  const r = await slack.botCall('chat.update', { channel: FIRST_POST.channel, ts: FIRST_POST.ts, text: render(it), blocks: blocks(it) });
+  if (!r.ok) return `Slack refused the update: ${String(r.error)}`;
+  await setMetaIfAbsent(flag, now.toISOString());
+  return 'rewritten';
 }
 
 /* ----------------------------------------------------------------- timer */
@@ -452,6 +531,11 @@ export function startSweeping(): void {
       .finally(() => (busy = false));
   };
   setTimeout(tick, 30_000).unref();
+  setTimeout(() => {
+    restyleFirstPost()
+      .then((r) => console.log(`[change-announce] first post restyle: ${r}`))
+      .catch((e) => console.error(`[change-announce] first post restyle failed: ${e instanceof Error ? e.message : String(e)}`));
+  }, 20_000).unref();
   timer = setInterval(tick, RULE.every_minutes * 60 * 1000);
   timer.unref();
 }

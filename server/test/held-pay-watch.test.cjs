@@ -70,5 +70,11 @@ const item = (over = {}) => ({
     assert.ok(!done.blocks.some((b) => b.type === 'actions'));
     assert.ok(done.text.includes('no day rate'));
   });
+  await check('the card shows the note first, however long the loop title', () => {
+    const m = { submission_id: 'sub_1', codex_entry_id: 'CODEX-1', part: 'p', share: 0.5, needs: 'live call', met: true, confidence: 'high', why: 'named' };
+    const c = h.cardBlocks({ match: m, builder: 'U0AHADXXX', builderName: 'Ahad', rate: 111, rateFrom: null, evidence: h.fromItem(item({ title: 'x'.repeat(2000) })) }, 'HPR-7');
+    const ev = c.blocks.find((b) => b.text && /The evidence/.test(b.text.text));
+    assert.ok(ev.text.text.includes('CA123'));
+  });
   console.log(`${n} checks passed`);
 })().catch((e) => { console.error(e); process.exit(1); });

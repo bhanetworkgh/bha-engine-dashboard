@@ -107,4 +107,21 @@ assert.equal(ca.added('old', 'something new'), 'something new');
 assert.equal(ca.newestLine('one\ntwo\nUpdate 2026-11-18 (Jason): three'), 'three');
 ok('only the added text is quoted, and the date stamp is dropped');
 
+// 13. Block Kit: header, facts, what changed as a bullet list, why as a quote, a button
+{
+  const bi = { kind: 'progress', record: 'loop', id: 'LOOP-9-ZZZZ', title: 'Wire it', owner: 'Destiny Arupi', changes: ['Progress Note added', 'status Open → In Progress'], why: 'event 118905 landed', stands: 'In Progress', next: null, link: 'https://x/open-loops/LOOP-9-ZZZZ', keys: ['k'], at: '2026-11-18T09:27:37Z', author: 'U1', owner_id: 'U1', changed_by: 'Destiny Arupi', lane: 'CAPITAL' };
+  const b = ca.blocks(bi);
+  assert.equal(b[0].type, 'header');
+  assert.equal(b[0].text.text, 'Progress report');
+  const list = b.find((x) => x.type === 'rich_text' && x.elements.some((e) => e.type === 'rich_text_list'));
+  assert.equal(list.elements[1].elements.length, 2);
+  assert.ok(b.some((x) => x.type === 'rich_text' && x.elements.some((e) => e.type === 'rich_text_quote')));
+  assert.ok(JSON.stringify(b).includes('Changed by') && JSON.stringify(b).includes('CAPITAL') && JSON.stringify(b).includes('10:27 Lagos'));
+  assert.equal(b[b.length - 1].elements[0].url, bi.link);
+  const bb = ca.batchBlocks([bi, { ...bi, id: 'LOOP-8', kind: 'completion' }]);
+  assert.equal(bb[0].text.text, 'Engine updates');
+  assert.ok(bb.filter((x) => x.type === 'rich_text').length === 2);
+  ok('the post is Block Kit with lists, a quote and a button');
+}
+
 console.log(`\n${n} checks passed`);

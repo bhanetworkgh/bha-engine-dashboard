@@ -15676,3 +15676,10 @@ Files:      server/src/heldPayWatch.ts (new), server/src/changeAnnounce.ts (coll
 Problem:    The first timers.ts edit put the new name inside the change announcements entry ({ name: 'change announcements',\n  'held pay watch', what: ... }); caught on read-back before building.
 Fix:        Two separate entries.
 Decision:   The evidence sources are the ones part 1 already reads (loop and watch changes) plus saved evidence documents, so no write path changes. The model only proposes: a match must be met at high confidence, and the card is a draft until Jason or Destiny presses Release, which runs the same payNote.release the Held tab uses. One card per log and part, so the same proof never asks twice.
+
+## 2026-11-18 11:05 — Announcements in Block Kit, the release card's evidence first, both first posts redrawn
+Intent:     Destiny, on the first live run: the #bha-coordination announcement needs more detail and proper styling (Block Kit, rich text lists); the release card's evidence line hid the proof behind the loop's long title.
+Files:      server/src/changeAnnounce.ts (blocks(), batchBlocks(), changed_by and lane on each item, the post's ts kept on its claims, restyleFirstPost()), server/src/heldPayWatch.ts (the note first in the evidence, inputFrom(), restyleFirstCard()), both tests, CLAUDE.md
+Problem:    The first card (HPR-145469) showed "Loop LOOP-1792827895094-JD68: Wire the charge gate ..." and cut off before the note naming event 118905; the first announcement (ts 1794994282.960389) was plain text.
+Fix:        The evidence text now starts with the note and the card quotes that line whole. The announcement is Block Kit. Once after this deploy, each first post is rewritten in place with chat.update (meta flags change_announce.restyled.1794994282 and held_pay_watch.restyled.145469); the card is redrawn only while undecided and keeps its buttons.
+Decision:   Rewrite in place rather than delete and repost, so the channel keeps one post per change.
