@@ -34,6 +34,12 @@ const ok = (m) => { n += 1; console.log('  ok  ' + m); };
   assert.equal(await ic.describe('create_record', { kind: 'loops', fields: { What: 'x' }, dry_run: true }), null); ok('a dry run is not checked');
   const nudge = await ic.describe('send_nudge', { recipients: ['U0AEW3TBYH1'], text: 'Is the summary broken?', cc: 'U0A9V97949F' });
   assert.match(nudge, /Destiny/); assert.match(nudge, /Jason/); assert.match(nudge, /Is the summary broken\?/); ok('a nudge is described by who it goes to and what it says');
+  const long = 'Adding one more layer. '.repeat(120);
+  const word = await ic.describe('send_nudge', { recipients: ['U0AEW3TBYH1'], text: long });
+  assert.ok(word.includes(long.trim()), 'a 2,760-character DM is shown whole'); assert.ok(!word.includes('…')); ok('a word-for-word DM under 6,000 characters is shown to the check whole, never with "…" (INC-BAYS.AGENT-112, -113)');
+  const huge = 'x'.repeat(7000);
+  assert.match(ic.shown(huge, 6000), /shortened for the check: the full text is 7000 characters and is sent whole/); ok('a longer one says it is shortened and sent whole');
+  assert.match(ic.SYSTEM, /as it stands now, before this action/); assert.match(ic.SYSTEM, /never call it cut off/); ok('the check is told what is context and what is shortened');
   const watch = await ic.describe('open_decision_watch', { owner_user_id: 'U0BKT6MAW2Y', decision: 'Update 6I62 with PR #24 state' });
   assert.match(watch, /Hardik/); assert.match(watch, /6I62/); ok('a watch is described by its owner and what they owe');
 

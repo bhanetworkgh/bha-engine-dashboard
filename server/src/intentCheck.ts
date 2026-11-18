@@ -78,6 +78,15 @@ const clip = (v: unknown, n: number): string => {
   const s = typeof v === 'string' ? v : v === undefined || v === null ? '' : JSON.stringify(v);
   return s.length > n ? s.slice(0, n - 1) + '…' : s;
 };
+/**
+ * A long text the action sends whole, shown long enough to judge (18 Nov 2026, INC-BAYS.AGENT-112 and -113: a DM
+ * Jason asked to go word for word was clipped at 1,500 characters for the check, which then read the "…" as Bays
+ * cutting the message and refused it twice). Past the limit the view says it is shortened and the text is sent whole.
+ */
+export const shown = (v: unknown, n: number): string => {
+  const s = typeof v === 'string' ? v : v === undefined || v === null ? '' : JSON.stringify(v);
+  return s.length > n ? `${s.slice(0, n)} [this view is shortened for the check: the full text is ${s.length} characters and is sent whole]` : s;
+};
 const person = (id: string): string => (id ? `${PEOPLE[id] || 'unknown person'} (${id})` : '(nobody)');
 const ids = (v: unknown): string[] =>
   (Array.isArray(v) ? v.map(String) : String(v ?? '').split(/[\s,;]+/)).map((t) => (/[UW][A-Z0-9]{6,}/.exec(t) || [''])[0]).filter(Boolean);
@@ -141,7 +150,15 @@ export function addedText(current: unknown, next: unknown): { where: 'above it' 
 }
 
 const loopLine = (l: { loop_id: string; what: string; status: string; assignee: string } | null, fallback: string): string =>
-  l ? `loop ${l.loop_id} ("${clip(l.what, 300)}", now ${l.status || 'no status'}, assigned to ${person(l.assignee)})` : `loop ${fallback || '(not named)'} (not found on the dashboard)`;
+  l ? `loop ${l.loop_id} ("${clip(l.what, 300)}"; as it stands now, before this action: ${l.status || 'no status'}, assigned to ${person(l.assignee)})` : `loop ${fallback || '(not named)'} (not found on the dashboard)`;
+
+/**
+ * A watch as it stands, marked as context (18 Nov 2026, INC-BAYS.AGENT-110: an update adding Jason's line to OWYM's
+ * next step was refused twice because the watch's existing owed text, shown beside it, held items the message never
+ * named; the check read what the watch already said as part of the change).
+ */
+const watchLine = (w: { decision: string; owner: string } | null): string =>
+  w ? ` (as it stands now, before this action: owner ${person(w.owner)}, already owes "${clip(w.decision, 400)}")` : ' (not found)';
 
 /**
  * The action a call would take, in plain words, or null when the call is not one this check covers
@@ -177,25 +194,25 @@ export async function describe(tool: string, args: Args): Promise<string | null>
     case 'update_decision_watch': {
       const w = await watchRow(str(args.watch_id));
       const change = ['next_step', 'sop_refs', 'ns_refs', 'close_on_reply', 'unlink_record', 'replace'].filter((k) => args[k] !== undefined).map((k) => `${k}: ${clip(args[k], 600)}`).join('; ');
-      return `Change Decision Watch ${str(args.watch_id)}${w ? ` (owner ${person(w.owner)}, owes "${clip(w.decision, 400)}")` : ' (not found)'}: ${change || 'nothing named'}.`;
+      return `Change Decision Watch ${str(args.watch_id)}${watchLine(w)}. This changes only: ${change || 'nothing named'}.`;
     }
     case 'close_decision_watch': {
       const w = await watchRow(str(args.watch_id));
-      return `Close Decision Watch ${str(args.watch_id)}${w ? ` (owner ${person(w.owner)}, owes "${clip(w.decision, 400)}")` : ' (not found)'} as ${str(args.outcome) || '(no outcome)'}. Reason: "${clip(args.reason, 500)}". Proof: ${clip(args.proof, 300)}.`;
+      return `Close Decision Watch ${str(args.watch_id)}${watchLine(w)} as ${str(args.outcome) || '(no outcome)'}. Reason: "${clip(args.reason, 500)}". Proof: ${clip(args.proof, 300)}.`;
     }
     case 'snooze_decision_watch': {
       const w = await watchRow(str(args.watch_id));
-      return `${args.clear === true ? 'End the snooze on' : `Snooze until ${str(args.until) || '(no date)'}`} Decision Watch ${str(args.watch_id)}${w ? ` (owner ${person(w.owner)}, owes "${clip(w.decision, 400)}")` : ' (not found)'}. Reason: "${clip(args.reason, 400)}".`;
+      return `${args.clear === true ? 'End the snooze on' : `Snooze until ${str(args.until) || '(no date)'}`} Decision Watch ${str(args.watch_id)}${watchLine(w)}. Reason: "${clip(args.reason, 400)}".`;
     }
     case 'send_nudge': {
       const to = ids(args.recipients).map(person).join(', ') || '(nobody)';
       const cc = ids(args.cc).map(person).join(', ');
-      return `Send a Slack DM as Bays to ${to}${cc ? `, with a marked copy to ${cc}` : ''}. The message says: "${clip(args.text, 1500)}".`;
+      return `Send a Slack DM as Bays to ${to}${cc ? `, with a marked copy to ${cc}` : ''}. The message says: "${shown(args.text, 6000)}".`;
     }
     case 'post_file':
       return `Post a file titled "${clip(args.title, 200)}" to ${str(args.channel_id)}${str(args.thread_ts) ? ` in thread ${str(args.thread_ts)}` : ''}, with the comment "${clip(args.initial_comment, 400)}". It opens: "${clip(args.content, 1200)}".`;
     case 'edit_sop':
-      return `Edit SOP ${str(args.id) || str(args.title) || '(not named)'}. ${args.content !== undefined ? `Its text becomes: "${clip(args.content, 1200)}"` : `Replacements: ${clip(args.replacements, 1200)}`}. Reason given: "${clip(args.reason, 400)}".`;
+      return `Edit SOP ${str(args.id) || str(args.title) || '(not named)'}. ${args.content !== undefined ? `Its text becomes: "${shown(args.content, 6000)}"` : `Replacements: ${clip(args.replacements, 1200)}`}. Reason given: "${clip(args.reason, 400)}".`;
     default:
       return null;
   }
@@ -329,6 +346,8 @@ Rules:
 - Decision Watches: the owner must be the person the message puts the decision or reply on, never the person asking for it unless they asked to be watched themselves. The watch's wording must say what that person owes as the message states it, not more and not something else. A watch opened when the message asked for no follow-up is a miss.
 - Messages sent for someone (a DM or a post): the recipients must be who the message asked to reach, and the text must say only what the message, the thread or the records listed below support. A message that states facts neither the thread nor a listed record shows is a miss. A fact that matches a listed record (a loop's title, status, lane or owner as the dashboard holds it) is supported, even when the thread does not repeat it.
 - SOP edits: the change must be the one the message asked for.
+- Text marked "as it stands now, before this action" (a loop's status and owner, a watch's owner and what it already owes) is the record before the action, shown for context. It is not part of the change: judge only what the action changes. A watch already owing more than this message names is not a miss when the action does not change what it owes.
+- Text marked as shortened for the check is sent whole: judge the part shown, and never call it cut off.
 - In a scheduled task run there is no typed message: the action matches when it is what a task of that name exists to do.
 - When the message is ambiguous and the action is a reasonable reading of it, it matches. Only call a miss when the action is clearly not what was asked: a different loop or person, a different action, or words the message does not support.
 
