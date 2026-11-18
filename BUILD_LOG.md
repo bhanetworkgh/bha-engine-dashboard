@@ -15689,3 +15689,9 @@ Decision:   Rewrite in place rather than delete and repost, so the channel keeps
 Intent:     Destiny: the Progress report / Completion report posts in #bha-coordination should tag @channel at the head and tag the builder under Owner.
 Files:      server/src/changeAnnounce.ts, server/test/change-announce.test.cjs
 Fix:        Every post (single and combined, text and blocks) opens with <!channel>; Owner is <@Slack id> where the loop or watch carries one. The two posts already sent (JD68 1794994282.960389, A2OW 1794994880.245829) are rewritten in place once on boot (flag change_announce.restyled2.<ts>).
+
+## 2026-11-18 — @channel moves into the report heading; four posts rewritten
+Intent:     Destiny: the @channel tag belongs on the heading line ("Progress report @channel", "Completion report @channel"), and Jegan's two newer posts lacked both tags.
+Files:      server/src/changeAnnounce.ts, server/test/change-announce.test.cjs
+Problem:    A Block Kit header block is plain text, so it cannot carry a mention; the tag had been put on the record line below it.
+Fix:        The heading is now a bold mrkdwn section ending in <!channel> (combined posts: "Engine updates <!channel>"); the fallback text follows the same order. Owner stays <@Slack id>. All four posts so far (JD68 1794994282.960389, A2OW 1794994880.245829, 8ZVR 1794995350.047099, FRWX 1794995350.350669) are rewritten in place once on boot (flag change_announce.restyled3.<ts>). 14 checks pass.

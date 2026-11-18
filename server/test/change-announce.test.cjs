@@ -20,7 +20,7 @@ assert.equal(it.kind, 'completion');
 assert.equal(it.why, 'All 14 keys checked at source');
 assert.equal(it.owner, 'Ahad');
 assert.deepEqual(it.changes, ['closed (was Open)']);
-assert.match(ca.render(it), /^<!channel> \*Completion report\* on loop LOOP-1-AAAA/);
+assert.match(ca.render(it), /^\*Completion report\* <!channel> on loop LOOP-1-AAAA/);
 assert.doesNotMatch(ca.render(it), /Next:/);
 ok('a loop closed with a reason is a completion report giving that reason, and carries no nudge');
 
@@ -34,7 +34,7 @@ it = ca.loopItem('LOOP-3-CCCC', { What: 'Genie builds workflows', Status: 'In Pr
   [ch(4, '2026-11-18T08:00:00Z', { What: 'Genie builds workflows', Status: 'In Progress', 'Progress Note': 'Spec written.', 'Assignee Slack User ID': 'U0AEW3TBYH1' }, ['Progress Note'])], nm);
 assert.equal(it.kind, 'progress');
 assert.equal(it.why, 'n8n tools wired and proven on run 95300.');
-assert.match(ca.render(it), /^<!channel> \*Progress report\* on loop LOOP-3-CCCC/);
+assert.match(ca.render(it), /^\*Progress report\* <!channel> on loop LOOP-3-CCCC/);
 assert.match(ca.render(it), /Next: keep it moving and close it once it is done\./);
 ok('a note added is a progress report that quotes only the new part, with a nudge');
 
@@ -92,7 +92,7 @@ ok('a fixture watch posts nothing');
 // 10. many changes go out as one combined post
 const many = [1, 2, 3, 4, 5].map((k) => ({ kind: k % 2 ? 'completion' : 'progress', record: 'loop', id: `LOOP-${k}`, title: `t${k}`, owner: 'Ahad', changes: ['closed (was Open)'], why: 'r', stands: 'Closed', next: null, link: 'https://d/x', keys: [`k${k}`], at: '2026-11-18T08:00:00Z' }));
 const b = ca.renderBatch(many);
-assert.match(b, /^<!channel> \*Engine updates\*: 5 changes \(3 closed, 2 moved\)/);
+assert.match(b, /^\*Engine updates\* <!channel>: 5 changes \(3 closed, 2 moved\)/);
 assert.equal(b.split('\n').filter((l) => l.startsWith('• ')).length, 5);
 assert.ok(ca.RULE.batch_over < many.length);
 ok('more than four changes in a pass are one combined post listing each');
@@ -111,16 +111,16 @@ ok('only the added text is quoted, and the date stamp is dropped');
 {
   const bi = { kind: 'progress', record: 'loop', id: 'LOOP-9-ZZZZ', title: 'Wire it', owner: 'Destiny Arupi', changes: ['Progress Note added', 'status Open → In Progress'], why: 'event 118905 landed', stands: 'In Progress', next: null, link: 'https://x/open-loops/LOOP-9-ZZZZ', keys: ['k'], at: '2026-11-18T09:27:37Z', author: 'U1', owner_id: 'U1', changed_by: 'Destiny Arupi', lane: 'CAPITAL' };
   const b = ca.blocks(bi);
-  assert.equal(b[0].type, 'header');
-  assert.equal(b[0].text.text, 'Progress report');
+  assert.equal(b[0].type, 'section');
+  assert.equal(b[0].text.text, '*Progress report* <!channel>');
   const list = b.find((x) => x.type === 'rich_text' && x.elements.some((e) => e.type === 'rich_text_list'));
   assert.equal(list.elements[1].elements.length, 2);
   assert.ok(b.some((x) => x.type === 'rich_text' && x.elements.some((e) => e.type === 'rich_text_quote')));
   assert.ok(JSON.stringify(b).includes('Changed by') && JSON.stringify(b).includes('CAPITAL') && JSON.stringify(b).includes('10:27 Lagos'));
   assert.equal(b[b.length - 1].elements[0].url, bi.link);
-  assert.ok(b[1].text.text.startsWith('<!channel>') && JSON.stringify(b).includes('<@U1>'));
+  assert.ok(b[0].text.text.endsWith('<!channel>') && JSON.stringify(b).includes('<@U1>'));
   const bb = ca.batchBlocks([bi, { ...bi, id: 'LOOP-8', kind: 'completion' }]);
-  assert.equal(bb[0].text.text, 'Engine updates');
+  assert.equal(bb[0].text.text, '*Engine updates* <!channel>');
   assert.ok(bb.filter((x) => x.type === 'rich_text').length === 2);
   ok('the post is Block Kit with lists, a quote and a button');
 }
