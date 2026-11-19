@@ -31,6 +31,8 @@ const PARSER_NODE = 'Layer 1 Output Parser';
 const L0_NODE = 'Layer 0 — Completeness Gate';
 const L0_PARSER = 'Layer 0 Output Parser';
 const L0_EVAL = 'Evaluate Layer 0 Gate';
+const L2_NODE = 'BHA Orchestrator';
+const L2_PARSER = 'Layer 2 Output Parser';
 /**
  * sha256 of `Evaluate Layer 0 Gate`'s code when `layer0Missing` was ported from it (11 Nov 2026), updated 13 Nov 2026 when
  * the gate gained its extra-log pass (an extra log of the builder's UTC day skips the check). The pre-check never sees
@@ -222,4 +224,40 @@ export async function pay(b: Obj): Promise<Obj> {
     releases_unread,
     dry_run: true,
   };
+}
+
+/** The Codex entry's prompt (Layer 2, `BHA Orchestrator`) with the submission row in place of its expressions (19 Nov
+ *  2026, Genie rebuild 10.2c). Every expression reads `$json.fields['<name>']`, the row as `Lookup Submission Row`
+ *  shapes it; the source line is the one ternary. Any other expression is refused, never guessed. Pure. */
+export function resolveLayer2(template: string, fields: Obj): string {
+  let t = template.startsWith('=') ? template.slice(1) : template;
+  for (const e of t.match(/\{\{[\s\S]*?\}\}/g) ?? []) {
+    if (/Submission Source/.test(e)) t = t.split(e).join(fields['Submission Source'] === 'loom' ? 'Loom (UI/UX screen recording)' : 'Otter (voice-narrated build session)');
+    else {
+      const m = e.match(/^\{\{\s*\$json\.fields\['([^']+)'\]\s*(\|\|\s*''\s*)?\}\}$/);
+      if (!m) throw new PrecheckError(409, `The Codex prompt now carries an expression Genie does not know how to fill (${e.slice(0, 120)}). Update logPrecheck.resolveLayer2 first.`);
+      const v = fields[m[1]!];
+      t = t.split(e).join(v == null ? '' : typeof v === 'string' ? v : JSON.stringify(v));
+    }
+  }
+  return t;
+}
+
+/** What Genie is handed to write a log's Codex entry: `BHA Orchestrator`'s system message and prompt, filled from the
+ *  submission row, and `Layer 2 Output Parser`'s schema, all read live from Submit Actions. Writes nothing. */
+export async function layer2Prompt(b: Obj): Promise<Obj> {
+  const fields = (b.fields && typeof b.fields === 'object' ? b.fields : null) as Obj | null;
+  if (!fields || typeof fields.Transcript !== 'string' || fields.Transcript.trim().length < 200) throw new PrecheckError(422, 'fields is required: the submission row as Lookup Submission Row shapes it, with its Transcript (at least 200 characters).');
+  const w = await n8n.workflow(SUBMIT_ACTIONS);
+  const nodes = w.nodes as Obj[];
+  const node = nodes.find((x) => x.name === L2_NODE);
+  const parser = nodes.find((x) => x.name === L2_PARSER);
+  if (!node || !parser) throw new PrecheckError(409, `${L2_NODE} or ${L2_PARSER} is no longer in Bays — Submit Actions.`);
+  const params = (node.parameters ?? {}) as Obj;
+  const system = String(((params.options ?? {}) as Obj).systemMessage ?? '').replace(/^=/, '');
+  if (/\{\{/.test(system)) throw new PrecheckError(409, `${L2_NODE}'s system message now carries an expression. Update logPrecheck.layer2Prompt first.`);
+  const schema = String(((parser.parameters ?? {}) as Obj).inputSchema ?? '').replace(/^=/, '');
+  JSON.parse(schema);
+  if (!system) throw new PrecheckError(409, `${L2_NODE} has no system message.`);
+  return { system_message: system, prompt: resolveLayer2(String(params.text ?? ''), fields), schema, workflow_version: w.versionId, read_at: new Date().toISOString(), dry_run: true };
 }

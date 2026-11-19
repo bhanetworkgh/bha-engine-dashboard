@@ -1221,6 +1221,20 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         describe: (r) => `review prompt read from Submit Actions ${r.workflow_version}`,
         hint: 'POST { transcript or submission_id, source? }. The Layer 1 review as it stands now: system_message, prompt (with the log in place) and schema. Writes nothing.',
       },
+      /** 19 Nov 2026 (Genie rebuild 10.2c): what Genie is handed to write a log's Codex entry, read live from Submit Actions. */
+      '/api/engine/layer2/prompt': {
+        kind: 'codex',
+        store: async (b) => {
+          try {
+            return { ...(await logPrecheck.layer2Prompt(b)) };
+          } catch (e) {
+            if (e instanceof logPrecheck.PrecheckError) throw new systemFeeds.FeedError(e.status, e.message);
+            throw e;
+          }
+        },
+        describe: (r) => `Codex prompt read from Submit Actions ${r.workflow_version}`,
+        hint: 'POST { fields } (or body_b64): the submission row. Answers system_message, prompt and schema for the Codex entry. Writes nothing.',
+      },
       '/api/engine/log-precheck/pay': {
         kind: 'codex',
         store: async (b) => {
