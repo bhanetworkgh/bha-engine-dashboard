@@ -20,6 +20,8 @@
 import { query, withTransaction } from './pg';
 import * as engineEvents from './engineEvents';
 import * as approvals from './genieApprovals';
+import * as reuseCheck from './reuseCheck';
+import * as patternTrust from './patternTrust';
 import * as shared from './sharedMemory';
 
 export const CONTROL_EVENTS = ['genie_channel_updated', 'genie_memory_added', 'genie_memory_removed', 'genie_limit_reached', 'genie_task_created', 'genie_task_cancelled', 'genie_task_ran', 'genie_nudge_posted'];
@@ -336,6 +338,15 @@ export async function handle(b: Row): Promise<Row> {
       return approvals.finish(b);
     case 'approval_expire':
       return approvals.expire();
+    // Steps 10.9 to 10.11 (19 Nov 2026): the build trail's rating, the reuse check, the pattern trust record.
+    case 'build_rate':
+      return approvals.rate(b);
+    case 'build_rate_card':
+      return approvals.setRateCard(b);
+    case 'reuse_check':
+      return { ...(await reuseCheck.check(b)) };
+    case 'pattern_trust':
+      return patternTrust.read();
     // Steps 7 and 8 (17 Nov 2026): one memory across the engine, and what every part is doing.
     case 'shared_remember':
       return shared.remember({ ...b, written_by: 'genie', said_by: b.requester });
@@ -346,7 +357,7 @@ export async function handle(b: Row): Promise<Row> {
     case 'activity':
       return shared.activity(b);
     default:
-      throw new GenieControlError(422, 'op is one of channel, set_channel, remember, forget, usage, followed, create_task, list_tasks, cancel_task, due_tasks, task_result, log_nudge, people, approval_request, approval_card, approval_decide, approval_finish, approval_expire, shared_remember, shared_recall, shared_forget, activity.');
+      throw new GenieControlError(422, 'op is one of channel, set_channel, remember, forget, usage, followed, create_task, list_tasks, cancel_task, due_tasks, task_result, log_nudge, people, approval_request, approval_card, approval_decide, approval_finish, approval_expire, build_rate, build_rate_card, reuse_check, pattern_trust, shared_remember, shared_recall, shared_forget, activity.');
   }
 }
 

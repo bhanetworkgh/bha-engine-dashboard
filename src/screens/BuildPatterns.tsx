@@ -8,6 +8,7 @@ import { useReplayKey, Tabs, PageHeader, Pagination, Button, ButtonAnchor, Count
 import RecordStatistics from '../components/RecordStatistics';
 import { REUSE_DEFS } from './recordDefinitions';
 import { CandidatesTab } from './PatternCandidates';
+import Trust from './patterns/Trust';
 
 /** The record kinds this page is built from: a change to one re-reads it (live since 2026-09-23). */
 const PATTERN_KINDS = ['patterns', 'pattern_candidates'] as const;
@@ -336,7 +337,7 @@ function patternColumns(open: (p: BuildPattern) => void): RecordColumn<BuildPatt
  * month-against-month figures rather than rows. Everything month-shaped lives
  * there: the chart, the month in view and the export.
  */
-const VIEWS = ['Patterns', 'Candidates', 'Statistics'] as const;
+const VIEWS = ['Patterns', 'Candidates', 'Trust', 'Statistics'] as const;
 type View = (typeof VIEWS)[number];
 
 /**
@@ -344,7 +345,7 @@ type View = (typeof VIEWS)[number];
  * the link Bays' instructions give people in place of the retired Airtable
  * view. Patterns, the default, carries no parameter.
  */
-const VIEW_PARAM: Record<View, string | null> = { Patterns: null, Candidates: 'candidates', Statistics: 'statistics' };
+const VIEW_PARAM: Record<View, string | null> = { Patterns: null, Candidates: 'candidates', Trust: 'trust', Statistics: 'statistics' };
 function viewFrom(param: string | null): View {
   return (VIEWS.find((v) => VIEW_PARAM[v] === param) ?? 'Patterns') as View;
 }
@@ -471,7 +472,9 @@ export default function BuildPatterns() {
         Everything month-shaped lives on the statistics tab: the chart, the
         month in view and the export. This tab is the list and its filters.
       */}
-      {view === 'Candidates' ? (
+      {view === 'Trust' ? (
+        <Trust />
+      ) : view === 'Candidates' ? (
         <CandidatesTab
           state={candidates}
           months={months}

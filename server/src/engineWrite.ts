@@ -13,6 +13,7 @@
  * What differs between callers is only how they are named on the log: the
  * endpoint, the method and which credential let them in. That is `WriteCtx`.
  */
+import * as reuseCheck from './reuseCheck';
 import * as layer0Notice from './layer0Notice';
 import * as codeReview from './codeReview';
 import * as paySuggest from './paySuggest';
@@ -63,6 +64,24 @@ function detail(ctx: WriteCtx, text: string): string {
  * logged and rethrown as the `MirrorError` it was, so the caller answers with
  * the status it carries.
  */
+/**
+ * The reuse check on a submitted log (Genie rebuild 10.10). Run once, on the write that first carries the log's
+ * description or summary, and stored as `Reuse Check` (a new field name, JSON): ran, the summary line and the top
+ * matches. A report, a log already carrying one, or a log already decided is left as it is. It never changes pay
+ * and never fails the write: a check that throws is stored as not run, with the reason.
+ */
+export async function reuseOnSubmission(fields: Record<string, unknown>): Promise<Record<string, unknown>> {
+  if (fields['Reuse Check'] || String(fields['Log Kind'] ?? '') === 'Report') return fields;
+  const status = String(fields['Jason Status'] ?? '');
+  if (status && status !== 'Pending') return fields;
+  const text = [fields['Session Description'], fields['Summary']].filter((v) => typeof v === 'string' && v.trim()).join('\n');
+  if (!text) return fields;
+  const sid = String(fields['Submission ID'] ?? '');
+  const v = await reuseCheck.check({ text, source_ref: sid || 'log', exclude_submission_id: sid });
+  const stored = { ran: v.ran, reason: v.reason ?? null, summary: v.summary, matches: v.matches.map((m) => ({ kind: m.kind, id: m.id, title: m.title, score: m.score, how: m.how })), at: new Date().toISOString() };
+  return { ...fields, 'Reuse Check': JSON.stringify(stored) };
+}
+
 export async function postRecord(kind: mirror.MirrorKind, body: mirror.MirrorInput, ctx: WriteCtx): Promise<PostResult> {
   try {
     // A rejected Codex log is closed to the engine (2026-10-15, codexReject.ts).
@@ -73,6 +92,8 @@ export async function postRecord(kind: mirror.MirrorKind, body: mirror.MirrorInp
     if (kind === 'codex' && body.fields && typeof body.fields === 'object') body = { ...body, fields: await paySuggest.annotate(body.fields as Record<string, unknown>) };
     // The code review at submission (14 Nov 2026, codeReview.ts): its answer becomes the Codex entry's code check fields.
     if (kind === 'codex' && body.fields && typeof body.fields === 'object') body = { ...body, fields: codeReview.annotate(body.fields as Record<string, unknown>) };
+    // The reuse check at submission (19 Nov 2026, Genie rebuild 10.10): a flag for Jason's card, never a pay hold.
+    if (kind === 'codex' && body.fields && typeof body.fields === 'object') body = { ...body, fields: await reuseOnSubmission(body.fields as Record<string, unknown>) };
     const result = await mirror.upsert(kind, body, 'engine');
     if (kind === 'layer0' && layer0Notice.becameComplete(body.fields as Record<string, unknown>, result.changed)) void layer0Notice.deleteOnComplete(String(result.id)).catch(() => undefined);
     // A log that went through retires any parked copy of the same recording (2026-10-25).

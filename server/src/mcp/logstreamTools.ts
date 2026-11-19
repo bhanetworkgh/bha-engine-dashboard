@@ -142,6 +142,7 @@ export const readLogstream: ToolDefinition = {
         pattern_adherence: page.adherence,
         empty_reads: await logstream.emptyReads(),
         research_signals: await signalsBrief(),
+        not_converging: page.not_converging,
         notes: page.notes,
         page_url: `${(process.env.PUBLIC_DASHBOARD_URL || 'https://dashboard.bhanetwork.org').replace(/\/$/, '')}/logstream`,
       },

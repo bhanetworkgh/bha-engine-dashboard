@@ -61,6 +61,7 @@
  * No silent failures: a job or an alert that does not land keeps its trigger
  * at `failed` with the reason and is tried again on every pass.
  */
+import * as loopConvergence from './loopConvergence';
 import { query, withTransaction } from './pg';
 import * as engineEvents from './engineEvents';
 import * as slack from './slack';
@@ -826,7 +827,9 @@ export async function read(): Promise<Record<string, unknown>> {
     windowIncidents().then(async (i) => [i, await windowRuns(i)] as const),
   ]);
   const now = evaluate(watch[0], watch[1]);
+  const notConverging = await loopConvergence.read().catch((e) => ({ rule: null, now: [], error: e instanceof Error ? e.message : String(e) }));
   return {
+    not_converging: notConverging,
     rule: {
       ...RULE,
       words: [

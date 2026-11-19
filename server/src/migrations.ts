@@ -4916,6 +4916,32 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       )`,
     ],
   },
+  {
+    id: 144,
+    name: 'Genie build trail and pattern trust record (19 Nov 2026, Destiny, Genie rebuild 10.9 to 10.11, genieApprovals.ts and patternTrust.ts)',
+    statements: [
+      `ALTER TABLE engine_genie_approvals ADD COLUMN IF NOT EXISTS plan jsonb`,
+      `ALTER TABLE engine_genie_approvals ADD COLUMN IF NOT EXISTS choice text CHECK (choice IS NULL OR choice IN ('go_ahead','extend','reuse'))`,
+      `ALTER TABLE engine_genie_approvals ADD COLUMN IF NOT EXISTS built jsonb`,
+      `ALTER TABLE engine_genie_approvals ADD COLUMN IF NOT EXISTS rating text CHECK (rating IS NULL OR rating IN ('useful','partly','not_useful','not_rated'))`,
+      `ALTER TABLE engine_genie_approvals ADD COLUMN IF NOT EXISTS rating_reason text`,
+      `ALTER TABLE engine_genie_approvals ADD COLUMN IF NOT EXISTS rated_by text`,
+      `ALTER TABLE engine_genie_approvals ADD COLUMN IF NOT EXISTS rated_at timestamptz`,
+      `ALTER TABLE engine_genie_approvals ADD COLUMN IF NOT EXISTS rate_ts text`,
+      `CREATE TABLE IF NOT EXISTS engine_pattern_trust (
+        id bigserial PRIMARY KEY,
+        pattern_id text NOT NULL,
+        kind text NOT NULL CHECK (kind IN ('shown','up','down')),
+        reason text,
+        voter text,
+        thread text,
+        source_ref text NOT NULL,
+        at timestamptz NOT NULL DEFAULT now()
+      )`,
+      `CREATE INDEX IF NOT EXISTS engine_pattern_trust_pattern_at ON engine_pattern_trust (pattern_id, at)`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS engine_pattern_trust_vote ON engine_pattern_trust (pattern_id, kind, source_ref, voter) WHERE kind <> 'shown'`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

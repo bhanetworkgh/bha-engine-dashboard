@@ -93,6 +93,9 @@ import * as reviewCard from './reviewCard';
 import * as paySuggest from './paySuggest';
 import * as logPrecheck from './logPrecheck';
 import * as intentCheck from './intentCheck';
+import * as loopConvergence from './loopConvergence';
+import * as patternTrust from './patternTrust';
+import * as reuseCheck from './reuseCheck';
 import * as intentHeal from './intentHeal';
 import * as layer0Notice from './layer0Notice';
 import * as baysAsks from './baysAsks';
@@ -1192,6 +1195,15 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         store: async (b) => ({ ...(await intentCheck.answerCheck(b)), dry_run: true }),
         describe: (r) => `reply ${r.answers ? 'answers' : 'does not answer'} (${r.checked}): ${String(r.reason ?? '')}`.slice(0, 400),
         hint: 'POST { ask, reply, agent? (Bays, Genie or North Star; default Bays), channel_id?, thread_ts? } (or body_b64). A Bays reply that hands the question to Genie answers it when the hand-off for that thread is on record. Answers { answers, reason, checked: model | phrase | unchecked }. Writes nothing.',
+      },
+      /** The reuse check at log submission (19 Nov 2026, Genie rebuild 10.10): matches the log against patterns, open
+       *  loops, the backlog and approved Codex logs. A flag for Jason's card and the Codex row; never a pay hold. Writes
+       *  only the `shown` lines the pattern trust record keeps. */
+      '/api/engine/reuse-check': {
+        kind: 'codex',
+        store: async (b) => ({ ...(await reuseCheck.check({ ...b, text: b.text ?? [b.description, b.summary].filter(Boolean).join('\n') })), dry_run: true }),
+        describe: (r) => `reuse check ${r.ran ? `ran: ${(r.matches as unknown[]).length} match(es)` : `did not run: ${String(r.reason ?? '')}`}`.slice(0, 400),
+        hint: 'POST { text } or { description, summary }, with source_ref (the Submission ID) and exclude_submission_id (or body_b64). Answers { ran, matches, summary, choices }.',
       },
       /** Loop closes from a log review (13 Nov 2026, intentCheck.ts; SOP 05ccd8ab): each proposed close checked against the log, held open when twice unbacked. Writes events only. */
       '/api/engine/loop-close-check': {
@@ -2511,6 +2523,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         return send(res, 200, await genieControl.page());
       case '/api/genie/sources':
         return send(res, 200, await outsideSources.page());
+      /** The build trail (10.9) and the pattern trust record (10.11), for the Genie and Build patterns pages. */
+      case '/api/genie/builds':
+        return send(res, 200, { ok: true, builds: await genieApprovals.list() });
+      case '/api/pattern-trust':
+        return send(res, 200, await patternTrust.read());
       case '/api/genie/builder':
         return send(res, 200, await genieBuilder.read({ rail_id: url.searchParams.get('rail_id') }));
       /** Bays' own ledger: Slack turns, scheduled task runs and panel questions (2026-10-05). */
@@ -3794,6 +3811,9 @@ async function boot(): Promise<void> {
     changeAnnounce.startSweeping();
   heldPayWatch.startSweeping();
     intentHeal.startSweeping();
+    loopConvergence.startSweeping();
+    patternTrust.startSweeping();
+    genieApprovals.startSweeping();
     renewalReminder.startSweeping();
     codeCheckWatch.startSweeping();
     slackApps.startReading();

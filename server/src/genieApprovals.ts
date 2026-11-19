@@ -16,9 +16,24 @@
 import { createHash } from 'node:crypto';
 import { query } from './pg';
 import * as engineEvents from './engineEvents';
+import * as reuse from './reuseCheck';
+import * as trust from './patternTrust';
+import * as timers from './timers';
 
 export const APPROVERS = new Set(['U0AEW3TBYH1', 'U0A9V97949F']);
-export const APPROVAL_EVENTS = ['genie_approval_requested', 'genie_approval_decided', 'genie_approval_finished', 'genie_approval_expired'];
+export const APPROVAL_EVENTS = ['genie_approval_requested', 'genie_approval_decided', 'genie_approval_finished', 'genie_approval_expired', 'genie_build_planned', 'genie_build_built', 'genie_build_rated'];
+
+/**
+ * The build trail (19 Nov 2026, Genie rebuild 10.9): every Genie build is plan, decision, built, rating.
+ * The plan is written when the call is held: the goal (the ask), the change (the call in words) and the reuse
+ * check (10.10) on both. The decision is the click, with its choice: go ahead, extend a match, or use what
+ * exists (which runs nothing). Built is what the call did. The rating is the asker's: useful, partly, or not
+ * useful with a reason (wrong, outdated, misrouted); 48 hours with none is not_rated, never assumed useful.
+ * The choices and ratings are the votes the pattern trust record keeps (10.11).
+ */
+export const RATINGS = ['useful', 'partly', 'not_useful'] as const;
+export const CHOICES = ['go_ahead', 'extend', 'reuse'] as const;
+export const RATE_WITHIN_HOURS = 48;
 
 type Row = Record<string, unknown>;
 const str = (v: unknown, max = 2000) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
@@ -54,13 +69,18 @@ export async function request(b: Row): Promise<Row> {
   const held = await query<Row>(`SELECT id, card_ts FROM engine_genie_approvals WHERE digest = $1 AND status = 'pending' AND expires_at > now()`, [digest]);
   if (held.rows[0]) return { ok: true, id: held.rows[0].id, repeat: true, card_ts: held.rows[0].card_ts };
   const id = `GAP-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+  const goal = str(b.goal, 3000);
+  const thread = str(b.thread_ts, 40) || null;
+  const check = await reuse.check({ text: `${goal}\n${summary}`, source_ref: id, thread: thread ? `${channel}:${thread}` : null });
+  const plan = { goal: goal || null, change: summary, reuse: { ran: check.ran, reason: check.reason ?? null, summary: check.summary, matches: check.matches }, patterns_used: [] as string[] };
   await query(
-    `INSERT INTO engine_genie_approvals (id, server, tool, args, summary, channel_id, thread_ts, requester, request_id, digest)
-     VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10)`,
-    [id, server, tool, JSON.stringify(args), summary, channel, str(b.thread_ts, 40) || null, str(b.requester, 40) || null, str(b.request_id, 80) || null, digest],
+    `INSERT INTO engine_genie_approvals (id, server, tool, args, summary, channel_id, thread_ts, requester, request_id, digest, plan)
+     VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb)`,
+    [id, server, tool, JSON.stringify(args), summary, channel, thread, str(b.requester, 40) || null, str(b.request_id, 80) || null, digest, JSON.stringify(plan)],
   );
-  await log('genie_approval_requested', id, str(b.requester, 40) || 'genie', { server, tool, summary, channel_id: channel, thread_ts: str(b.thread_ts, 40) || null });
-  return { ok: true, id, repeat: false };
+  await log('genie_approval_requested', id, str(b.requester, 40) || 'genie', { server, tool, summary, channel_id: channel, thread_ts: thread });
+  await log('genie_build_planned', id, str(b.requester, 40) || 'genie', { goal: goal || null, change: summary, reuse_ran: check.ran, matches: check.matches.map((m) => m.id) });
+  return { ok: true, id, repeat: false, plan };
 }
 
 export async function setCard(b: Row): Promise<Row> {
@@ -77,6 +97,8 @@ export async function decide(b: Row): Promise<Row> {
   const who = str(b.decider, 40);
   const decision = str(b.decision, 10);
   if (decision !== 'approve' && decision !== 'deny') throw new ApprovalError(422, 'decision is approve or deny.');
+  const askedChoice = str(b.choice, 10);
+  if (askedChoice && !(CHOICES as readonly string[]).includes(askedChoice)) throw new ApprovalError(422, 'choice is go_ahead, extend or reuse.');
   const r = await query<Row>(`SELECT * FROM engine_genie_approvals WHERE id = $1`, [id]);
   const row = r.rows[0];
   if (!row) return { ok: false, reason: 'not_found', message: `No approval ${id}.` };
@@ -90,38 +112,114 @@ export async function decide(b: Row): Promise<Row> {
     await log('genie_approval_expired', id, 'genie', { server: row.server, tool: row.tool });
     return { ok: false, reason: 'expired', message: 'This request is over 24 hours old and has expired. Ask Genie again.', row };
   }
-  const status = decision === 'approve' ? 'approved' : 'denied';
+  // Use what exists is a deny with its own choice: nothing runs, and the match it points at gets the credit.
+  const status = decision === 'approve' && askedChoice !== 'reuse' ? 'approved' : 'denied';
+  const plan = (row.plan as Row | null) ?? {};
+  const matched = (((plan.reuse as Row | undefined)?.matches as reuse.Match[] | undefined) ?? []).filter((m) => m.kind === 'pattern').map((m) => m.id);
+  const choice = askedChoice || (status === 'approved' && matched.length ? 'go_ahead' : null);
+  const patternsUsed = choice === 'extend' ? matched : [];
   const claimed = await query<Row>(
-    `UPDATE engine_genie_approvals SET status = $2, decided_by = $3, decided_at = now() WHERE id = $1 AND status = 'pending' RETURNING *`,
-    [id, status, who],
+    `UPDATE engine_genie_approvals SET status = $2, decided_by = $3, decided_at = now(), choice = $4,
+            plan = jsonb_set(COALESCE(plan, '{}'::jsonb), '{patterns_used}', $5::jsonb)
+      WHERE id = $1 AND status = 'pending' RETURNING *`,
+    [id, status, who, choice, JSON.stringify(patternsUsed)],
   );
   if (!claimed.rows[0]) return { ok: false, reason: 'already_decided', message: 'Someone decided this a moment ago.' };
-  await log('genie_approval_decided', id, who, { decision: status, server: row.server, tool: row.tool, summary: row.summary });
-  return { ok: true, decision: status, row: claimed.rows[0] };
+  await log('genie_approval_decided', id, who, { decision: status, choice, server: row.server, tool: row.tool, summary: row.summary });
+  const thread = row.thread_ts ? `${String(row.channel_id)}:${String(row.thread_ts)}` : null;
+  for (const p of matched) {
+    if (choice === 'reuse' || choice === 'extend') await trust.vote({ pattern_id: p, kind: 'up', reason: choice, voter: who, thread, source_ref: id });
+    else if (choice === 'go_ahead') await trust.vote({ pattern_id: p, kind: 'down', reason: 'overridden', voter: who, thread, source_ref: id });
+  }
+  return { ok: true, decision: status, choice, row: claimed.rows[0] };
 }
 
 /** What happened once an approved call was made. A call never claimed approved is refused. */
 export async function finish(b: Row): Promise<Row> {
   const id = str(b.id, 60);
   const ok = b.ok === true;
+  const built = { ok, what: ok ? str(b.result, 600) || 'done, with no output' : null, error: ok ? null : str(b.error, 600) || 'no reason given', at: new Date().toISOString() };
   const r = await query<Row>(
-    `UPDATE engine_genie_approvals SET status = $2, result = $3, error = $4, finished_at = now() WHERE id = $1 AND status = 'approved' RETURNING id, server, tool`,
-    [id, ok ? 'done' : 'failed', str(b.result, 4000) || null, ok ? null : str(b.error, 2000) || 'no reason given'],
+    `UPDATE engine_genie_approvals SET status = $2, result = $3, error = $4, finished_at = now(), built = $5::jsonb WHERE id = $1 AND status = 'approved' RETURNING id, server, tool, requester`,
+    [id, ok ? 'done' : 'failed', str(b.result, 4000) || null, ok ? null : str(b.error, 2000) || 'no reason given', JSON.stringify(built)],
   );
   if (!r.rows[0]) return { ok: false, reason: 'not_approved', message: `${id} is not waiting on a result.` };
   await log('genie_approval_finished', id, 'genie', { ok, server: r.rows[0].server, tool: r.rows[0].tool, error: ok ? null : str(b.error, 500) });
+  await log('genie_build_built', id, 'genie', { ok, server: r.rows[0].server, tool: r.rows[0].tool });
+  return { ok: true, rate_by: r.rows[0].requester ?? null };
+}
+
+/** Where the rating message sits, so Genie can rewrite it once rated. */
+export async function setRateCard(b: Row): Promise<Row> {
+  await query(`UPDATE engine_genie_approvals SET rate_ts = $2 WHERE id = $1`, [str(b.id, 60), str(b.rate_ts, 40) || null]);
   return { ok: true };
+}
+
+/**
+ * The asker's rating (10.9). Only the asker, Destiny or Jason; once; only on a build that ran. A rating is the
+ * vote on every pattern the build used (an extend): useful is an up, not useful is a down with its reason.
+ */
+export async function rate(b: Row): Promise<Row> {
+  const id = str(b.id, 60);
+  const who = str(b.rater, 40);
+  const rating = str(b.rating, 12);
+  if (!(RATINGS as readonly string[]).includes(rating)) throw new ApprovalError(422, 'rating is useful, partly or not_useful.');
+  const reason = rating === 'not_useful' ? (['wrong', 'outdated', 'misrouted'].includes(str(b.reason, 12)) ? str(b.reason, 12) : 'not_useful') : null;
+  const r = await query<Row>(`SELECT * FROM engine_genie_approvals WHERE id = $1`, [id]);
+  const row = r.rows[0];
+  if (!row) return { ok: false, reason: 'not_found', message: `No build ${id}.` };
+  if (who !== row.requester && !APPROVERS.has(who)) return { ok: false, reason: 'not_permitted', message: 'Only the person who asked, Destiny or Jason can rate this build.' };
+  if (row.status !== 'done' && row.status !== 'failed') return { ok: false, reason: 'not_built', message: 'Only a build that ran can be rated.' };
+  const claimed = await query<Row>(
+    `UPDATE engine_genie_approvals SET rating = $2, rating_reason = $3, rated_by = $4, rated_at = now() WHERE id = $1 AND rating IS NULL RETURNING id`,
+    [id, rating, reason, who],
+  );
+  if (!claimed.rows[0]) return { ok: false, reason: 'already_rated', message: `Already rated ${String(row.rating)}.` };
+  await log('genie_build_rated', id, who, { rating, reason });
+  const used = (((row.plan as Row | null)?.patterns_used as string[] | undefined) ?? []);
+  const thread = row.thread_ts ? `${String(row.channel_id)}:${String(row.thread_ts)}` : null;
+  for (const p of used) {
+    if (rating === 'useful') await trust.vote({ pattern_id: p, kind: 'up', reason: 'rated_useful', voter: who, thread, source_ref: `${id}:rating` });
+    if (rating === 'not_useful') await trust.vote({ pattern_id: p, kind: 'down', reason: reason ?? 'not_useful', voter: who, thread, source_ref: `${id}:rating` });
+  }
+  return { ok: true, id, rating, reason, channel_id: row.channel_id, rate_ts: row.rate_ts };
 }
 
 /** Requests past 24 hours with no answer. Genie rewrites their cards. */
 export async function expire(): Promise<Row> {
   const r = await query<Row>(`UPDATE engine_genie_approvals SET status = 'expired' WHERE status = 'pending' AND expires_at <= now() RETURNING id, server, tool, channel_id, card_ts, summary`);
   for (const row of r.rows) await log('genie_approval_expired', String(row.id), 'genie', { server: row.server, tool: row.tool });
-  return { ok: true, expired: r.rows };
+  const unrated = await query<Row>(
+    `UPDATE engine_genie_approvals SET rating = 'not_rated', rated_at = now()
+      WHERE status IN ('done','failed') AND rating IS NULL AND finished_at <= now() - ($1 || ' hours')::interval
+      RETURNING id, channel_id, rate_ts`,
+    [String(RATE_WITHIN_HOURS)],
+  );
+  for (const row of unrated.rows) await log('genie_build_rated', String(row.id), 'genie', { rating: 'not_rated' });
+  return { ok: true, expired: r.rows, not_rated: unrated.rows };
 }
 
 export async function list(): Promise<Row[]> {
-  const r = await query<Row>(`SELECT id, server, tool, summary, channel_id, thread_ts, requester, status, decided_by, decided_at, result, error, created_at, finished_at
+  const r = await query<Row>(`SELECT id, server, tool, summary, channel_id, thread_ts, requester, status, decided_by, decided_at, result, error, created_at, finished_at,
+            plan, choice, built, rating, rating_reason, rated_by, rated_at
       FROM engine_genie_approvals ORDER BY created_at DESC LIMIT 100`);
   return r.rows;
+}
+
+/** Expiry and the 48-hour not_rated mark, every 15 minutes (19 Nov 2026: nothing called expire() on a timer before). */
+let timer: NodeJS.Timeout | null = null;
+export function startSweeping(): void {
+  if (timer) return;
+  const tick = () => {
+    timers.beat('genie approvals sweep');
+    expire()
+      .then((r) => {
+        const e = (r.expired as unknown[]).length, n = (r.not_rated as unknown[]).length;
+        if (e || n) console.log(`[genie-approvals] ${e} request(s) expired, ${n} build(s) marked not rated`);
+      })
+      .catch((err) => console.error(`[genie-approvals] sweep failed: ${err instanceof Error ? err.message : String(err)}`));
+  };
+  setTimeout(tick, 60_000).unref();
+  timer = setInterval(tick, 15 * 60_000);
+  timer.unref();
 }

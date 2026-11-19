@@ -4985,3 +4985,24 @@ export interface OutsideSource { source_id: string; kind: string; name: string |
 export interface OutsideSourceChange { change_id: string; source_id: string; tune_date: string; action: string; from_hours: number | null; to_hours: number | null; reason: string; score: number; created_at: string; applied_at: string | null; error: string | null }
 export interface OutsideSourceCandidate { candidate_id: string; host: string; evidence: string[]; status: string; kind: string | null; feed_url: string | null; name: string | null; decided_by: string | null; decided_at: string | null; reason: string | null; added_source_id: string | null; added_at: string | null; proposed_at: string; seen_at: string }
 export interface OutsideSourcesData { rule: Record<string, number>; sources: OutsideSource[]; changes: OutsideSourceChange[]; candidates: OutsideSourceCandidate[] }
+
+/** The build trail (Genie rebuild 10.9, 19 Nov 2026): GET /api/genie/builds. */
+export interface GenieBuildMatch { kind: string; id: string; title: string; score: number; how: string }
+export interface GenieBuild {
+  id: string; server: string; tool: string; summary: string; status: string; created_at: string; decided_by: string | null; error: string | null;
+  plan: { goal: string | null; change: string; reuse: { ran: boolean; reason: string | null; summary: string; matches: GenieBuildMatch[] }; patterns_used: string[] } | null;
+  choice: string | null; built: { ok: boolean; what: string | null; error: string | null; at: string } | null;
+  rating: string | null; rating_reason: string | null; rated_by: string | null; rated_at: string | null;
+}
+export interface GenieBuildsData { ok: true; builds: GenieBuild[] }
+
+/** The pattern trust record (Genie rebuild 10.11, 19 Nov 2026): GET /api/pattern-trust. */
+export interface PatternTrustRow { pattern_id: string; name: string; shown: number; ups: number; downs: number; misrouted: number; score: number | null; demoted: boolean }
+export interface PatternTrustData {
+  ok: true;
+  rule: { window_days: number; score_days: number; min_downs: number; min_voters: number; min_shown: number; min_down_share: number; incident_days: number };
+  trusted_first: PatternTrustRow[]; all: PatternTrustRow[];
+  demoted: Array<{ pattern_id: string; name: string; why: string }>;
+  moves: Array<{ pattern_id: string; kind: string; reason: string | null; voter: string | null; thread: string | null; source_ref: string; at: string }>;
+  unscored_patterns: number;
+}
