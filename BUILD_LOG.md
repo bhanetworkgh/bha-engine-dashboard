@@ -15748,3 +15748,11 @@ Files:      server/src/outsideSources.ts (RULE.new_days 7 -> 3), server/test/out
 Problem:    rss_tune_runs 2026-11-19: counts {"none":195}, applied 0.
 Fix:        new_days 3. Each source has been read about five times by now.
 Decision:   Destiny chose 3 days over waiting for Saturday, so the first move is proved today.
+
+## 2026-11-19 11:40 — Intent-check incidents that fixed themselves close themselves (Genie rebuild 9.3)
+Intent:     28 of the 48 incidents a person closed in two weeks were Bays intent-check incidents, and I closed them after checking by hand that Bays' next try had worked. Make the engine do that check and close them.
+Files:      server/src/intentHeal.ts (new), server/src/intentCheck.ts, server/src/selfHealing.ts, server/src/timers.ts, server/src/index.ts, server/test/intent-heal.test.cjs, package.json, CLAUDE.md
+Problem:    The plan said "the same ask passed within 30 minutes", which matched 11 past incidents. Reading the actions showed that was wrong for 10 of them: on 13 Nov the pass was a different watch (DQ1P) from the seven that missed (BEFG, CJU1 …); on 16 Nov the pass was close_decision_watch after a missed update_record; on 17 Nov (AGENT-117) the pass was a different new loop, and the ask never landed.
+Fix:        The rule needs the same ask, the same tool and the same record named in the action, and the write behind the pass must have landed on engine_mcp_writes. A write naming no record is never closed by it. On the past data only AGENT-120 (GAJV, check IC-1794999023001-D84A, audit 7029, 70 seconds later) meets it; it was already closed by a person, so it gets a backfilled event and the ledger is left alone.
+Decision:   Strict over generous: closing an incident on a pass that was not the fix would count work as done that was not, which is the failure the scorecard exists to stop.
+

@@ -96,7 +96,7 @@ function percentiles(minutes: number[]): { n: number; p50_minutes: number | null
 
 export interface AutoFix {
   key: string;
-  kind: 'retry_recovered' | 'repair_standing' | 'recovery_rerun' | 'one_off_closed' | 'incident_self_healed';
+  kind: 'retry_recovered' | 'repair_standing' | 'recovery_rerun' | 'one_off_closed' | 'incident_self_healed' | 'intent_retry_passed';
   at: string;
   incident_id: string | null;
   workflow: string | null;
@@ -136,7 +136,7 @@ export async function scorecard(opts: { weeks?: number } = {}) {
   for (let i = n - 1; i >= 0; i--) weeks.push(addDays(thisWeek, -7 * i));
   const from = weeks[0];
 
-  const [runs, inc, retries, repairs, recov, oneOffs, routed] = await Promise.all([
+  const [runs, inc, retries, repairs, recov, oneOffs, routed, intentHealed] = await Promise.all([
     query<{ week: string; runs: number; failed: number }>(
       `SELECT to_char(date_trunc('week', nullif(started_at, '')::timestamptz AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS week, count(*)::int AS runs,
               count(*) FILTER (WHERE status = ANY($3))::int AS failed
@@ -172,6 +172,10 @@ export async function scorecard(opts: { weeks?: number } = {}) {
          FROM engine_events WHERE event_type = 'self_healer_routed' AND at >= $1::date GROUP BY 1, 2 ORDER BY 3 DESC`,
       [from],
     ),
+    // A Bays intent-check incident whose same ask then passed and landed on the same record (intentHeal, 19 Nov 2026).
+    query<{ subject_id: string; at: string }>(
+      `SELECT subject_id, at::text AS at FROM engine_events WHERE event_type = 'intent_check_self_healed' AND subject_id IS NOT NULL`,
+    ),
   ]);
 
   const incidentByExec = new Map<string, string>();
@@ -182,6 +186,7 @@ export async function scorecard(opts: { weeks?: number } = {}) {
     ...repairs.rows.map((r) => ({ key: r.execution_id ? `EXEC-${r.execution_id}` : r.repair_id, kind: 'repair_standing' as const, at: new Date(r.at).toISOString(), incident_id: null, workflow: r.workflow })),
     ...recov.rows.map((r) => ({ key: r.incident_id, kind: 'recovery_rerun' as const, at: new Date(r.at).toISOString(), incident_id: r.incident_id, workflow: r.workflow })),
     ...oneOffs.rows.map((r) => ({ key: r.subject_id, kind: 'one_off_closed' as const, at: new Date(r.at).toISOString(), incident_id: r.subject_id, workflow: r.workflow })),
+    ...intentHealed.rows.map((r) => ({ key: r.subject_id, kind: 'intent_retry_passed' as const, at: new Date(r.at).toISOString(), incident_id: r.subject_id, workflow: 'Bays intent check (dashboard)' })),
     ...inc.rows.filter((i) => String(i.resolution_status).toLowerCase() === 'self_healed').map((i) => ({ key: i.incident_id, kind: 'incident_self_healed' as const, at: i.resolved_at ?? i.occurred_at, incident_id: i.incident_id, workflow: i.workflow })),
   ];
   const allFixes = dedupeFixes(raw, incidentByExec);

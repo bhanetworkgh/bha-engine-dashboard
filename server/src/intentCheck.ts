@@ -32,6 +32,7 @@ import * as mirror from './mirror';
 import * as events from './events';
 import * as engineEvents from './engineEvents';
 import { PEOPLE } from './mcp/northStarTools';
+import * as intentHeal from './intentHeal';
 
 /** Which agents are checked. Bays is the one turning founder and builder asks into actions. */
 export const CHECKED_AGENTS = new Set(['bays']);
@@ -613,6 +614,8 @@ export async function gate(agent: string, tool: string, rawArgs: Args): Promise<
   }
   if (v.match) {
     await record({ agent, tool, ask_key: ask.key, ask_source: ask.source, ask_excerpt: ask.text, action, verdict: 'match', reason: v.reason, asked: v.asked, provider: v.provider, attempt: 0 });
+    // A pass after a repeated miss may be the fix: look once its write has landed (intentHeal, 19 Nov 2026).
+    if (await priorMisses(agent, tool, ask.key) > 1) intentHeal.soon();
     return { refusal: null, args };
   }
 

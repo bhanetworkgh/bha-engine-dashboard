@@ -93,6 +93,7 @@ import * as reviewCard from './reviewCard';
 import * as paySuggest from './paySuggest';
 import * as logPrecheck from './logPrecheck';
 import * as intentCheck from './intentCheck';
+import * as intentHeal from './intentHeal';
 import * as layer0Notice from './layer0Notice';
 import * as baysAsks from './baysAsks';
 import * as scheduledRuns from './scheduledRuns';
@@ -3778,6 +3779,7 @@ async function boot(): Promise<void> {
     codexGap.startSweeping();
     changeAnnounce.startSweeping();
   heldPayWatch.startSweeping();
+    intentHeal.startSweeping();
     renewalReminder.startSweeping();
     codeCheckWatch.startSweeping();
     slackApps.startReading();

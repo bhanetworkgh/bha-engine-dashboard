@@ -143,6 +143,7 @@
     "test:codex-doc-delete": "node server/test/codex-doc-delete.test.cjs",
     "test:acceptance-check": "node server/test/acceptance-check.test.cjs",
     "test:outside-sources": "npm run build:server --silent && node server/test/outside-sources.test.cjs",
+    "test:intent-heal": "npm run build:server --silent && node server/test/intent-heal.test.cjs",
     "test:held-pay": "npm run build:server --silent && node server/test/held-pay.test.cjs"
   },
   "dependencies": {
