@@ -86,7 +86,7 @@ async function byCodex(work: string, excludeSubmission: string): Promise<Match[]
     `SELECT fields->>'Codex Entry ID' id, fields->>'Submission ID' sid, fields->>'Session Description' d, fields->>'Summary' sm
        FROM engine_codex_submissions
       WHERE fields->>'Jason Status' IN ('Approved','Input Added') AND COALESCE(fields->>'Codex Entry ID','') <> ''
-        AND updated_at > now() - ($1 || ' days')::interval`,
+        AND updated_at::timestamptz > now() - ($1 || ' days')::interval`, // updated_at is text on the mirror tables
     [String(RULE.codex_days)],
   );
   const out: Match[] = [];

@@ -15806,3 +15806,10 @@ Files:      server/src/reuseCheck.ts, patternTrust.ts, loopConvergence.ts (new);
 Problem:    Nothing called approval_expire on a timer, so an undecided Genie request only expired when someone clicked it; the 48-hour not-rated mark needed the same sweep.
 Fix:        genieApprovals.startSweeping every 15 minutes. Incident link joins an n8n build's workflow id to its name through engine_execution_runs, because incidents name the workflow (payload.workflow_or_scenario).
 Decision:   The reuse check at submission is a flag only, never a pay hold (Genie's deep think, request 472eca7d, and the design note). Demotion uses Genie's improved rule (distinct voters, exposure floor, recency, misrouted never counts) and retirement is always a person's.
+
+## 2026-11-19 18:20 — Reuse check failed on its first real Genie build
+Intent:     read the first real Genie build trail (GAP-1795108456399-AKG2, create_branch genie/trail-test).
+Files:      server/src/reuseCheck.ts
+Problem:    the plan, decision, build and rating message all landed, but the reuse check answered ran:false "operator does not exist: text > timestamp with time zone". The Codex step compared engine_codex_submissions.updated_at, which is text on the mirror tables, with now(). The test stub never ran SQL, so it passed.
+Fix:        updated_at::timestamptz in byCodex. The fixed query was run live first (338 approved logs in 90 days).
+Decision:   the check failing said so on the card and never blocked the build, which is the rule; only the SQL was wrong.
