@@ -144,6 +144,7 @@
     "test:acceptance-check": "node server/test/acceptance-check.test.cjs",
     "test:outside-sources": "npm run build:server --silent && node server/test/outside-sources.test.cjs",
     "test:intent-heal": "npm run build:server --silent && node server/test/intent-heal.test.cjs",
+    "test:ask-genie": "npm run build:server --silent && node server/test/ask-genie.test.cjs",
     "test:held-pay": "npm run build:server --silent && node server/test/held-pay.test.cjs"
   },
   "dependencies": {

@@ -248,6 +248,8 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         'read_outside_digest',
         // 2026-11-17 (Genie rebuild 7 and 8): one shared memory, and what every part of the engine is doing.
         'read_shared_memory', 'read_engine_activity', 'write_shared_memory',
+        // 2026-11-19 (Genie rebuild 10.1): GitHub, Render, n8n building and deep questions go to Genie, in the same thread.
+        'ask_genie',
         // 2026-11-05: a Stage 1 agreement to Destiny's or Jason's own DM, never through the agent.
         'send_agreement',
         // 2026-11-04: the Media Twin's drafts whole, so a reliability claim is read in full, never from its hook.

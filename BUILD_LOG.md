@@ -15756,3 +15756,10 @@ Problem:    The plan said "the same ask passed within 30 minutes", which matched
 Fix:        The rule needs the same ask, the same tool and the same record named in the action, and the write behind the pass must have landed on engine_mcp_writes. A write naming no record is never closed by it. On the past data only AGENT-120 (GAJV, check IC-1794999023001-D84A, audit 7029, 70 seconds later) meets it; it was already closed by a person, so it gets a backfilled event and the ledger is left alone.
 Decision:   Strict over generous: closing an incident on a pass that was not the fix would count work as done that was not, which is the failure the scorecard exists to stop.
 
+## 2026-11-19 11:55 — Bays hands GitHub, Render and deep questions to Genie (Genie rebuild 10.1)
+Intent:     The reverse of this morning's 8.1: a question Bays gets that is Genie's should reach Genie and be answered in the same thread.
+Files:      server/src/mcp/genieAskTools.ts (new), server/src/mcp/tools.ts, server/src/mcp/index.ts, server/test/ask-genie.test.cjs, package.json, CLAUDE.md; Genie repo src/server.ts, src/integrations/slack.ts, src/integrations/callbackDelivery.ts (commit 8aa435d)
+Problem:    Genie's service door answers to a callback URL, not a Slack thread, and its Bays router could hand a Bays-forwarded ask straight back to Bays.
+Fix:        Genie gets POST /api/genie/engine-ask, checked against the inbound key it already holds, which runs the ask through dispatchTrigger in the thread with fromEngine set, so the Bays hop is skipped and the ask is recorded with source bays. The dashboard's ask_genie checks the channel and the asker, calls it, and audits it.
+Decision:   No new key: the plan said one would be needed, but Genie's post-card route already checks the dashboard's inbound key, so the same key carries this.
+
