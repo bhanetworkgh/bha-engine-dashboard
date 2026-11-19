@@ -101,6 +101,27 @@ const srv = http.createServer((req, res) => {
   assert.equal((await dw.open({ ...base, thread_ts: '1.000001', wait_minutes: 5 })).reason, 'bad_wait');
   ok('a watch opens once per thread and owner, and refuses what it cannot watch');
 
+  /* 1b. 19 Nov 2026 (INC-BAYS.AGENT-117): one thread, one owner, two loops -> two watches; the same loop twice -> one. */
+  {
+    const nowIso = new Date().toISOString();
+    for (const id of ['LOOP-1795071778245-T1AA', 'LOOP-1795071778245-T2BB']) {
+      await query(`DELETE FROM engine_loops WHERE natural_id = $1`, [id]);
+      await query(`INSERT INTO engine_loops (natural_id, builder_id, created_time, fields, source, first_seen_at, updated_at) VALUES ($1, 'destiny', $2, $3::jsonb, 'engine', $2, $2)`, [id, nowIso, JSON.stringify({ loop_id: id, What: 'test loop ' + id, Status: 'Open' })]);
+    }
+    const two = { ...base, thread_ts: '1794956207.799159', record_kind: 'loops' };
+    const first = await dw.open({ ...two, record_id: 'LOOP-1795071778245-T1AA' });
+    assert.equal(first.ok && first.created, true);
+    const second = await dw.open({ ...two, decision: 'A different decision on a different loop in the same thread.', record_id: 'LOOP-1795071778245-T2BB' });
+    assert.equal(second.ok && second.created, true, 'a second loop in the same thread gets its own watch');
+    assert.notEqual(second.watch.watch_id, first.watch.watch_id);
+    const dup = await dw.open({ ...two, record_id: 'LOOP-1795071778245-T2BB' });
+    assert.equal(dup.ok && dup.created, false, 'the same loop asked twice lands on one watch');
+    assert.equal(dup.watch.watch_id, second.watch.watch_id);
+    await query(`UPDATE engine_decision_watches SET status = 'cancelled' WHERE watch_id = ANY($1)`, [[first.watch.watch_id, second.watch.watch_id]]);
+    await query(`DELETE FROM engine_loops WHERE natural_id = ANY($1)`, [['LOOP-1795071778245-T1AA', 'LOOP-1795071778245-T2BB']]);
+  }
+  ok('one open watch per thread, owner and linked loop (INC-BAYS.AGENT-117)');
+
   /* 2. not due: nothing posted. A dry run says so and changes nothing. */
   const key = `${CH}:1791733223.226019`;
   slack.threads[key] = [];

@@ -260,9 +260,13 @@ async function recordState(kind: string, id: string): Promise<{ found: boolean; 
 }
 
 /**
- * Opens a watch. A second ask for the same thread and owner while the first is
- * still open answers the first (`created: false`): Jason's messages routinely
- * reach Bays twice, once in the thread and once in a DM.
+ * Opens a watch. A second ask for the same thread, owner and linked record while
+ * the first is still open answers the first (`created: false`): Jason's messages
+ * routinely reach Bays twice, once in the thread and once in a DM.
+ * 19 Nov 2026 (INC-BAYS.AGENT-117): the linked record is part of the key. One
+ * message from Jason asked for two loops with a watch on each, in one thread, on
+ * one owner; the second watch was answered with the first (a different loop) and
+ * never made. A watch with no linked record keys on '' as before.
  */
 export async function open(input: OpenInput): Promise<OpenResult> {
   const decision = input.decision.trim();
@@ -286,7 +290,7 @@ export async function open(input: OpenInput): Promise<OpenResult> {
   }
 
   if (hasThread) {
-    const held = await query<WatchRow>(`SELECT * FROM engine_decision_watches WHERE channel_id = $1 AND thread_ts = $2 AND owner_user_id = $3 AND status = 'watching' LIMIT 1`, [input.channel_id, input.thread_ts, input.owner_user_id]);
+    const held = await query<WatchRow>(`SELECT * FROM engine_decision_watches WHERE channel_id = $1 AND thread_ts = $2 AND owner_user_id = $3 AND COALESCE(record_id, '') = $4 AND status = 'watching' LIMIT 1`, [input.channel_id, input.thread_ts, input.owner_user_id, hasRecord ? input.record_id : '']);
     if (held.rows[0]) return { ok: true, created: false, watch: held.rows[0], others: await otherOpen(input.owner_user_id, held.rows[0].watch_id) };
   }
   const id = newId();
@@ -324,10 +328,10 @@ export async function open(input: OpenInput): Promise<OpenResult> {
     ],
   );
   if (!r.rows[0]) {
-    // The unique index refused it: the same thread and owner, or the same auto key, landed a moment ago.
+    // The unique index refused it: the same thread, owner and record, or the same auto key, landed a moment ago.
     const again = input.auto_key
       ? await query<WatchRow>(`SELECT * FROM engine_decision_watches WHERE auto_key = $1 LIMIT 1`, [input.auto_key])
-      : await query<WatchRow>(`SELECT * FROM engine_decision_watches WHERE channel_id = $1 AND thread_ts = $2 AND owner_user_id = $3 AND status = 'watching' LIMIT 1`, [input.channel_id, input.thread_ts, input.owner_user_id]);
+      : await query<WatchRow>(`SELECT * FROM engine_decision_watches WHERE channel_id = $1 AND thread_ts = $2 AND owner_user_id = $3 AND COALESCE(record_id, '') = $4 AND status = 'watching' LIMIT 1`, [input.channel_id, input.thread_ts, input.owner_user_id, hasRecord ? input.record_id : '']);
     if (again.rows[0]) return { ok: true, created: false, watch: again.rows[0], others: await otherOpen(input.owner_user_id, again.rows[0].watch_id) };
     return { ok: false, reason: 'not_recorded', message: 'The watch could not be recorded.' };
   }
@@ -402,8 +406,8 @@ export async function reopen(watchId: string, by: string, reason: string, now = 
   if (!w) return { ok: false, reason: 'not_found', message: `No watch has the id "${watchId}". Use list_decision_watches to find it.` };
   if (w.status === 'watching') return { ok: false, reason: 'already_open', message: `${watchId} is already open.` };
   if (w.thread_ts) {
-    const held = await query<{ watch_id: string }>(`SELECT watch_id FROM engine_decision_watches WHERE channel_id = $1 AND thread_ts = $2 AND owner_user_id = $3 AND status = 'watching' AND watch_id <> $4 LIMIT 1`, [w.channel_id, w.thread_ts, w.owner_user_id, watchId]);
-    if (held.rows[0]) return { ok: false, reason: 'another_open', message: `${held.rows[0].watch_id} is already open on this thread for the same person. Add to that one with update_decision_watch rather than keeping two.` };
+    const held = await query<{ watch_id: string }>(`SELECT watch_id FROM engine_decision_watches WHERE channel_id = $1 AND thread_ts = $2 AND owner_user_id = $3 AND COALESCE(record_id, '') = COALESCE($5::text, '') AND status = 'watching' AND watch_id <> $4 LIMIT 1`, [w.channel_id, w.thread_ts, w.owner_user_id, watchId, w.record_id]);
+    if (held.rows[0]) return { ok: false, reason: 'another_open', message: `${held.rows[0].watch_id} is already open on this thread for the same person and record. Add to that one with update_decision_watch rather than keeping two.` };
   }
   const line = `reopened by ${by}: ${clip(reason, 300)} (was ${w.status}${w.close_reason ? `: ${clip(w.close_reason, 200)}` : ''})`;
   const r = await query<WatchRow>(

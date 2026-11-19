@@ -4852,6 +4852,16 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `CREATE INDEX IF NOT EXISTS engine_shared_memory_live ON engine_shared_memory (created_at DESC) WHERE removed_at IS NULL`,
     ],
   },
+  {
+    id: 142,
+    name: 'engine_decision_watches: one open watch per thread, owner AND linked record (19 Nov 2026, Destiny, INC-BAYS.AGENT-117)',
+    statements: [
+      `CREATE UNIQUE INDEX IF NOT EXISTS engine_decision_watches_open_thread_record
+         ON engine_decision_watches (channel_id, thread_ts, owner_user_id, (COALESCE(record_id, '')))
+         WHERE status = 'watching' AND thread_ts IS NOT NULL`,
+      `DROP INDEX IF EXISTS engine_decision_watches_open_thread`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
