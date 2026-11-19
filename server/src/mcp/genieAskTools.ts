@@ -29,7 +29,7 @@ export function argProblem(a: { channel_id: string; thread_ts: string; asked_by:
 export const askGenie: ToolDefinition = {
   name: 'ask_genie',
   description:
-    "Hand a question to Genie, which answers in the same Slack thread as Genie. Use it when someone asks you about GitHub (a repo, a PR, a commit), Render (a deploy, a service, its logs), building or fixing an n8n workflow, or anything that needs long, deep reasoning or a log or code review: those are Genie's. Pass the person's question in their own words, with anything Genie needs from the thread, the channel_id and thread_ts from your context block, and asked_by, the Slack id of the person who asked. Then tell the person in one line that you have handed it to Genie and it will answer here. Do not answer the question yourself as well. ok:false means it was not handed over: say why and tell the person to ask @Genie directly in the thread.",
+    "Hand a question to Genie, which answers in the same Slack thread as Genie. Use it when someone asks you about GitHub (a repo, a PR, a commit), Render (a deploy, a service, its logs), building or fixing an n8n workflow, or anything that needs long, deep reasoning or a log or code review: those are Genie's. Set deep: true for a second opinion, a high-stakes or architectural question, or a log or code review (this replaces Deep_Think: Genie answers it on Opus 5.5). Pass the person's question in their own words, with anything Genie needs from the thread, the channel_id and thread_ts from your context block, and asked_by, the Slack id of the person who asked. Then tell the person in one line that you have handed it to Genie and it will answer here. Do not answer the question yourself as well. ok:false means it was not handed over: say why and tell the person to ask @Genie directly in the thread.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -37,6 +37,7 @@ export const askGenie: ToolDefinition = {
       channel_id: { type: 'string', description: 'The Slack channel the ask came from (C… or G…).' },
       thread_ts: { type: 'string', description: 'The ts of the thread to answer in.' },
       asked_by: { type: 'string', description: 'The Slack id of the person who asked.' },
+      deep: { type: 'boolean', description: 'true for a second opinion, a high-stakes or architectural question, or a log or code review: Genie answers it on Opus 5.5. Leave it out for everything else.' },
       dry_run: { type: 'boolean', description: 'Check everything and hand nothing over.' },
     },
     required: ['question', 'channel_id', 'thread_ts', 'asked_by'],
@@ -51,6 +52,7 @@ export const askGenie: ToolDefinition = {
       asked_by: String(args.asked_by ?? '').trim(),
     };
     const dry = args.dry_run === true;
+    const deep = args.deep === true;
     const audit = await auditOpen({ tool: 'ask_genie', args, access: deps.access, kind: 'genie', requester: a.asked_by || null, dry_run: dry });
     const refuse = async (reason: string, message: string) => {
       await auditClose(audit, { outcome: 'refused', detail: `${reason}: ${message}` });
@@ -73,7 +75,7 @@ export const askGenie: ToolDefinition = {
       const res = await fetch(`${genieUrl()}/api/genie/engine-ask`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-dashboard-key': key },
-        body: JSON.stringify({ channel: a.channel_id, thread_ts: a.thread_ts, asked_by: a.asked_by, question: a.question, from: 'bays' }),
+        body: JSON.stringify({ channel: a.channel_id, thread_ts: a.thread_ts, asked_by: a.asked_by, question: a.question, from: 'bays', deep }),
         signal: AbortSignal.timeout(20_000),
       });
       status = res.status;
@@ -90,9 +92,9 @@ export const askGenie: ToolDefinition = {
     }
     await engineEvents.record({
       event_type: 'genie_handoff_requested', subject_id: `${a.channel_id}/${a.thread_ts}`, lane: 'GENIE', actor: 'bays',
-      detail: { from: 'bays', asked_by: a.asked_by, channel_id: a.channel_id, thread_ts: a.thread_ts, question: a.question.slice(0, 600), audit_id: audit },
+      detail: { from: 'bays', asked_by: a.asked_by, channel_id: a.channel_id, thread_ts: a.thread_ts, question: a.question.slice(0, 600), deep, audit_id: audit },
     }).catch(() => undefined);
-    await auditClose(audit, { outcome: 'applied', detail: `handed to Genie in ${a.channel_id}/${a.thread_ts}` });
+    await auditClose(audit, { outcome: 'applied', detail: `handed to Genie${deep ? ' (deep, Opus 5.5)' : ''} in ${a.channel_id}/${a.thread_ts}` });
     return { ok: true, handed_over: true, message: 'Handed to Genie. Genie answers in this thread; tell the person so in one line and do not answer it yourself.', audit_id: audit };
   },
 };

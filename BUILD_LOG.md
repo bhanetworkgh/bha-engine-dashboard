@@ -15763,3 +15763,10 @@ Problem:    Genie's service door answers to a callback URL, not a Slack thread, 
 Fix:        Genie gets POST /api/genie/engine-ask, checked against the inbound key it already holds, which runs the ask through dispatchTrigger in the thread with fromEngine set, so the Bays hop is skipped and the ask is recorded with source bays. The dashboard's ask_genie checks the channel and the asker, calls it, and audits it.
 Decision:   No new key: the plan said one would be needed, but Genie's post-card route already checks the dashboard's inbound key, so the same key carries this.
 
+
+## 2026-11-19 15:20 — ask_genie carries deep (Genie rebuild step 10.4)
+Intent:     replace Bays' Deep_Think (Opus 5.5 direct, Gemini backup) with a hand-over to Genie on the same model.
+Files:      server/src/mcp/genieAskTools.ts, CLAUDE.md; genie repo fc14319 (executionContext.ts, llmProvider.ts, server.ts, slack.ts, test/deepThinking.test.ts)
+Problem:    Genie answered every ask on Sonnet 5.5; Deep_Think used Opus 5.5, so a plain hand-over would have been a weaker second opinion.
+Fix:        ask_genie takes deep (boolean) and sends it to /api/genie/engine-ask; Genie runs a deep ask inside runWithDeepThinking, and the router uses the endpoint's deepModel (ANTHROPIC_DEEP_MODEL, default claude-opus-5-5) for every role on the Anthropic primary. The OpenRouter backup keeps its own models. The audit line and the genie_handoff_requested event say deep.
+Decision:   Destiny, 19 Nov: Opus 5.5 for reviewing is the right model. Deep_Think stays on Bays until a deep ask is proven, then comes off in 10.5. The local build could not run (no node_modules, no network); the router change was checked by a stand-in run.
