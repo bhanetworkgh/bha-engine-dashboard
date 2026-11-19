@@ -15770,3 +15770,10 @@ Files:      server/src/mcp/genieAskTools.ts, CLAUDE.md; genie repo fc14319 (exec
 Problem:    Genie answered every ask on Sonnet 5.5; Deep_Think used Opus 5.5, so a plain hand-over would have been a weaker second opinion.
 Fix:        ask_genie takes deep (boolean) and sends it to /api/genie/engine-ask; Genie runs a deep ask inside runWithDeepThinking, and the router uses the endpoint's deepModel (ANTHROPIC_DEEP_MODEL, default claude-opus-5-5) for every role on the Anthropic primary. The OpenRouter backup keeps its own models. The audit line and the genie_handoff_requested event say deep.
 Decision:   Destiny, 19 Nov: Opus 5.5 for reviewing is the right model. Deep_Think stays on Bays until a deep ask is proven, then comes off in 10.5. The local build could not run (no node_modules, no network); the router change was checked by a stand-in run.
+
+## 2026-11-19 16:55 — Genie runs the code review: the dashboard side (rebuild step 10.3)
+Intent:     Genie takes over the code review at submission, with its own GitHub, Render and n8n servers, so it needs the review's answer format and the records the review reads.
+Files:      server/src/codeReview.ts, server/src/index.ts, server/src/mcp/index.ts, server/test/genie-doctrine.test.cjs
+Problem:    The code review's answer format lives only in Submit Actions' Code Review Output Parser, and Genie's read token had neither find_records nor read_code_checks, both of which the review's brief tells it to use.
+Fix:        /api/engine/code-review/prepare answers schema too when with_schema is true, read live from that parser node (codeReview.reviewSchema). Genie's token gains find_records and read_code_checks, both reads.
+Decision:   The format is read from n8n, not copied, so Genie's check and n8n's fallback node cannot disagree on it.

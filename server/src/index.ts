@@ -1177,7 +1177,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         kind: 'codex',
         store: async (b) => ({ ...(await codeReview.prepare(b)), dry_run: true }),
         describe: (r) => `code review prepared${r.extra ? ` for an extra log, ${String(r.held)} held part(s) listed` : ''}`,
-        hint: 'POST { builder_user_id, builder_name?, session_url?, session_description?, summary?, transcript?, extra_of_day? } (or body_b64). Answers { brief, task }.',
+        hint: 'POST { builder_user_id, builder_name?, session_url?, session_description?, summary?, transcript?, extra_of_day?, with_schema? } (or body_b64). Answers { brief, task }, and schema (the Code Review Output Parser\'s, read from Submit Actions) when with_schema is true.',
       },
       /** After Jason approves (14 Nov 2026): one short summary of the Codex and the code review in the Codex entry's thread. */
       '/api/engine/code-review/thread-summary': {

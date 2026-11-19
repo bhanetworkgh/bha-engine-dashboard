@@ -398,6 +398,9 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-11-16 (Destiny, the Claude and ChatGPT Slack features): "where did we decide X?" is searched
         // in Slack itself, read as North Star's bot, the same read North Star uses.
         'read_slack',
+        // 2026-11-19 (Destiny, Genie rebuild 10.3): Genie runs the code review at submission, so it reads the records
+        // the review checks claims against: any loop, log or record, and the earlier code checks. Both reads.
+        'find_records', 'read_code_checks',
       ]),
     },
   ] as Array<Omit<AgentKey, 'secret'>>

@@ -17,6 +17,7 @@ import { query } from './pg';
 import * as slack from './slack';
 import { record } from './engineEvents';
 import * as payNote from './payNote';
+import * as n8n from './n8n';
 
 type Obj = Record<string, unknown>;
 
@@ -126,8 +127,18 @@ export function annotate(fields: Obj): Obj {
   };
 }
 
+/** The code review's answer format, read from `Code Review Output Parser` in `Bays — Submit Actions` (19 Nov 2026, rebuild
+ *  step 10.3): Genie runs the review and checks its answer against the format n8n's own node uses, so the two never drift. */
+export async function reviewSchema(): Promise<string> {
+  const w = await n8n.workflow('YTpezWSOIN6TNYcX');
+  const parser = (w.nodes as Obj[]).find((x) => x.name === 'Code Review Output Parser');
+  const schema = String(((parser?.parameters ?? {}) as Obj).inputSchema ?? '').replace(/^=/, '');
+  JSON.parse(schema);
+  return schema;
+}
+
 /** What the agent is told: the brief, and the log with, for an extra log, the pay held on earlier logs. */
-export async function prepare(b: Obj): Promise<{ brief: string; task: string; extra: boolean; held: number }> {
+export async function prepare(b: Obj): Promise<{ brief: string; task: string; extra: boolean; held: number; schema?: string }> {
   const builder = s(b.builder_user_id, 40);
   const extra = !!(b.extra_of_day && typeof b.extra_of_day === 'object');
   let heldLines: string[] = [];
@@ -144,7 +155,7 @@ export async function prepare(b: Obj): Promise<{ brief: string; task: string; ex
     `\nFull transcript:\n${s(b.transcript, 120000) || 'not given'}`,
     '\nCheck the claims against the live services and answer in the format.',
   ].filter(Boolean).join('\n');
-  return { brief: SUBMISSION_BRIEF, task, extra, held: heldLines.length };
+  return { brief: SUBMISSION_BRIEF, task, extra, held: heldLines.length, ...(b.with_schema === true ? { schema: await reviewSchema() } : {}) };
 }
 
 const hash = (v: unknown): string => createHash('sha256').update(typeof v === 'string' ? v : JSON.stringify(v ?? null)).digest('hex').slice(0, 16);
