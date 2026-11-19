@@ -4979,3 +4979,9 @@ export interface GenieControlTask {
 }
 export interface GenieControlAction { id: string; event_type: string; subject_id: string; actor: string | null; detail: Record<string, unknown> | null; at: string }
 export interface GenieControlsData { channels: GenieControlChannel[]; tasks: GenieControlTask[]; actions: GenieControlAction[] }
+
+/** BHA RSS's sources scored from real use (19 Nov 2026, Genie rebuild 8.8, server/src/outsideSources.ts). */
+export interface OutsideSource { source_id: string; kind: string; name: string | null; url: string; active: boolean; every_hours: number; base_every_hours: number | null; cited: number; used: number; score: number; used_where: Record<string, number>; decision: string; reason: string | null; tune_date: string; scored_at: string }
+export interface OutsideSourceChange { change_id: string; source_id: string; tune_date: string; action: string; from_hours: number | null; to_hours: number | null; reason: string; score: number; created_at: string; applied_at: string | null; error: string | null }
+export interface OutsideSourceCandidate { candidate_id: string; host: string; evidence: string[]; status: string; kind: string | null; feed_url: string | null; name: string | null; decided_by: string | null; decided_at: string | null; reason: string | null; added_source_id: string | null; added_at: string | null; proposed_at: string; seen_at: string }
+export interface OutsideSourcesData { rule: Record<string, number>; sources: OutsideSource[]; changes: OutsideSourceChange[]; candidates: OutsideSourceCandidate[] }

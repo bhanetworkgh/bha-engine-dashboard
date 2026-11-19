@@ -8,6 +8,9 @@
 import * as outside from '../outsideDigest';
 import * as mirror from '../mirror';
 import type { ToolDefinition } from './tools';
+import * as sources from '../outsideSources';
+import { auditClose, auditOpen } from './writeTools';
+
 
 export const readOutsideDigest: ToolDefinition = {
   name: 'read_outside_digest',
@@ -56,3 +59,62 @@ export const readOutsideDigest: ToolDefinition = {
 };
 
 export const OUTSIDE_READ_TOOLS: ToolDefinition[] = [readOutsideDigest];
+
+/**
+ * `read_outside_sources` and `decide_rss_candidate` (19 Nov 2026, Destiny — Genie rebuild 8.8, outsideSources.ts).
+ * The first is a read, both connections. The second is on the write connection, in no agent's scope, Destiny or
+ * Jason only: a candidate source joins BHA RSS's list only once a person approves it with its feed address.
+ */
+
+export const readOutsideSources: ToolDefinition = {
+  name: 'read_outside_sources',
+  description:
+    "BHA RSS's outside sources with their score from real use (cited in a digest, then used by Media Twin, Research Twin, North Star or Genie), how often each is read, every change to the list with its reason, and the candidate sources waiting on a person. Read only.",
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false, title: 'Read the outside sources and their scores' },
+  handler: async (_args, deps) => {
+    const t0 = Date.now();
+    const r = await sources.page();
+    await mirror.logWrite({ endpoint: 'mcp:read_outside_sources', kind: 'outside_sources', method: 'MCP', key_label: deps.access === 'write' ? 'MCP_WRITE_TOKEN' : 'MCP_SECRET', outcome: 'read', detail: `${(r.sources as unknown[]).length} sources`, ms: Date.now() - t0 });
+    return { ok: true, ...r };
+  },
+};
+
+export const decideRssCandidate: ToolDefinition = {
+  name: 'decide_rss_candidate',
+  description:
+    "Approves or declines a candidate outside source BHA RSS proposed. Destiny or Jason only (decided_by, a Slack id); refused on any agent token. approve needs kind (rss, youtube, linkedin or web) and feed_url (the https address BHA RSS reads); it joins the list on BHA RSS's next daily tune pass. decline needs a reason and is never proposed again. dry_run checks and writes nothing.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      candidate_id: { type: 'string', description: 'RSCAND-… id, from read_outside_sources.' },
+      decision: { type: 'string', enum: ['approve', 'decline'] },
+      decided_by: { type: 'string', description: "Destiny's or Jason's Slack id." },
+      kind: { type: 'string', enum: ['rss', 'youtube', 'linkedin', 'web'] },
+      feed_url: { type: 'string', description: 'The https address BHA RSS should read.' },
+      name: { type: 'string', description: 'A display name for the source.' },
+      reason: { type: 'string', description: 'Why; required to decline.' },
+      dry_run: { type: 'boolean' },
+    },
+    required: ['candidate_id', 'decision', 'decided_by'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false, title: 'Decide a candidate outside source' },
+  handler: async (args, deps) => {
+    if (deps.agent) return { ok: false, reason: 'not_permitted', message: 'A person decides candidate sources; this is refused on an agent token.' };
+    const audit = await auditOpen({ tool: 'decide_rss_candidate', args, access: deps.access, kind: 'outside_sources', requester: typeof args.decided_by === 'string' ? args.decided_by : null, dry_run: args.dry_run === true });
+    try {
+      const r = await sources.decideCandidate(args);
+      await auditClose(audit, { outcome: args.dry_run === true ? 'dry_run' : 'updated', detail: `${String(args.decision)} ${String(args.candidate_id)}`, natural_id: String(args.candidate_id) });
+      return { ...r, audit_id: audit };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      const refused = e instanceof sources.SourcesError;
+      await auditClose(audit, { outcome: refused ? 'refused' : 'failed', detail: message });
+      return { ok: false, reason: refused ? (e.status === 403 ? 'not_permitted' : 'refused') : 'error', message, audit_id: audit, ...(refused ? {} : { raise: true }) };
+    }
+  },
+};
+
+export const OUTSIDE_SOURCE_READ_TOOLS: ToolDefinition[] = [readOutsideSources];
+export const OUTSIDE_SOURCE_WRITE_TOOLS: ToolDefinition[] = [decideRssCandidate];

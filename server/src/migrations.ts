@@ -4862,6 +4862,60 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `DROP INDEX IF EXISTS engine_decision_watches_open_thread`,
     ],
   },
+  {
+    id: 143,
+    name: 'BHA RSS source scores, changes and candidates (19 Nov 2026, Destiny, Genie rebuild 8.8, outsideSources.ts)',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_rss_sources (
+        source_id text PRIMARY KEY,
+        kind text NOT NULL,
+        name text,
+        url text NOT NULL,
+        active boolean NOT NULL,
+        every_hours integer NOT NULL,
+        base_every_hours integer,
+        created_at timestamptz,
+        cited integer NOT NULL DEFAULT 0,
+        used integer NOT NULL DEFAULT 0,
+        score integer NOT NULL DEFAULT 0,
+        used_where jsonb NOT NULL DEFAULT '{}'::jsonb,
+        decision text NOT NULL,
+        reason text,
+        tune_date date NOT NULL,
+        scored_at timestamptz NOT NULL DEFAULT now()
+      )`,
+      `CREATE TABLE IF NOT EXISTS engine_rss_source_changes (
+        change_id text PRIMARY KEY,
+        source_id text NOT NULL,
+        tune_date date NOT NULL,
+        action text NOT NULL CHECK (action IN ('faster','slower','base','retire')),
+        from_hours integer,
+        to_hours integer,
+        reason text NOT NULL,
+        score integer NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        applied_at timestamptz,
+        error text,
+        UNIQUE (source_id, tune_date)
+      )`,
+      `CREATE TABLE IF NOT EXISTS engine_rss_candidates (
+        candidate_id text PRIMARY KEY,
+        host text NOT NULL UNIQUE,
+        evidence jsonb NOT NULL DEFAULT '[]'::jsonb,
+        status text NOT NULL CHECK (status IN ('proposed','approved','declined')),
+        kind text,
+        feed_url text,
+        name text,
+        decided_by text CHECK (decided_by IS NULL OR decided_by IN ('U0AEW3TBYH1','U0A9V97949F')),
+        decided_at timestamptz,
+        reason text,
+        added_source_id text,
+        added_at timestamptz,
+        proposed_at timestamptz NOT NULL DEFAULT now(),
+        seen_at timestamptz NOT NULL DEFAULT now()
+      )`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

@@ -28,7 +28,7 @@ import * as timers from './timers';
 export const ERROR_EVENT = 'rss_error_reported';
 export const DIGEST_EVENT = 'outside_digest_posted';
 export const MISSING_EVENT = 'outside_digest_missing';
-export const KINDS = ['source_failed', 'enrichment_failed', 'digest_failed', 'digest_not_delivered', 'pass_failed'] as const;
+export const KINDS = ['source_failed', 'enrichment_failed', 'digest_failed', 'digest_not_delivered', 'pass_failed', 'tune_failed'] as const;
 export type RssErrorKind = (typeof KINDS)[number];
 /** The digest covers the UTC day before and is written at 06:00 UTC; it counts as missing at 08:00 UTC. */
 export const RULE = { digest_due_hour_utc: 8, tick_minutes: 30 } as const;
@@ -48,6 +48,7 @@ const LABEL: Record<RssErrorKind, string> = {
   digest_failed: 'the daily digest could not be written',
   digest_not_delivered: 'the daily digest was written but did not reach the dashboard',
   pass_failed: 'a scheduler pass failed',
+  tune_failed: 'the daily source tuning (scores and read intervals) could not finish',
 };
 
 const str = (v: unknown, max: number): string => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, max) : '');

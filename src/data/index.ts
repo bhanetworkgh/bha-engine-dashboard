@@ -99,6 +99,7 @@ import type {
   CodeChecksData,
   GenieBuilderData,
   GenieControlsData,
+  OutsideSourcesData,
 } from './types';
 
 export * from './types';
@@ -718,6 +719,8 @@ export const getVfarmLeads = () => api<VfarmLeadsData>('/api/vfarm/leads');
 export const getGenie = () => api<GenieData>('/api/genie');
 export const getGenieBuilder = () => api<GenieBuilderData>('/api/genie/builder');
 export const getGenieControls = () => api<GenieControlsData>('/api/genie/controls');
+/** BHA RSS's sources, scores, changes and candidates (19 Nov 2026, Genie rebuild 8.8). */
+export const getOutsideSources = () => api<OutsideSourcesData>('/api/genie/sources');
 /** Bays' ask ledger: Slack turns, scheduled task runs and panel questions (2026-10-05). */
 export const getBays = () => api<BaysData>('/api/bays');
 export const getBaysReminders = () => api<BaysRemindersData>('/api/bays/reminders');

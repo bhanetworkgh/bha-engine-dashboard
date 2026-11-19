@@ -86,6 +86,7 @@ import * as narrationAudio from './narrationAudio';
 import * as outsideDigest from './outsideDigest';
 import * as rssReports from './rssReports';
 import * as genieControl from './genieControl';
+import * as outsideSources from './outsideSources';
 import * as sharedMemory from './sharedMemory';
 import * as genieApprovals from './genieApprovals';
 import * as reviewCard from './reviewCard';
@@ -989,6 +990,27 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         },
         describe: (r) => `outside digest ${r.digest_date ?? ''} ${r.dry_run ? 'dry run' : r.posted ? 'posted again' : `NOT posted: ${String(r.error ?? '')}`}`.slice(0, 400),
         hint: 'POST { digest_date? (newest held by default), confirm "REPOST <date>", dry_run? }. Posts it to #bha-engine-digests once more.',
+      },
+      /** BHA RSS's sources scored from real use, once a day after the digest (19 Nov 2026, Genie rebuild 8.8, outsideSources.ts). */
+      '/api/engine/outside-sources/score': {
+        kind: 'outside_sources',
+        store: async (b) => {
+          try {
+            return await outsideSources.score(b);
+          } catch (e) {
+            if (e instanceof outsideSources.SourcesError) throw new systemFeeds.FeedError(e.status, e.message);
+            throw e;
+          }
+        },
+        describe: (r) => `outside sources ${r.tune_date ?? ''} scored ${r.scored ?? 0}, ${Array.isArray(r.changes) ? r.changes.length : 0} change(s), ${Array.isArray(r.approved) ? r.approved.length : 0} approved candidate(s)`.slice(0, 400),
+        hint: 'POST { tune_date, history_days, sources: [{ id, kind, name, url, active, every_hours, base_every_hours, created_at, cited, cited_urls }], candidates: [{ host, evidence }], dry_run? }.',
+      },
+      /** What BHA RSS really changed after a score (19 Nov 2026, outsideSources.applied). */
+      '/api/engine/outside-sources/applied': {
+        kind: 'outside_sources',
+        store: async (b) => outsideSources.applied(b),
+        describe: (r) => `outside sources applied ${r.applied ?? 0}, failed ${r.failed ?? 0}, added ${r.added ?? 0}`.slice(0, 400),
+        hint: 'POST { tune_date, applied: [change_id], failed: [{ id, error }], added: [{ candidate_id, source_id }] }.',
       },
       /** Genie's controls: channel settings and memory, daily usage, recurring tasks (16 Nov 2026, genieControl.ts). */
       '/api/engine/genie-control': {
@@ -2472,6 +2494,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       /** Genie's controls for its page: channels, recurring tasks, the admin log (16 Nov 2026). */
       case '/api/genie/controls':
         return send(res, 200, await genieControl.page());
+      case '/api/genie/sources':
+        return send(res, 200, await outsideSources.page());
       case '/api/genie/builder':
         return send(res, 200, await genieBuilder.read({ rail_id: url.searchParams.get('rail_id') }));
       /** Bays' own ledger: Slack turns, scheduled task runs and panel questions (2026-10-05). */
