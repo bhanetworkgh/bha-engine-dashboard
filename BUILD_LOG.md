@@ -15741,3 +15741,10 @@ Files:      server/src/outsideSources.ts (new), server/src/migrations.ts (143: e
 Problem:    none at build. Local typecheck not possible (installs blocked); checked with the global tsc 7 against a copy of the config: the same 77 environment-only errors before and after the change. The pure rule run with node --experimental-strip-types on sample sources.
 Fix:        —
 Decision:   score = cited + 3 x used over 30 days. Cited is counted in BHA RSS (it holds the items); used is counted here (it holds the records). The dashboard decides, BHA RSS acts and confirms, so the page only shows a change BHA RSS really made. Retire and read-less wait for 30 and 14 days of digests, so with digests since 14 Nov only read-more and back-to-pace can happen yet, and the reason says so. Candidates need a person with the feed url, because a site's homepage is not a feed.
+
+## 2026-11-19 11:05 — BHA RSS tuning: judge a source from 3 days old
+Intent:     The first tune pass (09:51 UTC) scored 207 sources with real figures (The Verge 21, two Media Twin uses; MIT Technology Review 12; Farzad 9) but moved none: every source was added on 14 or 15 Nov and the rule skipped anything under 7 days old.
+Files:      server/src/outsideSources.ts (RULE.new_days 7 -> 3), server/test/outside-sources.test.cjs, CLAUDE.md.
+Problem:    rss_tune_runs 2026-11-19: counts {"none":195}, applied 0.
+Fix:        new_days 3. Each source has been read about five times by now.
+Decision:   Destiny chose 3 days over waiting for Saturday, so the first move is proved today.

@@ -29,8 +29,8 @@ export class SourcesError extends Error {
 export const RULE = {
   window_days: 30,
   used_weight: 3,
-  /** A source younger than this is left as it is: too new to judge. */
-  new_days: 7,
+  /** A source younger than this is left as it is: too new to judge (3 from 19 Nov 2026, Destiny; was 7). */
+  new_days: 3,
   /** Read twice as often: score at least this and in the top quarter of scored sources. */
   top_min_score: 3,
   top_share: 0.25,
