@@ -1,5 +1,6 @@
 /**
- * Reads of the services builders work on (4 Nov 2026, Destiny): GitHub, Render, Twilio, ElevenLabs and Stripe,
+ * Reads of the services builders work on (4 Nov 2026, Destiny): GitHub, Render, Twilio, ElevenLabs and Stripe
+ * (and Apify's usage from 19 Nov 2026),
  * so the automatic code check, Bays and the dashboard can see what is really live instead of what a log says.
  *
  * Every read is a GET to a path on an allowlist. A path that is not on the list is refused here, whatever the key
@@ -18,7 +19,7 @@ export const MAX_CHARS = 30_000;
 export const TIMEOUT_MS = 20_000;
 export const GITHUB_ORG = 'bhanetworkgh';
 
-export type Service = 'github' | 'render' | 'twilio' | 'elevenlabs' | 'stripe';
+export type Service = 'github' | 'render' | 'twilio' | 'elevenlabs' | 'stripe' | 'apify';
 
 const env = (k: string): string | null => process.env[k]?.trim() || null;
 const seg = '[A-Za-z0-9._-]+';
@@ -64,6 +65,13 @@ export const ALLOWED: Record<Service, RegExp[]> = {
     /^\/(events|payment_intents|charges|invoices|products|prices|webhook_endpoints)(\/[A-Za-z0-9_-]+)?$/,
     /^\/checkout\/sessions(\/[A-Za-z0-9_-]+)?$/,
   ],
+  // 19 Nov 2026 (Destiny): Apify's usage and runs, so BHA RSS's spend is read, not guessed. /users/me is on no
+  // list: it carries the proxy password.
+  apify: [
+    /^\/users\/me\/(limits|usage\/monthly)$/,
+    /^\/actor-runs(\/[A-Za-z0-9]+)?$/,
+    /^\/acts(\/[A-Za-z0-9~_.-]+(\/runs)?)?$/,
+  ],
 };
 
 export interface Refusal { ok: false; reason: string; message: string; raise?: boolean }
@@ -95,6 +103,10 @@ export function target(service: Service, path: string): { url: string; headers: 
   if (service === 'stripe') {
     const k = env('STRIPE_READ_KEY');
     return k ? { url: `https://api.stripe.com/v1${path}`, headers: { authorization: `Bearer ${k}` } } : { missing: 'STRIPE_READ_KEY' };
+  }
+  if (service === 'apify') {
+    const k = env('APIFY_READ_TOKEN');
+    return k ? { url: `https://api.apify.com/v2${path}`, headers: { authorization: `Bearer ${k}`, accept: 'application/json' } } : { missing: 'APIFY_READ_TOKEN' };
   }
   const sid = env('TWILIO_READ_KEY_SID');
   const secret = env('TWILIO_READ_KEY_SECRET');

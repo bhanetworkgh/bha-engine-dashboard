@@ -1,5 +1,5 @@
 /**
- * Reads of GitHub, Render, Twilio, ElevenLabs and Stripe over MCP, and Twilio changes for Destiny (4 Nov 2026,
+ * Reads of GitHub, Render, Twilio, ElevenLabs, Stripe and Apify over MCP, and Twilio changes for Destiny (4 Nov 2026,
  * Destiny). The rules are ../serviceReads.ts.
  *
  *   `read_github`, `read_render`, `read_twilio`, `read_elevenlabs`, `read_stripe`
@@ -53,6 +53,8 @@ export const readTwilio = reader('twilio', 'read_twilio', 'Read Twilio', 'Read B
 export const readElevenlabs = reader('elevenlabs', 'read_elevenlabs', 'Read ElevenLabs', 'Read the Customer Service Twin\'s voice agent on ElevenLabs. Read only. Paths: /convai/agents, /convai/agents/<id>, /convai/conversations (query agent_id), /convai/conversations/<id>, /convai/phone-numbers, /convai/tools.', 'For example /convai/conversations.');
 export const readStripe = reader('stripe', 'read_stripe', 'Read Stripe', 'Read BHA\'s Stripe account, to check a payment or a webhook. Read only; it can never charge, refund or pay out. Paths: /events, /payment_intents, /charges, /invoices, /products, /prices, /webhook_endpoints, each with /<id>, and /checkout/sessions.', 'For example /events.');
 
+export const readApify = reader('apify', 'read_apify', 'Read Apify', 'Read BHA\'s Apify account: what this month has cost and which Actor spent it. BHA RSS uses Apify for YouTube transcripts and LinkedIn posts. Read only; it starts no run. Paths: /users/me/limits (the month\'s cycle dates, usage so far in USD and the limits), /users/me/usage/monthly (cost per service, per day), /actor-runs (query desc=1, limit; each run carries usageTotalUsd), /actor-runs/<id>, /acts, /acts/<id>/runs. Say which cycle a figure is for.', 'For example /users/me/limits.');
+
 export const twilioAdmin: ToolDefinition = {
   name: 'twilio_admin',
   description: `Work on BHA's Twilio account for Destiny, including what read_twilio cannot see, such as A2P and Trust Hub. method GET, POST or DELETE. path: under the account (/Messages.json, /IncomingPhoneNumbers/<sid>.json) or on a product host (/messaging/v1/..., /trusthub/v1/..., /voice/v1/..., /numbers/v2/...). params: form values, or the query for a GET. A GET runs at once. A POST or DELETE changes nothing until it is called again with confirm set to exactly "<METHOD> <path>", once the person has seen the preview: it can send real texts to customers, repoint a live number or release one. Use it only when Destiny or Jason asks for that change. requester_user_id is theirs. Refused on any agent token. Audited on engine_mcp_writes.`,
@@ -96,5 +98,5 @@ export const twilioAdmin: ToolDefinition = {
   },
 };
 
-export const SERVICE_READ_TOOLS: ToolDefinition[] = [readGithub, readRender, readTwilio, readElevenlabs, readStripe];
+export const SERVICE_READ_TOOLS: ToolDefinition[] = [readGithub, readRender, readTwilio, readElevenlabs, readStripe, readApify];
 export const SERVICE_WRITE_TOOLS: ToolDefinition[] = [twilioAdmin];

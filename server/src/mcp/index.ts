@@ -160,6 +160,8 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
       tools: new Set([
         // 2026-11-14 (D4): the daily outside digest from BHA RSS, the one read of outside sources.
         'read_outside_digest',
+        // 2026-11-19 (Destiny): what Apify (BHA RSS's transcripts and LinkedIn) has cost this month. Read only.
+        'read_apify',
         // 2026-11-17 (Genie rebuild 7 and 8): one shared memory, and what every part of the engine is doing.
         'read_shared_memory', 'read_engine_activity',
         'read_slack', 'read_open_loops', 'get_priority_evidence', 'find_records', 'get_page_data',
@@ -311,6 +313,8 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-11-04 (Destiny): Bays checks a claim against the live source: commit numbers, deploys, calls,
         // payments. Read only, allowlisted paths; people's numbers and emails are masked on an agent's token.
         'read_github', 'read_render', 'read_twilio', 'read_elevenlabs', 'read_stripe',
+        // 2026-11-19 (Destiny): "how much Apify is left this month?" asked in Slack. Usage and runs, read only.
+        'read_apify',
         // 2026-11-04 (Destiny): the automatic code check runs on this token. Only the finished check comes back
         // here; Destiny's Approve is what posts it.
         'submit_code_check_draft',

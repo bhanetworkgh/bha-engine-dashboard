@@ -58,6 +58,8 @@ services:
         sync: false
       - key: STRIPE_READ_KEY
         sync: false
+      - key: APIFY_READ_TOKEN
+        sync: false
       - key: SESSION_SECRET
         generateValue: true
       # The company n8n instance. n8n.arupiautomates.cloud is retired; the

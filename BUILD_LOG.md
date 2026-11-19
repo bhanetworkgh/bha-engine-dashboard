@@ -15827,3 +15827,10 @@ Files:      server/src/rssReports.ts (kind service_blocked); bha-rss src/enrich.
 Problem:    From 20:10 UTC every YouTube source posted its own enrichment_failed card: "Apify automation-lab~youtube-transcript answered 403: platform-feature-disabled ... You've used the $5.00 of monthly usage included in the Free plan". CoinDesk posted one for ten articles answering 429.
 Fix:        The first blocked Apify answer (402, or 403/429 naming the plan or usage) holds every Apify call for 6 hours and sends one service_blocked card for the account; items are still saved, without transcripts or LinkedIn posts. A 429 on an article stops article reads on that site for the run, keeps the feed text and reports nothing.
 Decision:   The Apify plan itself is a billing step for a person (top up or upgrade at console.apify.com/billing); nothing here changes it.
+
+## 2026-11-19 21:55 — read_apify and the Apify usage watch
+Intent:     Destiny is moving Apify to the $19 Starter plan and wants to know before the month runs out, not after.
+Files:      server/src/serviceReads.ts, server/src/mcp/serviceTools.ts, server/src/mcp/index.ts (Bays and Genie scopes), server/src/apifyUsage.ts (new), server/src/index.ts, server/src/timers.ts, server/test/apify-usage.test.cjs, package.json, render.yaml, CLAUDE.md
+Problem:    The free plan's $5 ran out on 19 Nov at about 14:40 UTC ("You've used the $5.00 of monthly usage included in the Free plan"), five days after BHA RSS started; nothing in the engine could read Apify's usage.
+Fix:        read_apify on APIFY_READ_TOKEN (usage, limits, runs; /users/me refused). An hourly watch posts at 50/80/100% of the plan's included credit and once when the month is on pace to run out early.
+Decision:   The budget is read from Apify (plan.monthlyUsageCreditsUsd), never typed here, so a plan change needs no deploy. No included credit read means no line, not a guess.
