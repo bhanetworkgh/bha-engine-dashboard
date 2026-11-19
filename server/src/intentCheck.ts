@@ -677,6 +677,8 @@ export async function answerCheck(b: Record<string, unknown>): Promise<AnswerVer
   if (!reply.trim()) return { answers: false, reason: 'The reply is empty.', checked: 'phrase', provider: null, error: null };
   if (NON_ANSWER.test(reply.slice(0, 400))) return { answers: false, reason: `The reply opens by saying there is nothing to answer: "${clip(reply.replace(/\s+/g, ' '), 160)}"`, checked: 'phrase', provider: null, error: null };
   if (!ask.trim()) return { answers: true, reason: 'No message was given to check against.', checked: 'unchecked', provider: null, error: 'no ask' };
+  const handed = await handedToGenie(b, reply);
+  if (handed) return handed;
   // Genie's replies are checked the same way (16 Nov 2026, Genie rebuild step 4.6); Bays is the default.
   const agent = b.agent === 'Genie' || b.agent === 'North Star' ? b.agent : 'Bays';
   const id = AGENT_SLACK_IDS[agent];
@@ -684,6 +686,25 @@ export async function answerCheck(b: Record<string, unknown>): Promise<AnswerVer
   const v = await askAnswerModel(`${who}The message:\n${ask}\n\n${agent}'s reply:\n${reply}`, ANSWER_SYSTEM.replace(/\bBays\b(?! Horizon)/g, agent));
   if (v.checked === 'unchecked') await uncheckedSeen('answer_check', v.error || 'unknown', `AC-${Date.now()}-${randomUUID().slice(0, 4)}`);
   return v;
+}
+
+/** A reply that only says Bays handed the question to Genie (19 Nov 2026, Genie rebuild 10.5): it answers the
+ * message when ask_genie really did hand this thread over in the last 15 minutes, because Genie answers there.
+ * Judged as a non-answer, the retry made Bays answer too (execution 99724, two answers in one thread). Only Bays,
+ * only with the thread given, and only on a genie_handoff_requested event for that same channel and thread. */
+export const HANDOFF_SAID = /\b(handed|handing|passed|passing|sent|sending)\b[^.\n]{0,40}\bto genie\b|\bgenie (will|'ll|is going to) answer\b/i;
+export async function handedToGenie(b: Record<string, unknown>, reply: string): Promise<AnswerVerdict | null> {
+  if (b.agent && b.agent !== 'Bays') return null;
+  const channel = typeof b.channel_id === 'string' ? b.channel_id.trim() : '';
+  const thread = typeof b.thread_ts === 'string' ? b.thread_ts.trim() : '';
+  if (!channel || !thread || !HANDOFF_SAID.test(reply.slice(0, 600))) return null;
+  const { rows } = await query<{ n: string }>(
+    `select count(*)::text n from engine_events where event_type = 'genie_handoff_requested'
+       and detail->>'channel_id' = $1 and detail->>'thread_ts' = $2 and at > now() - interval '15 minutes'`,
+    [channel, thread],
+  );
+  if (Number(rows[0]?.n || 0) < 1) return null;
+  return { answers: true, reason: 'The reply hands the question to Genie, and the hand-off for this thread is on record: Genie answers in the thread.', checked: 'phrase', provider: null, error: null };
 }
 
 async function askAnswerModel(user: string, system: string = ANSWER_SYSTEM): Promise<AnswerVerdict> {
