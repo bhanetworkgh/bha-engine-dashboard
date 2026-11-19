@@ -94,13 +94,16 @@ export async function snapshot(): Promise<Snapshot> {
   if (!token) throw new Error('APIFY_READ_TOKEN is not set, so Apify cannot be read');
   const limits = await get('/users/me/limits', token);
   const me = await get('/users/me', token);
+  const usage = await get('/users/me/usage/monthly', token).catch((e) => ({ error: e instanceof Error ? e.message : String(e) }) as Record<string, unknown>);
+  const svc = (usage.monthlyServiceUsage ?? {}) as Record<string, Record<string, unknown>>;
+  const svcLine = Object.entries(svc).map(([k, v]) => `${k}=${String(v.amountAfterVolumeDiscountUsd ?? v.baseAmountUsd)}`).join(', ');
   const cycle = (limits.monthlyUsageCycle ?? {}) as Record<string, unknown>;
   const current = (limits.current ?? {}) as Record<string, unknown>;
   const lim = (limits.limits ?? {}) as Record<string, unknown>;
   const plan = (me.plan ?? {}) as Record<string, unknown>;
   // One line per read: the figures only, and the field names when the plan's credit was not found,
   // so a missing figure says where to look rather than going quiet.
-  console.log(`[apify-usage] cycle ${String(cycle.startAt)} to ${String(cycle.endAt)}; used ${String(current.monthlyUsageUsd)}; plan ${String(plan.id)} credit ${String(plan.monthlyUsageCreditsUsd)}; limit ${String(lim.maxMonthlyUsageUsd)}; current ${JSON.stringify(current)}; limits ${JSON.stringify(lim)}`);
+  console.log(`[apify-usage] cycle ${String(cycle.startAt)} to ${String(cycle.endAt)}; used ${String(current.monthlyUsageUsd)}; plan ${String(plan.id)} credit ${String(plan.monthlyUsageCreditsUsd)}; limit ${String(lim.maxMonthlyUsageUsd)}; usage total ${String(usage.totalUsageCreditsUsdAfterVolumeDiscount)} (${svcLine})${usage.error ? `; usage read failed: ${String(usage.error)}` : ''}; usage fields ${Object.keys(usage).join(',')}`);
   return {
     cycle_start: String(cycle.startAt ?? ''),
     cycle_end: String(cycle.endAt ?? ''),
