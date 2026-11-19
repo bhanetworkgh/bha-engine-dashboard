@@ -28,7 +28,7 @@ import * as timers from './timers';
 export const ERROR_EVENT = 'rss_error_reported';
 export const DIGEST_EVENT = 'outside_digest_posted';
 export const MISSING_EVENT = 'outside_digest_missing';
-export const KINDS = ['source_failed', 'enrichment_failed', 'digest_failed', 'digest_not_delivered', 'pass_failed', 'tune_failed'] as const;
+export const KINDS = ['source_failed', 'enrichment_failed', 'digest_failed', 'digest_not_delivered', 'pass_failed', 'tune_failed', 'service_blocked'] as const;
 export type RssErrorKind = (typeof KINDS)[number];
 /** The digest covers the UTC day before and is written at 06:00 UTC; it counts as missing at 08:00 UTC. */
 export const RULE = { digest_due_hour_utc: 8, tick_minutes: 30 } as const;
@@ -49,6 +49,7 @@ const LABEL: Record<RssErrorKind, string> = {
   digest_not_delivered: 'the daily digest was written but did not reach the dashboard',
   pass_failed: 'a scheduler pass failed',
   tune_failed: 'the daily source tuning (scores and read intervals) could not finish',
+  service_blocked: 'an outside service BHA RSS pays for has blocked it (a usage limit or a billing hold)',
 };
 
 const str = (v: unknown, max: number): string => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, max) : '');
@@ -103,7 +104,7 @@ export function errorMessage(e: RssErrorInput): { text: string; blocks: unknown[
   if (fields.length) blocks.push({ type: 'section', fields });
   if (e.source_url) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*Address*\n${esc(e.source_url)}` } });
   blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*What broke*\n${esc(e.error)}` } });
-  blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*What happens next*\n${e.kind === 'source_failed' || e.kind === 'enrichment_failed' ? 'The source is read again on its next run. This card is said once a day per source, so a source that keeps failing needs fixing or switching off.' : 'The digest step runs again on its next pass. If it is still missing by 08:00 UTC it is said here again.'}` } });
+  blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*What happens next*\n${e.kind === 'service_blocked' ? 'BHA RSS stops calling it, keeps saving every item without what it gave, and tries again every 6 hours. One card a day for the whole service, not one per source. A person tops up or upgrades the plan to clear it.' : e.kind === 'source_failed' || e.kind === 'enrichment_failed' ? 'The source is read again on its next run. This card is said once a day per source, so a source that keeps failing needs fixing or switching off.' : 'The digest step runs again on its next pass. If it is still missing by 08:00 UTC it is said here again.'}` } });
   blocks.push({ type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'Open BHA RSS status' }, url: 'https://rss.bhanetwork.org/status' }] });
   return { text: `BHA RSS: ${LABEL[e.kind]}${e.source_name ? ` (${e.source_name})` : ''}: ${e.error}`, blocks };
 }

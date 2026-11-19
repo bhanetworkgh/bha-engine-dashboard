@@ -15820,3 +15820,10 @@ Files:      n8n Engine — Log Pre-Check (odqBzeoEE4OET7Is), published a8cc9748,
 Problem:    The pre-check still ran Layer 0 and Layer 1 on its own n8n agent nodes, so it could disagree with the Genie review a real submission now gets.
 Fix:        Completeness · Genie Check · POST and Layer 1 · Genie Review · POST call /api/genie/log-review (stages completeness and review) first; on ok:false the old nodes run (Genie raises the failure). Join nodes Completeness Done and Review Done keep one exit per group. Write The Answer names who checked and reviewed.
 Decision:   Proven on execution 99934 (parked for proof_type, 95%) and 99942 after the narration's proof line was fixed (ready, 100%), both checked and reviewed by Genie (claude-opus-5-5).
+
+## 2026-11-19 20:35 — BHA RSS: one card for a blocked Apify account, no card for a 429
+Intent:     Destiny: check and fix the Genie errors in #bha-pipeline-errors from 20:10 UTC.
+Files:      server/src/rssReports.ts (kind service_blocked); bha-rss src/enrich.js, src/collectors.js, test/enrich.test.js.
+Problem:    From 20:10 UTC every YouTube source posted its own enrichment_failed card: "Apify automation-lab~youtube-transcript answered 403: platform-feature-disabled ... You've used the $5.00 of monthly usage included in the Free plan". CoinDesk posted one for ten articles answering 429.
+Fix:        The first blocked Apify answer (402, or 403/429 naming the plan or usage) holds every Apify call for 6 hours and sends one service_blocked card for the account; items are still saved, without transcripts or LinkedIn posts. A 429 on an article stops article reads on that site for the run, keeps the feed text and reports nothing.
+Decision:   The Apify plan itself is a billing step for a person (top up or upgrade at console.apify.com/billing); nothing here changes it.
