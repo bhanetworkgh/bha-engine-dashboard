@@ -100,7 +100,7 @@ export async function snapshot(): Promise<Snapshot> {
   const plan = (me.plan ?? {}) as Record<string, unknown>;
   // One line per read: the figures only, and the field names when the plan's credit was not found,
   // so a missing figure says where to look rather than going quiet.
-  console.log(`[apify-usage] cycle ${String(cycle.startAt)} to ${String(cycle.endAt)}; used ${String(current.monthlyUsageUsd)}; plan ${String(plan.id)} credit ${String(plan.monthlyUsageCreditsUsd)}; limit ${String(lim.maxMonthlyUsageUsd)}${num(plan.monthlyUsageCreditsUsd) === null ? `; plan fields: ${Object.keys(plan).join(',')}; current fields: ${Object.keys(current).join(',')}` : ''}`);
+  console.log(`[apify-usage] cycle ${String(cycle.startAt)} to ${String(cycle.endAt)}; used ${String(current.monthlyUsageUsd)}; plan ${String(plan.id)} credit ${String(plan.monthlyUsageCreditsUsd)}; limit ${String(lim.maxMonthlyUsageUsd)}; current ${JSON.stringify(current)}; limits ${JSON.stringify(lim)}`);
   return {
     cycle_start: String(cycle.startAt ?? ''),
     cycle_end: String(cycle.endAt ?? ''),
