@@ -15813,3 +15813,10 @@ Files:      server/src/reuseCheck.ts
 Problem:    the plan, decision, build and rating message all landed, but the reuse check answered ran:false "operator does not exist: text > timestamp with time zone". The Codex step compared engine_codex_submissions.updated_at, which is text on the mirror tables, with now(). The test stub never ran SQL, so it passed.
 Fix:        updated_at::timestamptz in byCodex. The fixed query was run live first (338 approved logs in 90 days).
 Decision:   the check failing said so on the card and never blocked the build, which is the rule; only the SQL was wrong.
+
+## 2026-11-19 19:25 — Engine Log Pre-Check runs on Genie first
+Intent:     Destiny: the pre-check must grade a log the way Submit Actions now does (Genie rebuild 10.2).
+Files:      n8n Engine — Log Pre-Check (odqBzeoEE4OET7Is), published a8cc9748, restore point e3b54ef7. No dashboard code.
+Problem:    The pre-check still ran Layer 0 and Layer 1 on its own n8n agent nodes, so it could disagree with the Genie review a real submission now gets.
+Fix:        Completeness · Genie Check · POST and Layer 1 · Genie Review · POST call /api/genie/log-review (stages completeness and review) first; on ok:false the old nodes run (Genie raises the failure). Join nodes Completeness Done and Review Done keep one exit per group. Write The Answer names who checked and reviewed.
+Decision:   Proven on execution 99934 (parked for proof_type, 95%) and 99942 after the narration's proof line was fixed (ready, 100%), both checked and reviewed by Genie (claude-opus-5-5).
