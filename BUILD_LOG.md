@@ -15777,3 +15777,11 @@ Files:      server/src/codeReview.ts, server/src/index.ts, server/src/mcp/index.
 Problem:    The code review's answer format lives only in Submit Actions' Code Review Output Parser, and Genie's read token had neither find_records nor read_code_checks, both of which the review's brief tells it to use.
 Fix:        /api/engine/code-review/prepare answers schema too when with_schema is true, read live from that parser node (codeReview.reviewSchema). Genie's token gains find_records and read_code_checks, both reads.
 Decision:   The format is read from n8n, not copied, so Genie's check and n8n's fallback node cannot disagree on it.
+
+## 2026-11-19 17:10 — Genie runs the code review (rebuild step 10.3)
+Intent:     Move the code review at submission from the n8n Code Review agent to Genie, on Opus, with Genie's own read tools.
+Files:      genie: src/integrations/codeReview.ts (new), src/server.ts (POST /api/genie/code-review), src/tools/dashboardMcpTools.ts and src/dashboardMcp/allowlist.ts (find_records, read_code_checks, read_evidence, read_vfarm_history), src/tools/registry.ts and src/mcp/mcpToolAdapter.ts (each tool says read or write), test/codeReview.test.ts. n8n: Bays — Submit Actions draft (Code Review · Genie · POST, Genie Code Reviewed?, Genie Code Review As Agent, Genie Fallback · Back To Code Review Input; groups C1, C2, C2b-e).
+Problem:    First deploy (cd618c0) failed to build: "src/tools/dashboardMcpTools.ts(348,29): error TS2554: Expected 2-3 arguments, but got 1." Genie is on Zod 4, where z.record needs a key type.
+Fix:        z.record(z.string(), z.unknown()) (f6b266e), deployed dep-dbvhnfuq1p3s738irjh0, live.
+Decision:   Genie gets the brief, task and answer format from the dashboard (with_schema), so the review is n8n's word for word. It is offered read tools only (GitHub, Render, six n8n reads, the dashboard's records); Twilio, ElevenLabs and Stripe go under couldnt_check. Any failure falls back to the n8n Code Review agent and is raised in #bha-pipeline-errors. Submit Actions stays a draft until the step-10 change note.
+Test:       Execution 99618 (TEST workflow, archived) on Kavin's log U0BNQGG020Y_1795098985783: ok in 119s, 28 tool calls, valid against the parser's format, verdict overstated. It used 971k prompt tokens, because every step resends the whole history.
