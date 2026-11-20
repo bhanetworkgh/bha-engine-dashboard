@@ -179,7 +179,7 @@ async function cstSummary() {
   const loops = (await query<{ natural_id: string; status: string; what: string; owner: string | null; days: number }>(
     `WITH l AS (SELECT DISTINCT ON (natural_id) natural_id, fields, builder_id, updated_at FROM engine_loops ORDER BY natural_id, updated_at DESC)
      SELECT natural_id, fields->>'Status' AS status, split_part(fields->>'What', E'\\n', 1) AS what, COALESCE(fields->>'Assignee Slack User ID', builder_id) AS owner,
-            floor(extract(epoch FROM now() - updated_at) / 86400)::int AS days
+            floor(extract(epoch FROM now() - updated_at::timestamptz) / 86400)::int AS days
        FROM l WHERE fields->>'lane_tag' = 'CST' AND fields->>'Status' IN ('Open', 'In Progress') ORDER BY updated_at`,
   )).rows;
   const watches = Number((await query<{ n: string }>(`SELECT count(*) AS n FROM engine_decision_watches WHERE lane = 'CST' AND status IN ('watching', 'escalating') AND fixture = false`)).rows[0]?.n ?? 0);
