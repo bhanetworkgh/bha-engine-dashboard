@@ -15887,3 +15887,10 @@ Files:      server/src/mcp/slackTools.ts
 Problem:    send_nudge always posted with SLACK_BAYS_BOT_TOKEN, whoever called it. Audit 7535: agent genie, send_nudge applied, channel D0BDLU2H0TC (Destiny's DM with Bays). post_channel_message already posted as Genie on Genie's token; send_nudge did not.
 Fix:        On Genie's token send_nudge posts each DM through postAsGenie (Genie's own /api/genie/post-card, guarded: true, which already accepts a U… id and opens the DM as Genie). The cc line and the approval card name Genie as the sender, and the answer carries posted_as. The Bays path is unchanged.
 Decision:   post_file still uploads as Bays: Genie has no upload route yet, so a file from Genie needs that route first.
+
+## 2026-11-20 21:20 — read_media_posts answers what went live, compactly
+Intent:     Genie, asked in the sandbox (1795205290.239439) what went out on LinkedIn today, read twenty whole drafts and ran out of its time limit before finding the links, so it said it could not confirm a post that had gone out (MTP-1795180686497-CKBY, LinkedIn share 7529535203678212096).
+Files:      server/src/mediaPosts.ts (posted), server/src/mcp/mediaPostsTools.ts
+Problem:    read_media_posts had no way to ask only for what went live; its default answer is every draft's whole text.
+Fix:        posted_since (a date or time) and platform: one line per platform posted since then, newest first, with the draft id, time, live link and the opening of the text. Test drafts left out. Genie's planner sends "went out today" asks there (genie commit after f065417).
+Decision:   A new option on the existing read rather than a new tool, so every agent that already holds read_media_posts gets it.

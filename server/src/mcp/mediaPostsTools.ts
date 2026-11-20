@@ -17,7 +17,7 @@ const str = (args: Record<string, unknown>, key: string): string => (typeof args
 export const readMediaPosts: ToolDefinition = {
   name: 'read_media_posts',
   description:
-    'Read the Media Twin\'s drafts (media.post.v1), newest first: for each, the occasion and angle, the text for LinkedIn, X, Facebook and Instagram, the branded card and its image links, the claim check per platform (clean, flagged, target, blocked, with the sentence that tripped it and, on a target, which Stage 1 records are missing), Jason\'s Approve or Reject per platform with his note, the revision and the draft it replaced, the Slack card, and analytics once posting is on. Use it to see what is waiting on Jason, what he rejected and why (read the notes before rewriting a draft), and what has been approved. Each post\'s text comes back whole. Test drafts are left out unless include_test is true. Returns {schema, counts, posts, rules}.',
+    'Read the Media Twin\'s drafts (media.post.v1), newest first: for each, the occasion and angle, the text for LinkedIn, X, Facebook and Instagram, the branded card and its image links, the claim check per platform (clean, flagged, target, blocked, with the sentence that tripped it and, on a target, which Stage 1 records are missing), Jason\'s Approve or Reject per platform with his note, the revision and the draft it replaced, the Slack card, and analytics once posting is on. Use it to see what is waiting on Jason, what he rejected and why (read the notes before rewriting a draft), and what has been approved. Each post\'s text comes back whole. Test drafts are left out unless include_test is true. Returns {schema, counts, posts, rules}. For what went out (what was posted today, what went live on LinkedIn), pass posted_since (a date or time, e.g. today\'s date) and optionally platform: it answers one compact line per platform posted, with the live link, and nothing else.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -25,11 +25,16 @@ export const readMediaPosts: ToolDefinition = {
       status: { type: 'string', enum: ['in_review', 'partly_decided', 'approved', 'rejected', 'superseded'] },
       include_test: { type: 'boolean' },
       limit: { type: 'number', description: 'Drafts, newest first. Default 20, at most 100.' },
+      posted_since: { type: 'string', description: 'A date (YYYY-MM-DD, UTC) or time: answer only what went live since then, one line per platform with its link.' },
+      platform: { type: 'string', enum: ['linkedin', 'x', 'facebook', 'instagram'], description: 'With posted_since, one platform only.' },
     },
     additionalProperties: false,
   },
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false, title: 'Read the Media Twin drafts' },
-  handler: async (args) => ({
+  handler: async (args) =>
+    str(args, 'posted_since')
+      ? { ok: true, ...(await posts.posted({ since: str(args, 'posted_since'), platform: str(args, 'platform') || null, limit: typeof args.limit === 'number' ? args.limit : 50 })) }
+      : {
     ok: true,
     ...(await posts.read({
       post_id: str(args, 'post_id') || null,
@@ -37,7 +42,7 @@ export const readMediaPosts: ToolDefinition = {
       include_test: args.include_test === true,
       limit: Math.min(typeof args.limit === 'number' ? args.limit : 20, 100),
     })),
-  }),
+  },
 };
 
 export const editMediaPost: ToolDefinition = {
