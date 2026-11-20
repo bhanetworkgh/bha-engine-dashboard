@@ -14,6 +14,7 @@
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit && tsc -p tsconfig.server.json --noEmit",
     "test:admin-gate": "npm run build:server --silent && node server/test/admin-gate.test.cjs",
+    "test:digest-cost": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/digest-cost.test.cjs",
     "test:apify-usage": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/apify-usage.test.cjs",
     "test:service-reads": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/service-reads.test.cjs",
     "test:buyer-flow": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/buyer-flow.test.cjs",

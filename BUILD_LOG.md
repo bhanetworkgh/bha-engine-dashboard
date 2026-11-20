@@ -15834,3 +15834,10 @@ Files:      server/src/serviceReads.ts, server/src/mcp/serviceTools.ts, server/s
 Problem:    The free plan's $5 ran out on 19 Nov at about 14:40 UTC ("You've used the $5.00 of monthly usage included in the Free plan"), five days after BHA RSS started; nothing in the engine could read Apify's usage.
 Fix:        read_apify on APIFY_READ_TOKEN (usage, limits, runs; /users/me refused). An hourly watch posts at 50/80/100% of the plan's included credit and once when the month is on pace to run out early.
 Decision:   The budget is read from Apify (plan.monthlyUsageCreditsUsd), never typed here, so a plan change needs no deploy. No included credit read means no line, not a guess.
+
+## 2026-11-20 10:20 — The outside digest prints what its day cost; Apify in the tool registry
+Intent:     Jason approved Apify Starter (C0ATC4CA3G9 1795126079.876419) and asked for a week's real cost per day. Destiny: record Apify as a cost, and have the daily digest say what that day cost, so a month can be tracked.
+Files:      server/src/digestCost.ts (new), server/src/outsideDigest.ts, server/src/rssReports.ts, server/src/migrations.ts (145), server/test/digest-cost.test.cjs, package.json, CLAUDE.md; bha-rss src/digest.js and test/digest.test.js; Supabase rss_digests.model_cost_usd.
+Problem:    The digest card said how many items it read and nothing about cost; Apify was not in the registry.
+Fix:        Registry row apify (audit 7436): Starter, $19 monthly, renewal 2026-12-20 (Apify's cycle reads 20 Nov to 19 Dec 23:59 UTC). The dashboard reads the digest day's own Apify line and the cycle so far; BHA RSS asks OpenRouter for usage.cost and sends model_cost_usd. Both kept on engine_outside_digests.cost and printed at the card's foot.
+Decision:   A part that cannot be read is said, never nought; the total is printed only when both parts are known.

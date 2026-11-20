@@ -24,6 +24,7 @@ import { query } from './pg';
 import { getMeta, setMeta } from './db';
 import { record } from './engineEvents';
 import * as timers from './timers';
+import { costLine, forDay, type DigestCost } from './digestCost';
 
 export const ERROR_EVENT = 'rss_error_reported';
 export const DIGEST_EVENT = 'outside_digest_posted';
@@ -267,7 +268,7 @@ export function richSection(icon: string, heading: string, md: string): RichEl {
  * text lists"): a header with the day, the headline, the counts, then every section of the digest as a
  * rich text bullet list with its sources linked, and a footer saying where the full digest lives.
  */
-export function digestMessage(d: { digest_date: string; title: string; body: string; items_used: number; sources_used: number }): { text: string; blocks: unknown[] } {
+export function digestMessage(d: { digest_date: string; title: string; body: string; items_used: number; sources_used: number; cost?: DigestCost | null }): { text: string; blocks: unknown[] } {
   const day = new Date(`${d.digest_date}T00:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
   const headline = d.title.replace(/^Outside digest\s*--\s*\d{4}-\d{2}-\d{2}:?\s*/i, '').trim();
   const blocks: unknown[] = [
@@ -285,6 +286,7 @@ export function digestMessage(d: { digest_date: string; title: string; body: str
   }
   if (!found) blocks.push(richSection(':newspaper:', 'Digest', d.body));
   blocks.push({ type: 'divider' });
+  blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: costLine(d.cost) }] });
   blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: 'The full digest is in BHARAG. Media Twin, Research Twin, North Star, Genie and Bays read it with read_outside_digest.' }] });
   blocks.push({ type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'Open BHA RSS status' }, url: 'https://rss.bhanetwork.org/status' }] });
   const moved = section(d.body, 'What moved outside');
@@ -298,14 +300,19 @@ export function digestMessage(d: { digest_date: string; title: string; body: str
  */
 export async function repostDigest(b: Record<string, unknown>, opts: { post?: typeof post } = {}): Promise<Record<string, unknown>> {
   const want = str(b.digest_date, 10);
-  const held = await query<{ digest_date: string; title: string; body: string; items_used: number; sources_used: number }>(
+  const held = await query<{ digest_date: string; title: string; body: string; items_used: number; sources_used: number; cost?: DigestCost | null }>(
     want
-      ? 'SELECT digest_date::text, title, body, items_used, sources_used FROM engine_outside_digests WHERE digest_date = $1'
-      : 'SELECT digest_date::text, title, body, items_used, sources_used FROM engine_outside_digests ORDER BY digest_date DESC LIMIT 1',
+      ? 'SELECT digest_date::text, title, body, items_used, sources_used, cost FROM engine_outside_digests WHERE digest_date = $1'
+      : 'SELECT digest_date::text, title, body, items_used, sources_used, cost FROM engine_outside_digests ORDER BY digest_date DESC LIMIT 1',
     want ? [want] : [],
   );
   const d = held.rows[0];
   if (!d) throw new RssReportError(404, want ? `No digest for ${want} is held.` : 'No digest is held yet.');
+  // A digest stored before the cost line (20 Nov 2026) has none: Apify's part is read now and kept.
+  if (!d.cost && b.dry_run !== true) {
+    d.cost = await forDay(d.digest_date, null);
+    await query('UPDATE engine_outside_digests SET cost = $2 WHERE digest_date = $1', [d.digest_date, JSON.stringify(d.cost)]);
+  }
   if (b.dry_run === true) return { ok: true, dry_run: true, digest_date: d.digest_date, would_post_to: digestChannel(), blocks: digestMessage(d).blocks.length };
   if (str(b.confirm, 40) !== `REPOST ${d.digest_date}`) throw new RssReportError(422, `Send confirm "REPOST ${d.digest_date}" to post it again.`);
   const updateTs = /^\d+\.\d+$/.test(str(b.update_ts, 30)) ? str(b.update_ts, 30) : undefined;
@@ -323,7 +330,7 @@ export async function repostDigest(b: Record<string, unknown>, opts: { post?: ty
 }
 
 /** Called once the day's digest is stored; posts it once per day. Never throws. */
-export async function postDigest(d: { digest_date: string; title: string; body: string; items_used: number; sources_used: number }, opts: { post?: typeof post } = {}): Promise<Record<string, unknown>> {
+export async function postDigest(d: { digest_date: string; title: string; body: string; items_used: number; sources_used: number; cost?: DigestCost | null }, opts: { post?: typeof post } = {}): Promise<Record<string, unknown>> {
   try {
     const r = await claimAndPost(
       { event_type: DIGEST_EVENT, subject_id: d.digest_date, dedupe_key: `${DIGEST_EVENT}:${d.digest_date}`, detail: { title: d.title } },
@@ -349,8 +356,8 @@ export function dueDate(now: Date): string | null {
 export async function checkMissing(opts: { now?: Date; post?: typeof post } = {}): Promise<Record<string, unknown>> {
   const date = dueDate(opts.now ?? new Date());
   if (!date) return { checked: false, reason: 'not_due' };
-  const held = await query<{ digest_date: string; title: string; body: string; items_used: number; sources_used: number }>(
-    'SELECT digest_date::text, title, body, items_used, sources_used FROM engine_outside_digests WHERE digest_date = $1',
+  const held = await query<{ digest_date: string; title: string; body: string; items_used: number; sources_used: number; cost?: DigestCost | null }>(
+    'SELECT digest_date::text, title, body, items_used, sources_used, cost FROM engine_outside_digests WHERE digest_date = $1',
     [date],
   );
   // A digest that is held but whose post did not land (or arrived before posting existed) is posted now, once.

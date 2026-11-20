@@ -15,6 +15,7 @@ import { record } from './engineEvents';
 import { changed } from './events';
 import * as bharag from './bharag';
 import * as rssReports from './rssReports';
+import * as digestCost from './digestCost';
 
 export class DigestError extends Error {
   constructor(public status: number, message: string) {
@@ -34,6 +35,8 @@ export interface DigestRow {
   items: Array<{ title?: string; url?: string; kind?: string; source?: string }>;
   bharag_doc_id: string | null;
   bharag_detail: string | null;
+  /** What the day cost (20 Nov 2026, digestCost.ts): Apify's line for the day and the model that wrote it. */
+  cost: digestCost.DigestCost | null;
   received_at: string;
   updated_at: string;
 }
@@ -42,7 +45,7 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const str = (v: unknown, max: number): string => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 const int = (v: unknown): number => (Number.isInteger(v) && (v as number) >= 0 ? (v as number) : 0);
 
-export function parse(b: Record<string, unknown>): Omit<DigestRow, 'bharag_doc_id' | 'bharag_detail' | 'received_at' | 'updated_at'> {
+export function parse(b: Record<string, unknown>): Omit<DigestRow, 'bharag_doc_id' | 'bharag_detail' | 'cost' | 'received_at' | 'updated_at'> & { model_cost_usd: number | null } {
   const digest_date = str(b.digest_date, 10);
   if (!DATE.test(digest_date)) throw new DigestError(422, 'digest_date is required as YYYY-MM-DD.');
   const title = str(b.title, 300);
@@ -68,6 +71,7 @@ export function parse(b: Record<string, unknown>): Omit<DigestRow, 'bharag_doc_i
     sources_used: int(b.sources_used),
     model: str(b.model, 100) || null,
     items,
+    model_cost_usd: typeof b.model_cost_usd === 'number' && Number.isFinite(b.model_cost_usd) && b.model_cost_usd >= 0 ? b.model_cost_usd : null,
   };
 }
 
@@ -120,8 +124,11 @@ export async function store(b: Record<string, unknown>): Promise<Record<string, 
     );
     await query('UPDATE engine_outside_digests SET bharag_doc_id = $2, bharag_detail = $3 WHERE digest_date = $1', [d.digest_date, bharagResult.ok ? bharagResult.id ?? 'ingested' : null, bharagResult.detail.slice(0, 500)]);
   }
+  // 20 Nov 2026: what the day cost, read now and kept on the row, so a month can be added up.
+  const cost = await digestCost.forDay(d.digest_date, d.model_cost_usd);
+  await query('UPDATE engine_outside_digests SET cost = $2 WHERE digest_date = $1', [d.digest_date, JSON.stringify(cost)]);
   // Genie rebuild step 4.3 (16 Nov 2026): the day's digest is posted to #bha-engine-digests once.
-  const slackPost = await rssReports.postDigest(d);
+  const slackPost = await rssReports.postDigest({ ...d, cost });
   return {
     ok: true,
     digest_date: d.digest_date,
@@ -134,6 +141,7 @@ export async function store(b: Record<string, unknown>): Promise<Record<string, 
     inserted: had ? 0 : 1,
     updated: had ? 1 : 0,
     unchanged: 0,
+    cost,
   };
 }
 
@@ -141,7 +149,7 @@ export async function read(opts: { date?: string; days?: number } = {}): Promise
   const all = await query<{ n: string; newest: string | null }>('SELECT count(*)::text n, max(digest_date)::text newest FROM engine_outside_digests');
   const days = Math.min(Math.max(opts.days ?? 1, 1), 14);
   const r = opts.date
-    ? await query<DigestRow>('SELECT digest_date::text, title, body, period_start, period_end, items_used, sources_used, model, items, bharag_doc_id, bharag_detail, received_at, updated_at FROM engine_outside_digests WHERE digest_date = $1', [opts.date])
-    : await query<DigestRow>('SELECT digest_date::text, title, body, period_start, period_end, items_used, sources_used, model, items, bharag_doc_id, bharag_detail, received_at, updated_at FROM engine_outside_digests ORDER BY digest_date DESC LIMIT $1', [days]);
+    ? await query<DigestRow>('SELECT digest_date::text, title, body, period_start, period_end, items_used, sources_used, model, items, bharag_doc_id, bharag_detail, cost, received_at, updated_at FROM engine_outside_digests WHERE digest_date = $1', [opts.date])
+    : await query<DigestRow>('SELECT digest_date::text, title, body, period_start, period_end, items_used, sources_used, model, items, bharag_doc_id, bharag_detail, cost, received_at, updated_at FROM engine_outside_digests ORDER BY digest_date DESC LIMIT $1', [days]);
   return { digests: r.rows, held: Number(all.rows[0]?.n ?? 0), newest: all.rows[0]?.newest ?? null };
 }

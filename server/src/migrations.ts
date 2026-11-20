@@ -4942,6 +4942,11 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `CREATE UNIQUE INDEX IF NOT EXISTS engine_pattern_trust_vote ON engine_pattern_trust (pattern_id, kind, source_ref, voter) WHERE kind <> 'shown'`,
     ],
   },
+  {
+    id: 145,
+    name: 'What each outside digest day cost (20 Nov 2026, Destiny, after Jason approved Apify Starter; digestCost.ts)',
+    statements: [`ALTER TABLE engine_outside_digests ADD COLUMN IF NOT EXISTS cost jsonb`],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
