@@ -15921,3 +15921,10 @@ Decision:   a tool, not a hand edit of the rows, so the write goes through engin
 Intent:     the new MCP tool did not reach this session's connector (refresh added nothing), so the completion needs a second door.
 Files:      server/src/index.ts
 Fix:        POST /api/engine/review-card/complete-parked (x-dashboard-key, requester Destiny or Jason), calling reviewCard.completeParked exactly as complete_parked_log does.
+
+## 2026-11-20 23:10 — lane_health answers in under a second (INC-NS.AGENT-075, INC-NS.AGENT-076)
+Intent:     North Star's ask NS-1795201375932-OW43 lost its lane_health read to a 60-second tool timeout (MCP -32001) at 19:04 UTC on 20 Nov.
+Files:      server/src/laneHealth.ts
+Problem:    the convergence query counted closed loops with a per-loop EXISTS over `events`, with an OR on record_id, so Postgres re-read the events table (7,240 rows) for each of 1,804 loop rows. engine_writes shows lane_health at 13.9 s, 14.7 s and 17.9 s on quiet days and 61.5 s under load; the same SQL through query_postgres hit the 5-second cap.
+Fix:        the closes are read once into a `closed` CTE and matched by hash (IN). Run on the live database through query_postgres before the push: 78 ms, twelve lanes, the counts as before.
+Decision:   no index added; the rewrite alone takes it from seconds to milliseconds.

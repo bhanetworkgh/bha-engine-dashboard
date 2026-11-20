@@ -260,15 +260,21 @@ export async function laneHealth(opts: { kind?: 'work' | 'commercial' | 'all'; l
 
   const loops = (
     await query<{ lane: string; opened: string; closed: string; open_now: string }>(
+      // 21 Nov 2026 (INC-NS.AGENT-075/076): the closes are read once into `closed` and matched by
+      // hash. The old per-loop EXISTS with an OR re-read the events table for every loop row and took
+      // 14 to 61 seconds, past the 60-second limit of the agents' tool calls. Same counts, about 80 ms.
       `WITH l AS (
          SELECT DISTINCT ON (fields->>'loop_id') id, airtable_record_id, fields
            FROM engine_loops ORDER BY fields->>'loop_id', updated_at DESC
+       ),
+       closed AS (
+         SELECT DISTINCT e.record_id FROM events e
+          WHERE e.kind = 'loops' AND e.to_status = 'closed' AND e.via IN ('engine', 'ui') AND e.at >= $1
        )
        SELECT coalesce(l.fields->>'lane_tag', '') AS lane,
               count(*) FILTER (WHERE coalesce(l.fields->>'Date Raised', '') >= $1)::text AS opened,
-              count(*) FILTER (WHERE EXISTS (
-                SELECT 1 FROM events e WHERE e.kind = 'loops' AND e.to_status = 'closed' AND e.via IN ('engine', 'ui') AND e.at >= $1
-                   AND (e.record_id = l.airtable_record_id OR e.record_id = 'row-' || l.id)))::text AS closed,
+              count(*) FILTER (WHERE l.airtable_record_id IN (SELECT record_id FROM closed)
+                                  OR ('row-' || l.id) IN (SELECT record_id FROM closed))::text AS closed,
               count(*) FILTER (WHERE l.fields->>'Status' IN ('Open', 'In Progress'))::text AS open_now
          FROM l GROUP BY 1`,
       [since.slice(0, 10)],
