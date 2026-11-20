@@ -117,7 +117,8 @@ export async function activity(b: Row): Promise<Row> {
   const genie = await query<Row>(
     `SELECT DISTINCT ON (request_id) request_id, question, source, status, handoff, occurred_at FROM engine_genie_events
       WHERE occurred_at >= $1 AND event_type NOT LIKE 'genie.subagent.%' AND request_id IS NOT NULL ORDER BY request_id, occurred_at DESC`, [since]);
-  const genieRows = genie.rows.sort((x, y) => String(y.occurred_at).localeCompare(String(x.occurred_at)));
+  // occurred_at comes back as a Date; compare times, never String(Date), which starts with the weekday name.
+  const genieRows = genie.rows.sort((x, y) => new Date(y.occurred_at as string | Date).getTime() - new Date(x.occurred_at as string | Date).getTime());
   const media = await query<Row>(`SELECT post_id, occasion_label, angle, status, created_at FROM engine_media_posts WHERE created_at >= $1 ORDER BY created_at DESC LIMIT $2`, [since, per]);
   const digest = await query<Row>(`SELECT digest_date, title, received_at FROM engine_outside_digests ORDER BY digest_date DESC LIMIT 1`).catch(() => ({ rows: [] as Row[] }));
   const events = await query<Row>(`SELECT event_type, count(*)::int AS n, max(at) AS last FROM engine_events WHERE at >= $1 GROUP BY 1 ORDER BY 3 DESC LIMIT 25`, [since]);

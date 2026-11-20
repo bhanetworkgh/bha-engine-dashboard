@@ -15841,3 +15841,7 @@ Files:      server/src/digestCost.ts (new), server/src/outsideDigest.ts, server/
 Problem:    The digest card said how many items it read and nothing about cost; Apify was not in the registry.
 Fix:        Registry row apify (audit 7436): Starter, $19 monthly, renewal 2026-12-20 (Apify's cycle reads 20 Nov to 19 Dec 23:59 UTC). The dashboard reads the digest day's own Apify line and the cycle so far; BHA RSS asks OpenRouter for usage.cost and sends model_cost_usd. Both kept on engine_outside_digests.cost and printed at the card's foot.
 Decision:   A part that cannot be read is said, never nought; the total is printed only when both parts are known.
+
+## 2026-11-20 — read_engine_activity: Genie asks sorted by time, not by text
+
+The Genie part of `read_engine_activity` (server/src/sharedMemory.ts) sorted its rows with `String(occurred_at).localeCompare(...)`. `occurred_at` comes back from Postgres as a Date, and `String(Date)` starts with the weekday name, so "Thu ..." sorted ahead of "Fri ..." and on 20 Nov the read showed 19 Nov 22:23 UTC as Genie's latest ask while 43 newer asks sat in engine_genie_events (latest 14:57 UTC). Bays and Genie read this to know what the other is doing (Genie rebuild step 8.6). Now sorted by getTime(). Reproduced the wrong order and the fix with the two real timestamps before pushing.
