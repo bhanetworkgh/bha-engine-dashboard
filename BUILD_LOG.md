@@ -15916,3 +15916,8 @@ Files:      server/src/reviewCard.ts (completedCard, completeParked), server/src
 Problem:    no tool could fill a Layer 0 answer or edit a pending review card; the only path was the builder's form, which re-reviews.
 Fix:        completeParked writes `<Name> Answer` / `<Name> Answered At` (Complete & Send's own field names) onto the Codex row with `Layer0 Missing` "[]", the same plus Status completed on the Layer 0 row (stops reminders, deletes the incomplete notice), and rewrites Jason's card: the "Codex incomplete" banner becomes a "Codex complete" line naming what was supplied, and each button's missing part is emptied so Approve needs no early reason. Nothing is reviewed or scored again. Destiny or Jason, refused on agent tokens, audited.
 Decision:   a tool, not a hand edit of the rows, so the write goes through engineWrite.patchRecord (status ledger, engine_writes, layer0Notice) like any other.
+
+## 2026-11-20 22:45 — the same completion as an engine route
+Intent:     the new MCP tool did not reach this session's connector (refresh added nothing), so the completion needs a second door.
+Files:      server/src/index.ts
+Fix:        POST /api/engine/review-card/complete-parked (x-dashboard-key, requester Destiny or Jason), calling reviewCard.completeParked exactly as complete_parked_log does.

@@ -1156,6 +1156,23 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         describe: (r) => `${r.submission_id}: ${r.dry_run ? 'would rewrite' : 'rewrote'} its review card as approved`.slice(0, 400),
         hint: 'POST { submission_id, approver_user_id, channel?, ts?, approved_at?, early_reason?, missing?, notes_added?, dry_run? }. Rewrites the card to say whose log it was, the session, when, and who approved it.',
       },
+      /** A parked log completed by hand with no second review (20 Nov 2026, Destiny; reviewCard.completeParked). The same function complete_parked_log calls. */
+      '/api/engine/review-card/complete-parked': {
+        kind: 'codex',
+        store: async (b) => {
+          if (!['U0AEW3TBYH1', 'U0A9V97949F'].includes(String(b.requester_user_id ?? ''))) throw new systemFeeds.FeedError(403, 'not_permitted: only Destiny or Jason may complete a parked log.');
+          try {
+            const ctx: engineWrite.WriteCtx = { endpoint: '/api/engine/review-card/complete-parked', method: 'PATCH', key_label: 'DASHBOARD_INBOUND_KEY', t0: Date.now(), note: 'completed by hand, no second review' };
+            const r = await reviewCard.completeParked(b, (kind, id, fields) => engineWrite.patchRecord(kind, id, fields, ctx));
+            return { ...r, inserted: 0, updated: r.dry_run ? 0 : 1, unchanged: r.dry_run ? 1 : 0 };
+          } catch (e) {
+            if (e instanceof reviewCard.CardError) throw new systemFeeds.FeedError(e.status, `${e.reason}: ${e.message}`);
+            throw e;
+          }
+        },
+        describe: (r) => `${r.submission_id}: ${r.dry_run ? 'would complete' : 'completed'} a parked log with no second review${r.ok === false ? `; ${r.message}` : ''}`.slice(0, 400),
+        hint: 'POST { submission_id, answers: { <missing field>: <answer> }, requester_user_id (Destiny or Jason), dry_run? }.',
+      },
       /** /held-pay (15 Nov 2026, Destiny; heldPay.ts): the asker's held pay, why, and what proof releases it, for Bays to post only to them. Reads; writes nothing. */
       '/api/engine/held-pay': {
         kind: 'pay_sessions',
