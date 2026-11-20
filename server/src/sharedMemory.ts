@@ -122,8 +122,26 @@ export async function activity(b: Row): Promise<Row> {
   const media = await query<Row>(`SELECT post_id, occasion_label, angle, status, created_at FROM engine_media_posts WHERE created_at >= $1 ORDER BY created_at DESC LIMIT $2`, [since, per]);
   const digest = await query<Row>(`SELECT digest_date, title, received_at FROM engine_outside_digests ORDER BY digest_date DESC LIMIT 1`).catch(() => ({ rows: [] as Row[] }));
   const events = await query<Row>(`SELECT event_type, count(*)::int AS n, max(at) AS last FROM engine_events WHERE at >= $1 GROUP BY 1 ORDER BY 3 DESC LIMIT 25`, [since]);
+  // 20 Nov 2026: this read once showed Genie's newest ask as a day old (rows sorted as text) and nothing said so.
+  // Each part's first row is now checked against the newest time the table itself holds; a mismatch is said on
+  // the answer and logged, never served quietly.
+  const newest = await query<Row>(
+    `SELECT (SELECT max(created_time) FROM engine_bays_asks WHERE created_time >= $1) AS bays,
+            (SELECT max(created_time) FROM engine_ns_asks WHERE created_time >= $1) AS north_star,
+            (SELECT max(created_time) FROM engine_rt_asks WHERE created_time >= $1) AS research_twin,
+            (SELECT max(occurred_at) FROM engine_genie_events WHERE occurred_at >= $1 AND event_type NOT LIKE 'genie.subagent.%' AND request_id IS NOT NULL) AS genie`, [since]);
+  const ms = (v: unknown) => (v == null ? null : new Date(v as string | Date).getTime());
+  const shown: Record<string, unknown> = { bays: bays.latest[0]?.at, north_star: northStar.latest[0]?.at, research_twin: researchTwin.latest[0]?.at, genie: genieRows[0]?.occurred_at };
+  const orderWarnings: string[] = [];
+  for (const part of Object.keys(shown)) {
+    const held = ms(newest.rows[0]?.[part]);
+    const first = ms(shown[part]);
+    if (held != null && first !== held) orderWarnings.push(`${part}: the newest row shown is not the newest held (${first == null ? 'none shown' : new Date(first).toISOString()} shown, ${new Date(held).toISOString()} held); do not read this part as current.`);
+  }
+  if (orderWarnings.length) console.error(`[engine-activity] order check failed: ${orderWarnings.join(' | ')}`);
   return {
     ok: true,
+    order_check: orderWarnings.length ? { ok: false, warnings: orderWarnings } : { ok: true },
     window_hours: hours,
     since,
     parts: {
