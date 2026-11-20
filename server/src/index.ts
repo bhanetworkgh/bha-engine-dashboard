@@ -69,6 +69,7 @@ import * as mcpLogs from './mcp/logs';
 import * as adminAuth from './adminAuth';
 import * as agreements from './agreements';
 import * as compSnapshot from './compSnapshot';
+import * as incomeBoard from './incomeBoard';
 import { extractFileText } from './mcp/docTools';
 import * as earlyAccess from './earlyAccess';
 import * as stripeLedger from './stripeLedger';
@@ -2284,6 +2285,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
     return send(res, 200, { ok: true });
   }
   if (p === '/api/comp-snapshot' && method === 'GET') return send(res, 200, await compSnapshot.read());
+  // The Production-Income Board (20 Nov 2026, Destiny; Jason 1795202126.334919).
+  if (p === '/api/income-board' && method === 'GET') return send(res, 200, await incomeBoard.read());
   if (p === '/api/agreements' && method === 'GET') return send(res, 200, await agreements.list());
   if (p === '/api/agreements' && method === 'POST') {
     const body = await readJson(req, 22 * 1024 * 1024);

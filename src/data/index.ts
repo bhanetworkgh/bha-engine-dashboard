@@ -732,6 +732,14 @@ export const getBaysReminders = () => api<BaysRemindersData>('/api/bays/reminder
 export const getDecisionWatches = () => api<DecisionWatchData>('/api/bays/decision-watches');
 /** Every scheduler's runs on one page (2026-10-09, K9B7). */
 export const getScheduledRuns = () => api<ScheduledRunsData>('/api/scheduled-runs');
+/** The Production-Income Board (20 Nov 2026): server/src/incomeBoard.ts. */
+export interface IncomeBlocker { kind: 'gate' | 'loop' | 'watch'; id: string; title: string; status: string; open: boolean; lane: string | null; owner: string | null; target_date: string | null; reason: string; link: string | null }
+export interface IncomeBoard {
+  board_key: string; question: string; ready: 'Yes' | 'No'; why: string; blocking: IncomeBlocker[]; gates: IncomeBlocker[]; items: IncomeBlocker[]; items_closed: number;
+  cst: { open_loops: number; moving: number; stalled: number; stalled_rule: string; open_watches: number; stalled_loops: { loop_id: string; what: string; owner: string | null; days_since_change: number; link: string }[] } | null;
+  read_errors: string[]; rule: string; read_at: string;
+}
+export const getIncomeBoard = () => api<IncomeBoard>('/api/income-board');
 export const getModelSpend = () => api<import('./types').ModelSpendData>('/api/model-spend');
 /** Logstream v0: repeating faults, what crossed a threshold and what was done (2026-10-10). */
 export const getLogstream = () => api<LogstreamData>('/api/logstream');

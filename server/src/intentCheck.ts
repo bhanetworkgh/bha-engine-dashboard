@@ -225,6 +225,8 @@ export async function describe(tool: string, args: Args): Promise<string | null>
       return `Post a message in ${str(args.destination)}${str(args.thread_ts) ? ` in thread ${str(args.thread_ts)}` : ''}. It says: "${shown(args.text, 6000)}".`;
     case 'edit_doc':
       return `Change the Google Doc ${str(args.document_id)}: ${Array.isArray(args.replacements) && args.replacements.length ? `replace ${clip(args.replacements, 1500)}` : 'no replacements'}${typeof args.append === 'string' && args.append ? `; add at the end: "${clip(args.append, 1500)}"` : ''}.`;
+    case 'set_income_board_item':
+      return `${str(args.action) === 'remove' ? 'Take' : 'Put'} ${str(args.record_id)} ${str(args.action) === 'remove' ? 'off' : 'on'} the Production-Income Board${str(args.target_date) ? `, target date ${str(args.target_date)}` : ''}. Reason given: "${clip(args.reason, 400)}".`;
     case 'edit_sop':
       return `Edit SOP ${str(args.id) || str(args.title) || '(not named)'}. ${args.content !== undefined ? `Its text becomes: "${shown(args.content, 6000)}"` : `Replacements: ${clip(args.replacements, 1200)}`}. Reason given: "${clip(args.reason, 400)}".`;
     default:
@@ -238,6 +240,8 @@ export const CHECKED: ReadonlyArray<string> = [
   'send_nudge', 'post_file', 'edit_sop',
   // 20 Nov 2026 (Genie rebuild step 13): Genie's two new ways to act for a person.
   'post_channel_message', 'edit_doc',
+  // 20 Nov 2026: the Production-Income Board.
+  'set_income_board_item',
 ];
 
 /* ------------------------------------------------------------------ the ask */

@@ -52,6 +52,8 @@ const GROUPS: { group: string | null; items: { to: string; label: string; icon: 
       // executions: a run is a record, it is the same record whichever system
       // produced it, and one page with a tab per system beats three pages.
       { to: '/executions', label: 'Executions', icon: 'pulse' },
+      // Jason's Production-Income Board: ready for the first paid Stage 1 pilot, yes or no (2026-11-20).
+      { to: '/income-board', label: 'Income board', icon: 'shield' },
       // Every scheduler's runs on one page (2026-10-09, K9B7): agent tasks, timed
       // workflows, reminder posts and this dashboard's own timers.
       { to: '/scheduled-runs', label: 'Scheduled runs', icon: 'calendar' },

@@ -4947,6 +4947,51 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
     name: 'What each outside digest day cost (20 Nov 2026, Destiny, after Jason approved Apify Starter; digestCost.ts)',
     statements: [`ALTER TABLE engine_outside_digests ADD COLUMN IF NOT EXISTS cost jsonb`],
   },
+  {
+    id: 146,
+    name: 'The Production-Income Board, BOARD_PROD_INCOME_VFARM_CST (20 Nov 2026, Destiny; Jason in #bha-coordination 1795202126.334919; incomeBoard.ts)',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_income_board_items (
+        id bigserial PRIMARY KEY,
+        board_key text NOT NULL,
+        kind text NOT NULL CHECK (kind IN ('loop','watch')),
+        record_id text NOT NULL,
+        reason text NOT NULL,
+        target_date date,
+        added_by text NOT NULL,
+        added_at timestamptz NOT NULL DEFAULT now(),
+        removed_at timestamptz,
+        removed_by text,
+        removed_reason text
+      )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS engine_income_board_item_live ON engine_income_board_items (board_key, record_id) WHERE removed_at IS NULL`,
+      // The starting list: the open loops that gate a paid Stage 1 pilot with CST and the Monitoring Twin, for
+      // Destiny and Jason to keep or take off. Seeded once, never again.
+      `INSERT INTO engine_income_board_items (board_key, kind, record_id, reason, added_by) VALUES
+        ('BOARD_PROD_INCOME_VFARM_CST', 'loop', 'LOOP-1794856066847-5DX1', 'The single Stage 1 Validation and P1.0 Lock gate for Early Access', 'U0AEW3TBYH1'),
+        ('BOARD_PROD_INCOME_VFARM_CST', 'loop', 'LOOP-1794856525804-H9KF', 'Stage 1 hardware proof on the production rack (November stability run)', 'U0AEW3TBYH1'),
+        ('BOARD_PROD_INCOME_VFARM_CST', 'loop', 'LOOP-1791587880697-L4WA', 'The first real Stage 1 lab validation record on Kavin''s rack', 'U0AEW3TBYH1'),
+        ('BOARD_PROD_INCOME_VFARM_CST', 'loop', 'LOOP-1791428275782-TU4O', 'The Stage 1 contract, Jason''s gate for reliability claims', 'U0AEW3TBYH1'),
+        ('BOARD_PROD_INCOME_VFARM_CST', 'loop', 'LOOP-1794168643405-SK22', 'Monitoring Twin stress test, engine side: readings on time, sensors marked live or not', 'U0AEW3TBYH1'),
+        ('BOARD_PROD_INCOME_VFARM_CST', 'loop', 'LOOP-1795200165855-6LWH', 'What the Monitoring Twin watches on the rack: commanded vs observed relay state, pH drift', 'U0AEW3TBYH1'),
+        ('BOARD_PROD_INCOME_VFARM_CST', 'loop', 'LOOP-1793031575930-X4EI', 'CST: KMG9 authoritative RAG acceptance (Jason, 10 Nov: stays open until the gate conditions are met)', 'U0AEW3TBYH1'),
+        ('BOARD_PROD_INCOME_VFARM_CST', 'loop', 'LOOP-1792681313173-0SNO', 'CST: one full request traced end to end', 'U0AEW3TBYH1'),
+        ('BOARD_PROD_INCOME_VFARM_CST', 'loop', 'LOOP-1795035800169-NVLF', 'CST: Content-Type validation on the web and webhook routes', 'U0AEW3TBYH1'),
+        ('BOARD_PROD_INCOME_VFARM_CST', 'loop', 'LOOP-1794902688969-80HM', 'CST: what the Monitoring Twin watches for in low-confidence telemetry', 'U0AEW3TBYH1'),
+        ('BOARD_PROD_INCOME_VFARM_CST', 'loop', 'LOOP-1791991972916-G718', 'CST clone-quality gate, step 2', 'U0AEW3TBYH1')
+       ON CONFLICT DO NOTHING`,
+      `UPDATE registry_truth SET
+         fact = 'BOARD_PROD_INCOME_VFARM_CST: the Production-Income Board (vFarm + CST). Answers: Ready for first paid Stage-1 greens vFarm pilot with CST + Monitoring Twin, Yes or No; and if No, which loops and watches (by id), lanes, owners and target dates are blocking. Also a CST lane summary: open, moving and stalled.',
+         store = 'engine_income_board_items (the loops and watches put on the board) plus two gates read live: a real Stage 1 record passed (engine_vfarm_gates) and the charge gate (engine_charge_gate). Page /income-board.',
+         written_through = 'set_income_board_item (MCP, Destiny or Jason only). Item state is read from each loop and watch, never stored on the board.',
+         writers = 'Destiny, Jason (and Genie on their ask)',
+         views = '/income-board, read_income_board',
+         owner = 'Destiny',
+         notes = 'Requested by Jason Bays on 20 Nov 2026 (#bha-coordination 1795202126.334919). Built 20 Nov 2026. Jason uses it for what gets worked on and who gets paid.',
+         updated_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+       WHERE id = 'board-prod-income-vfarm-cst-production-income-bo'`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

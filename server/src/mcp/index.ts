@@ -240,6 +240,8 @@ const BAYS_TOOLS: ReadonlySet<string> = new Set([
         'edit_sop',
         // 2026-11-11: the Sovereign Context Layer (see North Star's entry).
         'read_true_home', 'read_record_history',
+        // 2026-11-20: the Production-Income Board (Jason, 1795202126.334919). A read.
+        'read_income_board',
 ]);
 
 const AGENT_KEYS: ReadonlyArray<AgentKey> = (
@@ -282,6 +284,8 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         'read_evidence',
         // 2026-11-11: the Sovereign Context Layer. Where a fact lives before acting on it, and a record's earlier versions.
         'read_true_home', 'read_record_history',
+        // 2026-11-20: the Production-Income Board (Jason, 1795202126.334919). A read.
+        'read_income_board',
       ]),
     },
     {
@@ -370,6 +374,8 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-11-20 (Destiny): Genie answers priority, ranking and lane-health asks itself, the way Bays did,
         // instead of handing almost every ask to North Star. The three reads North Star ranks from.
         'rank_lanes', 'lane_health', 'get_priority_evidence',
+        // 2026-11-20 (Destiny, Jason 1795202126.334919): the Production-Income Board, read and kept on his ask.
+        'read_income_board', 'set_income_board_item',
         // 2026-11-14 (D4): the daily outside digest from BHA RSS, the one read of outside sources.
         'read_outside_digest',
         // 2026-11-17 (Genie rebuild 7 and 8): one shared memory, and what every part of the engine is doing.
