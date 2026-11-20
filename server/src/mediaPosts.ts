@@ -854,7 +854,7 @@ export async function addMetrics(postId: string, input: Record<string, unknown>)
 /**
  * What went live, compact (20 Nov 2026, Destiny: Genie asked "what went out on LinkedIn today" and read twenty
  * whole drafts, which ran it out of time before it found the links). One line per platform posted since a time,
- * newest first: the draft, the platform, when, the live link and the opening of the text. Test drafts left out.
+ * newest first: the draft, the platform, when, the live link and the whole text. Test drafts left out.
  */
 export async function posted(input: { since: string; platform?: string | null; limit?: number }) {
   const since = new Date(input.since);
@@ -868,7 +868,7 @@ export async function posted(input: { since: string; platform?: string | null; l
   }
   const r = await query<{ post_id: string; platform: string; posted_at: string; posted_url: string | null; text: string | null; status: string; occasion: string | null }>(
     `SELECT p.post_id, e.key AS platform, e.value->>'posted_at' AS posted_at, e.value->>'posted_url' AS posted_url,
-            left(e.value->>'text', 280) AS text, p.status, p.occasion
+            e.value->>'text' AS text, p.status, p.occasion
        FROM engine_media_posts p, jsonb_each(p.platforms) e
       WHERE p.test = false AND e.value->>'posted_at' IS NOT NULL AND (e.value->>'posted_at')::timestamptz >= $1::timestamptz${plat}
       ORDER BY (e.value->>'posted_at')::timestamptz DESC LIMIT ${limit}`,
