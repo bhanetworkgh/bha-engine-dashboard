@@ -306,3 +306,74 @@ export async function suggestionFor(b: Obj): Promise<Obj> {
   const part = sugPart(paySuggest.fromRow(r.rows[0].fields));
   return { ok: true, submission_id: id, sg: part ? JSON.parse(part.slice(1)) : null };
 }
+
+/**
+ * A parked log completed by hand, with no second review (20 Nov 2026, Destiny). The completeness check parked
+ * Destiny's 20 Nov log for a proof type the log already tags beside every id. Complete & Send would run the review
+ * again; this fills the missing answers straight in instead:
+ *   - the Codex row gets each answer (`<Name> Answer`, `<Name> Answered At`, the field names Complete & Send writes)
+ *     and `Layer0 Missing` becomes "[]"; `Layer0 Flagged` is history and stays;
+ *   - the Layer 0 row gets the same answers and Status `completed`, which stops the reminders and deletes the
+ *     "In review, incomplete" notice (layer0Notice);
+ *   - Jason's card loses its "Codex incomplete" banner, gains a line with what was supplied, and its buttons'
+ *     missing part is emptied, so Approve needs no early reason.
+ * Nothing is reviewed or scored again. Refused for a log that is not Pending or has no pending Layer 0 row.
+ */
+const ANSWER_FIELD: Record<string, string> = { proof_type: 'Proof Type', relog: 'Relog' };
+
+export function completedCard(blocks: Block[], supplied: string): Block[] {
+  const out = blocks.map((b) => JSON.parse(JSON.stringify(b)) as Block);
+  const banner = (b: Block) => /Codex incomplete|In review, incomplete/.test(JSON.stringify(b));
+  const at = out.findIndex(banner);
+  const note = section(cap(`:white_check_mark: *Codex complete.* Supplied after submission, with no second review:\n${supplied}`, 2900));
+  if (at === -1) out.unshift(note);
+  else {
+    out.splice(at, 1, note);
+    for (let i = out.length - 1; i > at; i--) if (banner(out[i])) out.splice(i, 1);
+  }
+  const actions = out.find((b) => b.type === 'actions');
+  if (!actions) throw new CardError('no_buttons', 'The card has no buttons, so it is not waiting on Jason; it is left as it is.');
+  for (const el of (actions.elements ?? []) as Obj[]) {
+    if (typeof el.value !== 'string') continue;
+    const parts = el.value.split('|');
+    if (parts.length >= 3) { parts[2] = ''; el.value = parts.join('|'); }
+  }
+  return out;
+}
+
+export async function completeParked(b: Obj, write: (kind: 'codex' | 'layer0', id: string, fields: Obj) => Promise<unknown>): Promise<Obj> {
+  const id = String(b.submission_id ?? '').trim();
+  const answers = (b.answers && typeof b.answers === 'object' ? b.answers : {}) as Record<string, unknown>;
+  if (!id) throw new CardError('submission_id_required', 'submission_id is the log to complete.');
+  const c = await query<{ id: string; fields: Obj }>(`SELECT id::text, fields FROM engine_codex_submissions WHERE natural_id = $1 OR fields->>'Submission ID' = $1 ORDER BY updated_at DESC LIMIT 2`, [id]);
+  if (c.rows.length !== 1) throw new CardError(c.rows.length ? 'ambiguous' : 'not_found', `${id} matches ${c.rows.length} Codex rows.`, c.rows.length ? 409 : 404);
+  const f = c.rows[0].fields;
+  if (String(f['Jason Status'] ?? 'Pending') !== 'Pending') throw new CardError('not_pending', `${id} is ${f['Jason Status']}, not waiting on Jason.`, 409);
+  const h = await query<{ id: string; fields: Obj }>(`SELECT id::text, fields FROM engine_layer0_holds WHERE natural_id = $1 AND fields->>'Status' = 'pending_builder_input'`, [id]);
+  if (h.rows.length !== 1) throw new CardError('not_parked', `${id} has ${h.rows.length} pending Layer 0 rows; there is nothing to complete.`, 409);
+  let missing: string[] = [];
+  try { missing = JSON.parse(String(h.rows[0].fields['Missing Fields'] ?? '[]')); } catch { missing = []; }
+  const gap = missing.filter((m) => !(typeof answers[m] === 'string' && (answers[m] as string).trim().length >= 3));
+  if (gap.length) throw new CardError('answers_missing', `Answers are needed for: ${gap.join(', ')}.`);
+  const at = new Date().toISOString();
+  const add: Obj = {};
+  for (const m of missing) {
+    const name = ANSWER_FIELD[m] ?? m.replace(/(^|_)(\w)/g, (_, s, ch) => (s ? ' ' : '') + ch.toUpperCase());
+    add[`${name} Answer`] = String(answers[m]).trim();
+    add[`${name} Answered At`] = at;
+  }
+  const supplied = missing.map((m) => `*${ANSWER_FIELD[m] ?? m}:* ${String(answers[m]).trim()}`).join('\n');
+  const channel = String(f['Review Card Channel'] ?? '');
+  const ts = String(f['Review Card TS'] ?? '');
+  if (!channel || !ts) throw new CardError('no_card', `${id} carries no Review Card Channel and TS.`, 404);
+  const r = await slack.botCall('conversations.history', { channel, latest: ts, inclusive: true, limit: 1 }, 'form');
+  const m = r.ok ? ((r.messages as { ts?: string; text?: string; blocks?: Block[] }[]) ?? [])[0] : undefined;
+  if (!r.ok || !m || m.ts !== ts || !Array.isArray(m.blocks)) throw new CardError('card_not_found', `The card at ${channel} ${ts} could not be read${r.ok ? '' : `: ${r.error}`}.`, 502);
+  const blocks = completedCard(m.blocks, supplied);
+  if (b.dry_run === true) return { ok: true, dry_run: true, submission_id: id, missing, fields: add, blocks_before: m.blocks.length, blocks_after: blocks.length };
+  await write('codex', c.rows[0].id, { ...add, 'Layer0 Missing': '[]' });
+  await write('layer0', h.rows[0].id, { ...add, Status: 'completed' });
+  const u = await slack.botCall('chat.update', { channel, ts, text: String(m.text ?? '').replace(/In review, incomplete/g, 'Codex complete').slice(0, 300) || 'Builder log review', blocks });
+  if (!u.ok) return { ok: false, raise: true, submission_id: id, completed: true, card_updated: false, message: `The log is completed in the dashboard, but Slack refused the card update: ${u.error}.` };
+  return { ok: true, submission_id: id, completed: true, card_updated: true, missing, link: `${WORKSPACE}/archives/${channel}/p${ts.replace('.', '')}` };
+}

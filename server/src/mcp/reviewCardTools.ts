@@ -5,6 +5,7 @@
  * any agent token, Destiny or Jason. Audited on engine_mcp_writes, kind codex.
  */
 import * as reviewCard from '../reviewCard';
+import * as engineWrite from '../engineWrite';
 import { auditClose, auditOpen } from './writeTools';
 import type { ToolDefinition } from './tools';
 
@@ -49,4 +50,43 @@ export const rewriteApprovedCard: ToolDefinition = {
   },
 };
 
-export const REVIEW_CARD_WRITE_TOOLS: ToolDefinition[] = [rewriteApprovedCard];
+/** `complete_parked_log` (20 Nov 2026, Destiny): a parked log's missing answers filled straight in, no second review (../reviewCard.ts completeParked). */
+export const completeParkedLog: ToolDefinition = {
+  name: 'complete_parked_log',
+  description: "Complete a log the completeness check parked, with no second review: the missing answers go onto the Codex row and the Layer 0 row (Status completed, which stops the reminders and deletes the 'In review, incomplete' notice), and Jason's review card loses its 'Codex incomplete' banner, shows what was supplied, and its Approve no longer needs an early reason. answers maps each missing field (as the Layer 0 row names it, e.g. proof_type) to its answer. Only for a log still Pending. dry_run reads the card and says what would change. HELD HERE: Destiny or Jason; refused on any agent token. Audited.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      submission_id: { type: 'string' },
+      answers: { type: 'object', description: 'Missing field -> answer, e.g. { "proof_type": "..." }.' },
+      requester_user_id: { type: 'string' },
+      dry_run: { type: 'boolean' },
+    },
+    required: ['submission_id', 'answers', 'requester_user_id'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: 'Complete a parked log without a second review' },
+  handler: async (args, deps) => {
+    const requester = str(args, 'requester_user_id');
+    const dry = args.dry_run === true;
+    const audit = await auditOpen({ tool: 'complete_parked_log', args, access: deps.access, kind: 'codex', requester: requester || null, dry_run: dry });
+    const refuse = async (reason: string, message: string) => {
+      await auditClose(audit, { outcome: 'refused', detail: `${reason}: ${message}`, guard_result: { reason } });
+      return { ok: false, reason, message: `${message} Nothing was changed.`, audit_id: audit };
+    };
+    if (deps.agent) return refuse('agent_not_permitted', `An agent (${deps.agent}) may not complete a parked log.`);
+    if (!ADMINS.has(requester)) return refuse('not_permitted', 'Only Destiny or Jason may complete a parked log.');
+    try {
+      const ctx: engineWrite.WriteCtx = { endpoint: 'mcp:complete_parked_log', method: 'PATCH', key_label: 'MCP_WRITE_TOKEN', t0: Date.now(), note: 'completed by hand, no second review' };
+      const r = await reviewCard.completeParked(args, (kind, id, fields) => engineWrite.patchRecord(kind, id, fields, ctx));
+      await auditClose(audit, { outcome: dry ? 'dry_run' : r.ok ? 'updated' : 'error', detail: `${r.submission_id}: ${dry ? 'would complete' : 'completed'} with no second review${r.ok === false ? `; ${r.message}` : ''}`, natural_id: String(r.submission_id) });
+      return { ...r, audit_id: audit };
+    } catch (e) {
+      if (e instanceof reviewCard.CardError) return refuse(e.reason, e.message);
+      await auditClose(audit, { outcome: 'error', detail: e instanceof Error ? e.message : String(e) });
+      throw e;
+    }
+  },
+};
+
+export const REVIEW_CARD_WRITE_TOOLS: ToolDefinition[] = [rewriteApprovedCard, completeParkedLog];

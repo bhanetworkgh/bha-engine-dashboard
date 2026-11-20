@@ -15909,3 +15909,10 @@ Fix:        `activity()` reads each part's newest time straight from its table (
 Decision:   on the answer, not only in the log, because the agents reading it are the ones who would act on a stale row.
 Problem:    d5f2396 broke the read: "operator does not exist: timestamp with time zone >= text". One $1 was compared with text created_time and with timestamptz occurred_at, so Postgres typed it text. Broken from about 21:37 to 21:39 UTC; it failed with the error, never answered wrong.
 Fix:        6c5a840 casts per column ($1::text, $1::timestamptz). The SQL was run on the live database through query_postgres before the read was retried; read_engine_activity then answered order_check ok, Genie newest 21:09:39 UTC, matching the table.
+
+## 2026-11-20 22:40 — complete_parked_log: a parked log's answers filled in with no second review
+Intent:     Destiny's 20 Nov log was parked by the completeness check for `proof_type`, though the log tags a proof type beside every id. Complete & Send would run the review again; he asked for the card and the backend to be completed directly.
+Files:      server/src/reviewCard.ts (completedCard, completeParked), server/src/mcp/reviewCardTools.ts (complete_parked_log), CLAUDE.md
+Problem:    no tool could fill a Layer 0 answer or edit a pending review card; the only path was the builder's form, which re-reviews.
+Fix:        completeParked writes `<Name> Answer` / `<Name> Answered At` (Complete & Send's own field names) onto the Codex row with `Layer0 Missing` "[]", the same plus Status completed on the Layer 0 row (stops reminders, deletes the incomplete notice), and rewrites Jason's card: the "Codex incomplete" banner becomes a "Codex complete" line naming what was supplied, and each button's missing part is emptied so Approve needs no early reason. Nothing is reviewed or scored again. Destiny or Jason, refused on agent tokens, audited.
+Decision:   a tool, not a hand edit of the rows, so the write goes through engineWrite.patchRecord (status ledger, engine_writes, layer0Notice) like any other.
