@@ -15907,3 +15907,5 @@ Intent:     the pre-check named the 20 Nov sort fault (566f43d) as a silent stat
 Files:      server/src/sharedMemory.ts
 Fix:        `activity()` reads each part's newest time straight from its table (max(created_time), max(occurred_at)) and compares it with the first row it shows. A mismatch is put on the answer as `order_check: { ok: false, warnings }`, naming the part and both times, and logged as `[engine-activity] order check failed`. A clean read carries `order_check: { ok: true }`.
 Decision:   on the answer, not only in the log, because the agents reading it are the ones who would act on a stale row.
+Problem:    d5f2396 broke the read: "operator does not exist: timestamp with time zone >= text". One $1 was compared with text created_time and with timestamptz occurred_at, so Postgres typed it text. Broken from about 21:37 to 21:39 UTC; it failed with the error, never answered wrong.
+Fix:        6c5a840 casts per column ($1::text, $1::timestamptz). The SQL was run on the live database through query_postgres before the read was retried; read_engine_activity then answered order_check ok, Genie newest 21:09:39 UTC, matching the table.
