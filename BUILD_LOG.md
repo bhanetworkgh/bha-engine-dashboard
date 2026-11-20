@@ -15859,3 +15859,10 @@ Files:      server/src/mcp/index.ts, CLAUDE.md, BUILD_LOG.md
 Problem:    none; Bays had not called them since 19 Nov, when they became Genie's.
 Fix:        removed the five from BAYS_TOOLS. Genie's token is built from BAYS_TOOLS, but Genie already reads those services through their own servers and its read_* tools were taken off on 17 Nov, so nothing changes for Genie.
 Decision:   both places changed the same day, as the AGENT_KEYS rule says.
+
+## 2026-11-20 19:40 — Genie gets read_doc, edit_doc and post_channel_message (step 13)
+Intent:     close the three jobs Bays did that Genie could not, before the Bays pointer goes live.
+Files:      server/src/google.ts, server/src/mcp/docTools.ts, server/src/mcp/tools.ts, server/src/mcp/slackTools.ts, server/src/rssReports.ts, server/src/intentCheck.ts, server/src/mcp/index.ts, CLAUDE.md
+Problem:    Bays read and edited Google Docs and posted into other channels through n8n nodes Genie has no copy of. Asking North Star and Research Twin turned out to be Genie's already (13 hand-offs on record, latest 19 Nov 16:53).
+Fix:        read_doc and edit_doc on the dashboard's Google credential; post_channel_message added to Genie's scope, posting as Genie through Genie's post-card route (new guarded flag and thread_ts there). edit_doc and post_channel_message are intent-checked.
+Decision:   post as Genie, not Bays, on Genie's token: people tag Genie, so a post it makes should be from Genie. The destination guard and approval card are the same for both bots.

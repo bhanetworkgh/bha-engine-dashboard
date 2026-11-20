@@ -196,6 +196,51 @@ export async function createDoc(folderId: string, title: string, content: string
   }
 }
 
+/** A Google Doc's text, paragraphs in order, tables a row a line (20 Nov 2026, Genie rebuild step 13). */
+export async function readDoc(docId: string): Promise<{ doc_id: string; title: string; text: string; revision_id: string | null; end_index: number }> {
+  const r = await authed('read the Doc (docs documents.get)', `${DOCS}/documents/${encodeURIComponent(docId)}`);
+  const d = r.body as { title?: string; revisionId?: string; body?: { content?: unknown[] } };
+  const out: string[] = [];
+  let end = 1;
+  const runs = (els: unknown[] | undefined) => (els || []).map((e) => ((e as { textRun?: { content?: string } }).textRun?.content ?? '')).join('');
+  const walk = (content: unknown[] | undefined) => {
+    for (const c of content || []) {
+      const el = c as { endIndex?: number; paragraph?: { elements?: unknown[] }; table?: { tableRows?: { tableCells?: { content?: unknown[] }[] }[] } };
+      if (typeof el.endIndex === 'number') end = Math.max(end, el.endIndex);
+      if (el.paragraph) out.push(runs(el.paragraph.elements).replace(/\n$/, ''));
+      else if (el.table) {
+        for (const row of el.table.tableRows || []) {
+          out.push((row.tableCells || []).map((cell) => (cell.content || []).map((x) => runs((x as { paragraph?: { elements?: unknown[] } }).paragraph?.elements).trim()).join(' ')).join(' | '));
+        }
+      }
+    }
+  };
+  walk(d.body?.content);
+  return { doc_id: docId, title: d.title ?? '', text: out.join('\n'), revision_id: d.revisionId ?? null, end_index: end };
+}
+
+/**
+ * Change a Google Doc's text (20 Nov 2026): each replacement is Docs' own replaceAllText (exact text,
+ * case-sensitive), and `append` is inserted at the end. Returns how many places each replacement changed,
+ * so a find that matched nothing is said, never read as done.
+ */
+export async function editDoc(docId: string, opts: { replacements?: { find: string; replace: string }[]; append?: string }): Promise<{ changed: { find: string; occurrences: number }[]; appended: number }> {
+  const reps = opts.replacements || [];
+  const requests: unknown[] = reps.map((x) => ({ replaceAllText: { containsText: { text: x.find, matchCase: true }, replaceText: x.replace } }));
+  if (opts.append) {
+    const cur = await readDoc(docId);
+    requests.push({ insertText: { location: { index: Math.max(1, cur.end_index - 1) }, text: (cur.text.trim() ? '\n' : '') + opts.append } });
+  }
+  if (!requests.length) return { changed: [], appended: 0 };
+  const r = await authed('change the Doc (docs batchUpdate)', `${DOCS}/documents/${encodeURIComponent(docId)}:batchUpdate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requests }),
+  });
+  const replies = ((r.body as { replies?: { replaceAllText?: { occurrencesChanged?: number } }[] })?.replies) || [];
+  return { changed: reps.map((x, i) => ({ find: x.find, occurrences: replies[i]?.replaceAllText?.occurrencesChanged ?? 0 })), appended: opts.append ? opts.append.length : 0 };
+}
+
 export interface Permission {
   permission_id: string;
 }

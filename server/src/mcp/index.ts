@@ -364,6 +364,9 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-11-20 (Destiny, Genie rebuild step 13.1): Genie is the one agent people tag, so it holds every
         // tool Bays holds, writes included, on this same key. ask_genie is left off: Genie does not ask itself.
         ...[...BAYS_TOOLS].filter((t) => t !== 'ask_genie'),
+        // 2026-11-20 (Destiny, step 13): what Bays did through n8n nodes Genie had no tool for: read and change a
+        // Google Doc, and post into another channel (as Genie; unknown destinations wait on an approval card).
+        'read_doc', 'edit_doc', 'post_channel_message',
         // 2026-11-14 (D4): the daily outside digest from BHA RSS, the one read of outside sources.
         'read_outside_digest',
         // 2026-11-17 (Genie rebuild 7 and 8): one shared memory, and what every part of the engine is doing.

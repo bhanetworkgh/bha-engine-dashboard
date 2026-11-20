@@ -472,10 +472,30 @@ async function postParts(dest: string, text: string, parts: Part[], threadTs: st
   return { ok: failed.length === 0, channel, ts: firstTs, parts: bodies.length, failed_parts: failed, permalink: `https://bayshorizonnetwork.slack.com/archives/${channel}/p${firstTs.replace('.', '')}` };
 }
 
+/** The same post as postParts, made by Genie's bot (it holds its own token; this server holds none of Genie's). */
+async function postPartsAsGenie(dest: string, text: string, parts: Part[], threadTs: string | undefined) {
+  const { postAsGenie } = await import('../rssReports');
+  const fallback = text.replace(/\s+/g, ' ').trim().slice(0, 280) || 'Genie message';
+  const bodies = parts.length ? parts : [null];
+  let firstTs = '';
+  let channel = dest;
+  const failed: { part: number; error: string }[] = [];
+  for (let i = 0; i < bodies.length; i++) {
+    const t = bodies[i] ? (i ? `${fallback} (part ${i + 1} of ${bodies.length})` : fallback) : text.slice(0, 39000);
+    const r = await postAsGenie(channel, t, (bodies[i] as unknown[] | null) ?? [], undefined, { thread_ts: i ? threadTs || firstTs : threadTs, guarded: true });
+    if (i === 0) {
+      if (!r.ok) return { ok: false as const, step: `part 1 of ${bodies.length}`, error: r.error };
+      firstTs = r.ts;
+      if (r.channel) channel = r.channel;
+    } else if (!r.ok) failed.push({ part: i + 1, error: r.error });
+  }
+  return { ok: failed.length === 0, channel, ts: firstTs, parts: bodies.length, failed_parts: failed, posted_as: 'Genie', permalink: `https://bayshorizonnetwork.slack.com/archives/${channel}/p${firstTs.replace('.', '')}` };
+}
+
 export const postChannelMessage: ToolDefinition = {
   name: 'post_channel_message',
   description:
-    'Post a message as the Bays bot into a channel, DM or to a person. This is the tool an approved "Bays — Slack Send" post runs through: on an agent token a destination the engine does not know (not in channel_tracking, not an engine channel, never approved before; or a person with no Builder Profile) is not posted and waits on an Approve / Deny card. destination: C…, G…, D… or a U… user id. text: the message (used as the notification text when parts are given). parts: optional array of Slack block arrays; part 1 posts at the destination and the rest as replies in its thread. Every post is checked for Slack\'s ok:false. Audited on engine_mcp_writes.',
+    'Post a message into a channel, DM or to a person: as the Bays bot, or as Genie when Genie calls it (20 Nov 2026). Use it only to post somewhere other than the thread you are answering in. This is the tool an approved "Bays — Slack Send" post runs through: on an agent token a destination the engine does not know (not in channel_tracking, not an engine channel, never approved before; or a person with no Builder Profile) is not posted and waits on an Approve / Deny card. destination: C…, G…, D… or a U… user id. text: the message (used as the notification text when parts are given). parts: optional array of Slack block arrays; part 1 posts at the destination and the rest as replies in its thread. Every post is checked for Slack\'s ok:false. Audited on engine_mcp_writes.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -517,7 +537,9 @@ export const postChannelMessage: ToolDefinition = {
         );
         return { ...asked, target: dest };
       }
-      const r = await postParts(dest, text, parts, threadTs);
+      // 20 Nov 2026 (Destiny, Genie rebuild step 13): on Genie's token the post is Genie's, made by Genie's own bot
+      // through its post-card route; the destination guard above is the same for both.
+      const r = deps.agent === 'genie' ? await postPartsAsGenie(dest, text, parts, threadTs) : await postParts(dest, text, parts, threadTs);
       if (!r.ok) {
         return { outcome: 'failed', detail: `${'step' in r ? r.step : 'some parts'}: ${'error' in r ? r.error : 'some_parts_failed'}`, target: dest, answer: { ...r, ok: false, error: 'error' in r ? r.error : 'some_parts_failed', message: 'Slack refused the post, or part of it. See error.' } };
       }

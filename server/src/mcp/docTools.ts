@@ -468,4 +468,85 @@ export const createDoc: ToolDefinition = {
     }),
 };
 
-export const DOC_WRITE_TOOLS: ToolDefinition[] = [shareDoc, unshareDoc, grantDriveAccess, createDoc];
+
+/* ------------------------------------------- read_doc and edit_doc (20 Nov 2026) */
+
+/** A Docs link or a bare id, to the id. */
+function docIdOf(v: string): string {
+  const m = v.match(/\/d\/([A-Za-z0-9_-]{20,})/);
+  return m ? m[1] : v.trim();
+}
+
+/**
+ * Genie rebuild step 13 (20 Nov 2026, Destiny): Genie is the agent people tag, and Bays read and edited
+ * Google Docs through n8n nodes Genie does not have. These are the same two jobs on this server's own
+ * Google credential (google.ts), so the tool is one Genie and a person on the connector can both call.
+ */
+export const readDoc: ToolDefinition = {
+  name: 'read_doc',
+  description:
+    'Read the full current text of a Google Doc by its id or link: paragraphs in order, a table row per line. Use it whenever someone asks what a doc says, and before edit_doc so you copy the exact text to replace. Returns {ok, doc_id, title, text, chars, truncated, link}; 30,000 characters at most, offset for the rest. Read only.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      document_id: { type: 'string', description: 'The Doc id, or a Docs link.' },
+      offset: { type: 'number', description: 'Character to start from, for a long Doc. Default 0.' },
+    },
+    required: ['document_id'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: true, openWorldHint: true, title: 'Read a Google Doc' },
+  handler: async (args) => {
+    const id = docIdOf(str(args, 'document_id'));
+    if (!id) return { ok: false, reason: 'bad_argument', message: '"document_id" is required.' };
+    if (!google.googleConfigured()) return { ok: false, reason: 'not_configured', message: google.notConfiguredMessage() };
+    try {
+      const d = await google.readDoc(id);
+      const offset = Math.max(0, Math.floor(Number(args.offset) || 0));
+      const text = d.text.slice(offset, offset + TEXT_CAP);
+      const truncated = offset + TEXT_CAP < d.text.length;
+      return { ok: true, doc_id: id, title: d.title, text, chars: d.text.length, offset, truncated, ...(truncated ? { next_offset: offset + TEXT_CAP } : {}), link: google.docLink(id) };
+    } catch (e) {
+      const status = e instanceof google.GoogleError ? e.status : 0;
+      return { ok: false, reason: status === 404 ? 'doc_not_found' : status === 403 ? 'not_authorised' : 'unreadable', message: e instanceof Error ? e.message : String(e) };
+    }
+  },
+};
+
+export const editDoc: ToolDefinition = {
+  name: 'edit_doc',
+  description:
+    'Change a Google Doc\'s text: replacements (each {find, replace}, exact and case-sensitive, every place it appears; an empty replace deletes) and/or append (text added at the end). Read the Doc with read_doc first and copy the exact text. Only on an explicit ask. A find that matched nothing is ok:false, reason not_found, naming it; the other changes still landed and are listed. Formatting (headings, bold) is not changed. Returns {ok, doc_id, changed, appended, link}. dry_run says what would change and calls Google for nothing. Audited on engine_mcp_writes.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      document_id: { type: 'string', description: 'The Doc id, or a Docs link.' },
+      replacements: { type: 'array', items: { type: 'object', properties: { find: { type: 'string' }, replace: { type: 'string' } }, required: ['find', 'replace'], additionalProperties: false } },
+      append: { type: 'string', description: 'Text to add at the end of the Doc.' },
+      ...DRY,
+      ...REQUESTER,
+      ...ORIGIN,
+    },
+    required: ['document_id'],
+    additionalProperties: false,
+  },
+  annotations: { ...WRITE_ANNOTATIONS, title: 'Change a Google Doc\'s text' },
+  handler: (args, deps) =>
+    audited('edit_doc', args, deps, async () => {
+      const id = docIdOf(str(args, 'document_id'));
+      const reps = (Array.isArray(args.replacements) ? args.replacements : [])
+        .filter((x): x is { find: string; replace: string } => !!x && typeof (x as { find?: unknown }).find === 'string' && (x as { find: string }).find.length > 0 && typeof (x as { replace?: unknown }).replace === 'string')
+        .slice(0, 50);
+      const append = typeof args.append === 'string' && args.append.trim() ? args.append : '';
+      if (!id || (!reps.length && !append)) return { outcome: 'refused', detail: 'nothing to change', answer: { ok: false, reason: 'bad_argument', message: '"document_id" and at least one replacement or "append" are required. Nothing was changed.' } };
+      if (args.dry_run === true) return { outcome: 'dry_run', detail: null, target: id, answer: { ok: true, dry_run: true, would: { document_id: id, replacements: reps.length, append_chars: append.length }, google_configured: google.googleConfigured() } };
+      if (!google.googleConfigured()) return { outcome: 'refused', detail: 'not configured', target: id, answer: { ok: false, reason: 'not_configured', message: google.notConfiguredMessage() } };
+      const r = await google.editDoc(id, { replacements: reps, append });
+      const missed = r.changed.filter((c) => c.occurrences === 0).map((c) => c.find);
+      const detail = `${r.changed.reduce((n, c) => n + c.occurrences, 0)} replaced${r.appended ? `, ${r.appended} chars appended` : ''}${missed.length ? `, ${missed.length} not found` : ''}`;
+      const answer = { ok: missed.length === 0, doc_id: id, changed: r.changed, appended: r.appended, link: google.docLink(id), ...(missed.length ? { reason: 'not_found', message: `Not found in the Doc, so not changed: ${missed.map((m) => JSON.stringify(m.slice(0, 80))).join(', ')}. Read it with read_doc and copy the text exactly.` } : {}) };
+      return { outcome: missed.length && !r.appended && missed.length === reps.length ? 'failed' : 'applied', detail, target: id, answer };
+    }),
+};
+
+export const DOC_WRITE_TOOLS: ToolDefinition[] = [shareDoc, unshareDoc, grantDriveAccess, createDoc, editDoc];
