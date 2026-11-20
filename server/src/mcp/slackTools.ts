@@ -130,7 +130,7 @@ function summarise(results: NudgeLine[]): string {
 export const sendNudge: ToolDefinition = {
   name: 'send_nudge',
   description:
-    'DM each person being nudged, one Slack DM each, and send a marked copy to everyone cc\'d. recipients: only the people the message is written to (U…/W… ids or <@U…> mentions, an array or one string separated by spaces or commas). cc: people who should see it but are not being asked anything (e.g. "cc Jason"); each gets the same text under a line saying who it was sent to, so a message written to Hardik never lands in Jason\'s DM looking like it was meant for him. Pass requester_user_id: if the person asking is also in recipients beside others, they are moved to cc and the answer says so (moved_to_cc). Anything that is not a Slack user id comes back as not_a_slack_user_id, never dropped. thread_link is appended to the text unless already in it. Returns {ok (every DM sent), sent_count, failed_count, results: [{recipient, user_id, role, ok, ts, error}], summary}; when any DM fails, reason is slack_refused and message carries Slack\'s own error for each. Empty text or no valid recipient: ok:false and nothing is sent. A DM to someone with no Builder Profile is not sent on an agent token: a person is asked in Slack first and the answer is ok:false, reason awaiting_approval (say so, do not retry). As the Bays bot; audited on engine_mcp_writes.',
+    'DM each person being nudged, one Slack DM each, and send a marked copy to everyone cc\'d. recipients: only the people the message is written to (U…/W… ids or <@U…> mentions, an array or one string separated by spaces or commas). cc: people who should see it but are not being asked anything (e.g. "cc Jason"); each gets the same text under a line saying who it was sent to, so a message written to Hardik never lands in Jason\'s DM looking like it was meant for him. Pass requester_user_id: if the person asking is also in recipients beside others, they are moved to cc and the answer says so (moved_to_cc). Anything that is not a Slack user id comes back as not_a_slack_user_id, never dropped. thread_link is appended to the text unless already in it. Returns {ok (every DM sent), sent_count, failed_count, results: [{recipient, user_id, role, ok, ts, error}], summary}; when any DM fails, reason is slack_refused and message carries Slack\'s own error for each. Empty text or no valid recipient: ok:false and nothing is sent. A DM to someone with no Builder Profile is not sent on an agent token: a person is asked in Slack first and the answer is ok:false, reason awaiting_approval (say so, do not retry). As the Bays bot, or as Genie\'s own bot when Genie calls it (no Bays in it); audited on engine_mcp_writes.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -166,7 +166,10 @@ export const sendNudge: ToolDefinition = {
       const total = parsed.total + ccParsed.total;
       const body = typeof args.text === 'string' ? args.text.trim() : '';
       const text = nudgeText(body, str(args, 'thread_link'));
-      const ccText = `_Copy for you: Bays sent this to ${valid.map((u) => `<@${u}>`).join(', ')}._\n\n${text}`;
+      // 20 Nov 2026 (Destiny): on Genie's token the DM is Genie's, made by Genie's own bot, with no Bays in it.
+      const asGenie = deps.agent === 'genie';
+      const sender = asGenie ? 'Genie' : 'Bays';
+      const ccText = `_Copy for you: ${sender} sent this to ${valid.map((u) => `<@${u}>`).join(', ')}._\n\n${text}`;
       const invalidLines: NudgeLine[] = invalid.map((x) => ({ recipient: x, user_id: '', ok: false, ts: '', channel: '', error: 'not_a_slack_user_id' }));
 
       if (!body || !valid.length) {
@@ -200,14 +203,14 @@ export const sendNudge: ToolDefinition = {
           },
         };
       }
-      if (!slack.slackConfigured()) return { outcome: 'refused', detail: 'not configured', target: valid.join(','), answer: notConfigured() };
+      if (!asGenie && !slack.slackConfigured()) return { outcome: 'refused', detail: 'not configured', target: valid.join(','), answer: notConfigured() };
       if (unknown.length && approvals.needsApproval()) {
         const asked = approvals.pendingAnswer(
           await approvals.request({
             tool: 'send_nudge',
             args: { ...args, destination: [...valid, ...ccIds].join(',') },
             target: [...valid, ...ccIds].join(','),
-            summary: `send a DM as Bays to ${unknown.map((u) => `<@${u}>`).join(', ')}, who ${unknown.length === 1 ? 'has' : 'have'} no Builder Profile${valid.length > unknown.length ? ` (and to ${valid.length - unknown.length} known team member${valid.length - unknown.length === 1 ? '' : 's'})` : ''}. Message: "${text.slice(0, 400)}"`,
+            summary: `send a DM as ${sender} to ${unknown.map((u) => `<@${u}>`).join(', ')}, who ${unknown.length === 1 ? 'has' : 'have'} no Builder Profile${valid.length > unknown.length ? ` (and to ${valid.length - unknown.length} known team member${valid.length - unknown.length === 1 ? '' : 's'})` : ''}. Message: "${text.slice(0, 400)}"`,
           }),
         );
         return { ...asked, target: valid.join(',') };
@@ -217,7 +220,14 @@ export const sendNudge: ToolDefinition = {
       const results: NudgeLine[] = [];
       const sends: Array<[string, 'recipient' | 'cc']> = [...valid.map((u) => [u, 'recipient'] as [string, 'recipient']), ...ccIds.map((u) => [u, 'cc'] as [string, 'cc'])];
       for (const [u, role] of sends) {
-        const r = await slack.botCall('chat.postMessage', { channel: u, text: role === 'cc' ? ccText : text, unfurl_links: false });
+        const msg = role === 'cc' ? ccText : text;
+        const r: { ok: boolean; ts?: unknown; channel?: unknown; error?: unknown } = asGenie
+          ? await (async () => {
+              const { postAsGenie } = await import('../rssReports');
+              const g = await postAsGenie(u, msg, [], undefined, { guarded: true });
+              return g.ok ? { ok: true, ts: g.ts, channel: g.channel ?? '' } : { ok: false, error: g.error };
+            })()
+          : await slack.botCall('chat.postMessage', { channel: u, text: msg, unfurl_links: false });
         results.push({
           recipient: `<@${u}>`,
           user_id: u,
@@ -240,6 +250,7 @@ export const sendNudge: ToolDefinition = {
           ...(failed ? { reason: 'slack_refused', message: summarise(results) } : {}),
           sent_count: sent,
           failed_count: failed,
+          posted_as: sender,
           ...(movedToCc.length ? { moved_to_cc: movedToCc, note: `${movedToCc.map((u) => `<@${u}>`).join(', ')} asked for this nudge, so they got a marked copy rather than a DM written to someone else.` } : {}),
           results,
           summary: summarise(results),

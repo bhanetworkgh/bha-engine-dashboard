@@ -15880,3 +15880,10 @@ Files:      server/src/incomeBoard.ts (new), server/src/mcp/incomeBoardTools.ts 
 Problem:    The registry row Genie made for the board earlier had its fact cut off, no owner and "Not yet defined" as its write door.
 Fix:        Migration 146 creates engine_income_board_items, seeds eleven open blocking loops, and rewrites that registry row (key, full fact, store, door, owner Destiny). read_income_board in Bays', North Star's and Genie's scopes; set_income_board_item on the write connection, Genie's scope, Destiny or Jason only, intent-checked.
 Decision:   Ready is computed, never set: two gates read live (a real Stage 1 pass, the charge gate) plus every item on the board closed. Items are curated rather than every VFARM or CST loop, because 140 open loops in those lanes would make the answer No forever and name nothing useful. No item held reads No, not Yes.
+
+## 2026-11-20 20:50 — Genie's DMs come from Genie, not Bays
+Intent:     Destiny asked Genie in #bha-sandbox (1795200115.041829) to DM him; the DM landed in his DM with Bays. Genie does everything itself, with no Bays in it.
+Files:      server/src/mcp/slackTools.ts
+Problem:    send_nudge always posted with SLACK_BAYS_BOT_TOKEN, whoever called it. Audit 7535: agent genie, send_nudge applied, channel D0BDLU2H0TC (Destiny's DM with Bays). post_channel_message already posted as Genie on Genie's token; send_nudge did not.
+Fix:        On Genie's token send_nudge posts each DM through postAsGenie (Genie's own /api/genie/post-card, guarded: true, which already accepts a U… id and opens the DM as Genie). The cc line and the approval card name Genie as the sender, and the answer carries posted_as. The Bays path is unchanged.
+Decision:   post_file still uploads as Bays: Genie has no upload route yet, so a file from Genie needs that route first.
