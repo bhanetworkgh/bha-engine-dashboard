@@ -1971,7 +1971,7 @@ ID when there is none). Destiny or Jason, a reason of 3 to 1,000 characters, `dr
 
 **Reads of the services builders work on** (4 Nov 2026, Destiny: the code check, Bays and the dashboard should
 check a claim against the source). `server/src/serviceReads.ts`, `server/src/mcp/serviceTools.ts`. `read_github`,
-`read_render`, `read_twilio`, `read_elevenlabs` and `read_stripe` (read only, both connections, in Bays' scope): a GET
+`read_render`, `read_twilio`, `read_elevenlabs` and `read_stripe` (read only, both connections; in Bays' scope until 20 Nov 2026, when they came off it because those services are Genie's, read through their own servers): a GET
 to a path on `ALLOWED` and nothing else, so a broad key still reads only what the lists name; Render's environment
 variables are on no list. 30,000 characters a call (`offset` for the rest), secrets redacted, and on an agent's token
 customers' numbers and emails are masked. An unset key is `not_configured`. Keys, no defaults: `GITHUB_READ_TOKEN`,

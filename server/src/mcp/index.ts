@@ -217,9 +217,9 @@ const BAYS_TOOLS: ReadonlySet<string> = new Set([
         // 2026-10-28: "how much OpenRouter / Twilio credit is left?" asked in Slack. Both balances read now
         // through n8n, judged against the SOP floors. A read; it tops nothing up.
         'check_service_balances',
-        // 2026-11-04 (Destiny): Bays checks a claim against the live source: commit numbers, deploys, calls,
-        // payments. Read only, allowlisted paths; people's numbers and emails are masked on an agent's token.
-        'read_github', 'read_render', 'read_twilio', 'read_elevenlabs', 'read_stripe',
+        // 2026-11-04 gave Bays the five live service reads (read_github, read_render, read_twilio, read_elevenlabs,
+        // read_stripe); removed 2026-11-20 (Destiny, Genie rebuild audit): GitHub, Render, Twilio, ElevenLabs and Stripe
+        // are Genie's, read through their own servers, and Bays has not used them since 19 Nov.
         // 2026-11-19 (Destiny): "how much Apify is left this month?" asked in Slack. Usage and runs, read only.
         'read_apify',
         // 2026-11-04 (Destiny): the automatic code check runs on this token. Only the finished check comes back

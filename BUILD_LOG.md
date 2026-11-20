@@ -15852,3 +15852,10 @@ Destiny's direction (20 Nov): Genie becomes the one agent people tag; Bays keeps
 - `server/src/mcp/index.ts`: Bays' tool list moved into `BAYS_TOOLS`; the `genie` key (`READONLY_SECRETS_GENIE`, name kept so nothing on Render changes) is now `access: 'write'` and holds `BAYS_TOOLS` (less `ask_genie`) plus its own reads. One key, one connection (`/mcp/agent`).
 - `server/src/intentCheck.ts`: `CHECKED_AGENTS` now holds `genie`, so Genie's loop, watch, nudge, file and SOP writes are checked against the ask exactly as Bays' are, and the three approval-gated tools post the same Approve / Deny card.
 - `server/test/genie-doctrine.test.cjs` checks 1 and 2 updated to the new scope. Not run here: installs are blocked in this environment; the server type check shows the same 1,128 environment errors before and after, none new.
+
+## 2026-11-20 16:40 — Bays' five service reads off its scope (Genie rebuild audit)
+Intent:     keep the dashboard's Bays scope in step with the Bays agent, which lost read_github, read_render, read_twilio, read_elevenlabs and read_stripe in its n8n allow-list today.
+Files:      server/src/mcp/index.ts, CLAUDE.md, BUILD_LOG.md
+Problem:    none; Bays had not called them since 19 Nov, when they became Genie's.
+Fix:        removed the five from BAYS_TOOLS. Genie's token is built from BAYS_TOOLS, but Genie already reads those services through their own servers and its read_* tools were taken off on 17 Nov, so nothing changes for Genie.
+Decision:   both places changed the same day, as the AGENT_KEYS rule says.
