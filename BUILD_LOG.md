@@ -15866,3 +15866,10 @@ Files:      server/src/google.ts, server/src/mcp/docTools.ts, server/src/mcp/too
 Problem:    Bays read and edited Google Docs and posted into other channels through n8n nodes Genie has no copy of. Asking North Star and Research Twin turned out to be Genie's already (13 hand-offs on record, latest 19 Nov 16:53).
 Fix:        read_doc and edit_doc on the dashboard's Google credential; post_channel_message added to Genie's scope, posting as Genie through Genie's post-card route (new guarded flag and thread_ts there). edit_doc and post_channel_message are intent-checked.
 Decision:   post as Genie, not Bays, on Genie's token: people tag Genie, so a post it makes should be from Genie. The destination guard and approval card are the same for both bots.
+
+## 2026-11-20 20:05 — Genie answers ranking and priority asks itself
+Intent:     Destiny: Genie hands almost every ask to North Star; it should run the checks and answer itself as Bays did, and hand to North Star only when someone asks for it.
+Files:      server/src/mcp/index.ts, CLAUDE.md, BUILD_LOG.md (and the Genie repo: twinRouting, slack.ts, openaiService rules, tests)
+Problem:    Genie routed any ask containing "rank", "priority", "strategy", "mission", "positioning" or a mention of North Star straight to North Star, and after answering also handed off whenever its model set north_star_needed. The 20 Nov announcement was handed to North Star.
+Fix:        Genie hands off only on an explicit ask (ask/send/hand to North Star, "North Star:", "for North Star", "what does North Star think"); the after-answer hand-off is off unless GENIE_NS_SYNTHESIS_HOP=true. Genie's scope here gains rank_lanes, lane_health and get_priority_evidence so it can rank and weigh lanes itself.
+Decision:   Same rule for Research Twin: only when asked for by name.
