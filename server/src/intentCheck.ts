@@ -35,7 +35,8 @@ import { PEOPLE } from './mcp/northStarTools';
 import * as intentHeal from './intentHeal';
 
 /** Which agents are checked. Bays is the one turning founder and builder asks into actions. */
-export const CHECKED_AGENTS = new Set(['bays']);
+// 20 Nov 2026 (Genie rebuild step 13.1): Genie writes on the same rules as Bays.
+export const CHECKED_AGENTS = new Set(['bays', 'genie']);
 
 /** Two misses on one ask and tool within this window raise an incident. */
 const MISS_WINDOW_HOURS = 6;

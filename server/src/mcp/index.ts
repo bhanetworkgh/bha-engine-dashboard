@@ -151,6 +151,97 @@ interface AgentKey {
   tools: ReadonlySet<string> | null;
 }
 
+/** Bays' scope. Genie holds all of it too (Genie rebuild step 13.1, 20 Nov 2026), so a tool added here reaches both. */
+const BAYS_TOOLS: ReadonlySet<string> = new Set([
+        // 2026-11-14 (D4): the daily outside digest from BHA RSS, the one read of outside sources.
+        'read_outside_digest',
+        // 2026-11-17 (Genie rebuild 7 and 8): one shared memory, and what every part of the engine is doing.
+        'read_shared_memory', 'read_engine_activity', 'write_shared_memory',
+        // 2026-11-19 (Genie rebuild 10.1): GitHub, Render, n8n building and deep questions go to Genie, in the same thread.
+        'ask_genie',
+        // 2026-11-05: a Stage 1 agreement to Destiny's or Jason's own DM, never through the agent.
+        'send_agreement',
+        // 2026-11-04: the Media Twin's drafts whole, so a reliability claim is read in full, never from its hook.
+        'read_media_posts',
+        'list_writable_kinds', 'find_records', 'create_record', 'update_record', 'archive_record', 'delete_record',
+        'get_page_data', 'get_health', 'get_recovery_status', 'list_n8n_workflows', 'get_n8n_workflow',
+        'read_slack_file', 'share_doc', 'grant_drive_access', 'create_doc', 'send_nudge', 'post_file',
+        'create_client_report_doc', 'get_execution_quota',
+        // 2026-10-07: speech to text for a voice note or audio file (834A).
+        'transcribe_slack_audio',
+        // 2026-10-05: reminder posts Slack holds and sends as Bays.
+        'schedule_reminder', 'list_reminders', 'cancel_reminder',
+        // 2026-10-01: what may be said about vFarm (T0NO).
+        'read_media_doctrine', 'read_publication_decision', 'read_doctrine_gap_summary',
+        // 2026-10-08: the candidate flow from Slack. Granted to the write connection on 25 Sep and
+        // left off this list when tokens were scoped on 28 Sep, so Bays saved a candidate's pattern
+        // with create_record instead (BP-GENIE-1791419670135-5KR7).
+        'draft_pattern_candidate', 'register_pattern_candidate',
+        // 2026-10-09: the vFarm stage gates and 5-rack offer (7S0O). Bays reads them and writes what
+        // Jason gives it; deleting fixtures stays with a person on the connector.
+        'get_vfarm_gates', 'write_vfarm_gate',
+        // 2026-10-10: the way back from share_doc. Behind the same approval card.
+        'unshare_doc',
+        // 2026-10-10: Jason's go-time notice: every agent reads Logstream and engine.event.v1.
+        'read_logstream', 'read_engine_events',
+        // 2026-10-11: Decision Watch (5YQA). Bays opens, lists and closes; running the pass stays with a person.
+        'open_decision_watch', 'list_decision_watches', 'close_decision_watch',
+        // 2026-10-11: attach an SOP written after the watch was opened (Jason, 1791746835.121559).
+        'update_decision_watch',
+        // 2026-10-18: pause a watch's reminders until a date the person names, at most 14 days,
+        // instead of cancelling it and opening a new one (Kaiqi, #workflow-logs-kaiqi).
+        'snooze_decision_watch',
+        // 2026-10-14: read an SOP whole after a search finds it, so a blocked builder is walked
+        // through the right section of an Operator Playbook (ZZVU).
+        'read_sop',
+        // 2026-10-18: the Engine Surfaces Contract's read (see North Star's entry).
+        'read_buyer_flow',
+        // 2026-10-19: the self-healing scorecard, so a figure Bays quotes is the page's figure.
+        'read_self_healing',
+        // 2026-10-25: void a parked log when its builder, Jason or Destiny asks in a thread (Kaiqi,
+        // #bha-log-reviews 1792899253.224039). Its dry run lists the Codex logs for the same recording,
+        // which is what Bays checks before saying there is no newer submission.
+        'void_parked_log',
+        // 2026-10-27: the CST help pages with their stage (draft, checked by Hardik, in cst-help-manuals),
+        // so a draft is never quoted to a customer as final. Writing them stays with Destiny on the connector.
+        'read_help_pages',
+        // 2026-10-29: the code checks and November's outputs (Jason, DM 1793181986.036119). Bays reads what is
+        // waiting and what each check found; recording a check stays with Destiny until D6 opens it.
+        'read_code_checks',
+        // 2026-10-28 (D3): the evidence store, so a decision's evidence is read from the one copy the
+        // dashboard holds, by name, never from a link that can move. A read.
+        'read_evidence',
+        // 2026-10-28 (D3): "Bays, save this into the evidence store" on a file posted in Slack. Saves one
+        // document and never edits one; who may ask is held on the server.
+        'save_evidence',
+        // 2026-10-28: "how much OpenRouter / Twilio credit is left?" asked in Slack. Both balances read now
+        // through n8n, judged against the SOP floors. A read; it tops nothing up.
+        'check_service_balances',
+        // 2026-11-04 (Destiny): Bays checks a claim against the live source: commit numbers, deploys, calls,
+        // payments. Read only, allowlisted paths; people's numbers and emails are masked on an agent's token.
+        'read_github', 'read_render', 'read_twilio', 'read_elevenlabs', 'read_stripe',
+        // 2026-11-19 (Destiny): "how much Apify is left this month?" asked in Slack. Usage and runs, read only.
+        'read_apify',
+        // 2026-11-04 (Destiny): the automatic code check runs on this token. Only the finished check comes back
+        // here; Destiny's Approve is what posts it.
+        'submit_code_check_draft',
+        // Reads the check needs beside the five above.
+        'read_open_loops', 'read_monitoring_twin', 'read_vfarm_history',
+        // 2026-10-30: "Bays, register this tool in the dashboard" from Slack (Destiny). Reads and writes
+        // the System Registry's services, endpoints and workflows; no secret is ever written (held on the
+        // server), and remove and restore are Destiny's or Jason's.
+        'read_registry', 'write_registry',
+        // 2026-11-02 (Destiny): "Bays, move Shibu to Form 2" from Jason. Stage 1 to 2 only, Jason or Destiny
+        // only, and on this token it never moves anything itself: it posts an Approve / Cancel card in
+        // #bha-engine-alerts and the lead moves when one of them approves.
+        'move_buyer_to_form_2',
+        // 2026-11-08 (Destiny; Jason in #all-bayshorizonnetwork 1794151650.032329): correct an SOP in place
+        // when Destiny or Jason asks, instead of ingesting a second copy. Same id, old text on the audit line.
+        'edit_sop',
+        // 2026-11-11: the Sovereign Context Layer (see North Star's entry).
+        'read_true_home', 'read_record_history',
+]);
+
 const AGENT_KEYS: ReadonlyArray<AgentKey> = (
   [
     {
@@ -245,95 +336,7 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
       agent: 'bays',
       env: 'MCP_AGENT_TOKEN_BAYS',
       access: 'write',
-      tools: new Set([
-        // 2026-11-14 (D4): the daily outside digest from BHA RSS, the one read of outside sources.
-        'read_outside_digest',
-        // 2026-11-17 (Genie rebuild 7 and 8): one shared memory, and what every part of the engine is doing.
-        'read_shared_memory', 'read_engine_activity', 'write_shared_memory',
-        // 2026-11-19 (Genie rebuild 10.1): GitHub, Render, n8n building and deep questions go to Genie, in the same thread.
-        'ask_genie',
-        // 2026-11-05: a Stage 1 agreement to Destiny's or Jason's own DM, never through the agent.
-        'send_agreement',
-        // 2026-11-04: the Media Twin's drafts whole, so a reliability claim is read in full, never from its hook.
-        'read_media_posts',
-        'list_writable_kinds', 'find_records', 'create_record', 'update_record', 'archive_record', 'delete_record',
-        'get_page_data', 'get_health', 'get_recovery_status', 'list_n8n_workflows', 'get_n8n_workflow',
-        'read_slack_file', 'share_doc', 'grant_drive_access', 'create_doc', 'send_nudge', 'post_file',
-        'create_client_report_doc', 'get_execution_quota',
-        // 2026-10-07: speech to text for a voice note or audio file (834A).
-        'transcribe_slack_audio',
-        // 2026-10-05: reminder posts Slack holds and sends as Bays.
-        'schedule_reminder', 'list_reminders', 'cancel_reminder',
-        // 2026-10-01: what may be said about vFarm (T0NO).
-        'read_media_doctrine', 'read_publication_decision', 'read_doctrine_gap_summary',
-        // 2026-10-08: the candidate flow from Slack. Granted to the write connection on 25 Sep and
-        // left off this list when tokens were scoped on 28 Sep, so Bays saved a candidate's pattern
-        // with create_record instead (BP-GENIE-1791419670135-5KR7).
-        'draft_pattern_candidate', 'register_pattern_candidate',
-        // 2026-10-09: the vFarm stage gates and 5-rack offer (7S0O). Bays reads them and writes what
-        // Jason gives it; deleting fixtures stays with a person on the connector.
-        'get_vfarm_gates', 'write_vfarm_gate',
-        // 2026-10-10: the way back from share_doc. Behind the same approval card.
-        'unshare_doc',
-        // 2026-10-10: Jason's go-time notice: every agent reads Logstream and engine.event.v1.
-        'read_logstream', 'read_engine_events',
-        // 2026-10-11: Decision Watch (5YQA). Bays opens, lists and closes; running the pass stays with a person.
-        'open_decision_watch', 'list_decision_watches', 'close_decision_watch',
-        // 2026-10-11: attach an SOP written after the watch was opened (Jason, 1791746835.121559).
-        'update_decision_watch',
-        // 2026-10-18: pause a watch's reminders until a date the person names, at most 14 days,
-        // instead of cancelling it and opening a new one (Kaiqi, #workflow-logs-kaiqi).
-        'snooze_decision_watch',
-        // 2026-10-14: read an SOP whole after a search finds it, so a blocked builder is walked
-        // through the right section of an Operator Playbook (ZZVU).
-        'read_sop',
-        // 2026-10-18: the Engine Surfaces Contract's read (see North Star's entry).
-        'read_buyer_flow',
-        // 2026-10-19: the self-healing scorecard, so a figure Bays quotes is the page's figure.
-        'read_self_healing',
-        // 2026-10-25: void a parked log when its builder, Jason or Destiny asks in a thread (Kaiqi,
-        // #bha-log-reviews 1792899253.224039). Its dry run lists the Codex logs for the same recording,
-        // which is what Bays checks before saying there is no newer submission.
-        'void_parked_log',
-        // 2026-10-27: the CST help pages with their stage (draft, checked by Hardik, in cst-help-manuals),
-        // so a draft is never quoted to a customer as final. Writing them stays with Destiny on the connector.
-        'read_help_pages',
-        // 2026-10-29: the code checks and November's outputs (Jason, DM 1793181986.036119). Bays reads what is
-        // waiting and what each check found; recording a check stays with Destiny until D6 opens it.
-        'read_code_checks',
-        // 2026-10-28 (D3): the evidence store, so a decision's evidence is read from the one copy the
-        // dashboard holds, by name, never from a link that can move. A read.
-        'read_evidence',
-        // 2026-10-28 (D3): "Bays, save this into the evidence store" on a file posted in Slack. Saves one
-        // document and never edits one; who may ask is held on the server.
-        'save_evidence',
-        // 2026-10-28: "how much OpenRouter / Twilio credit is left?" asked in Slack. Both balances read now
-        // through n8n, judged against the SOP floors. A read; it tops nothing up.
-        'check_service_balances',
-        // 2026-11-04 (Destiny): Bays checks a claim against the live source: commit numbers, deploys, calls,
-        // payments. Read only, allowlisted paths; people's numbers and emails are masked on an agent's token.
-        'read_github', 'read_render', 'read_twilio', 'read_elevenlabs', 'read_stripe',
-        // 2026-11-19 (Destiny): "how much Apify is left this month?" asked in Slack. Usage and runs, read only.
-        'read_apify',
-        // 2026-11-04 (Destiny): the automatic code check runs on this token. Only the finished check comes back
-        // here; Destiny's Approve is what posts it.
-        'submit_code_check_draft',
-        // Reads the check needs beside the five above.
-        'read_open_loops', 'read_monitoring_twin', 'read_vfarm_history',
-        // 2026-10-30: "Bays, register this tool in the dashboard" from Slack (Destiny). Reads and writes
-        // the System Registry's services, endpoints and workflows; no secret is ever written (held on the
-        // server), and remove and restore are Destiny's or Jason's.
-        'read_registry', 'write_registry',
-        // 2026-11-02 (Destiny): "Bays, move Shibu to Form 2" from Jason. Stage 1 to 2 only, Jason or Destiny
-        // only, and on this token it never moves anything itself: it posts an Approve / Cancel card in
-        // #bha-engine-alerts and the lead moves when one of them approves.
-        'move_buyer_to_form_2',
-        // 2026-11-08 (Destiny; Jason in #all-bayshorizonnetwork 1794151650.032329): correct an SOP in place
-        // when Destiny or Jason asks, instead of ingesting a second copy. Same id, old text on the audit line.
-        'edit_sop',
-        // 2026-11-11: the Sovereign Context Layer (see North Star's entry).
-        'read_true_home', 'read_record_history',
-      ]),
+      tools: BAYS_TOOLS,
     },
     {
       // 2026-10-22, Destiny: Hardik's independent audit of the Stripe -> ledger path (Jason's
@@ -352,11 +355,15 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
     {
       // 2026-10-11: Slack Genie (Kaiqi's service), LOOP-1791653985161-QRTH. Jason's go-time notice:
       // Genie reads the same two surfaces the three agents read, read-only, so it never builds its
-      // own view of incidents. A read token can never resolve to write.
+      // own view of incidents. 20 Nov 2026 (Destiny, Genie rebuild step 13): Genie became the one agent people
+      // tag, so this key became a write key with Bays' whole scope. The variable keeps its old name.
       agent: 'genie',
       env: 'READONLY_SECRETS_GENIE',
-      access: 'read',
+      access: 'write',
       tools: new Set([
+        // 2026-11-20 (Destiny, Genie rebuild step 13.1): Genie is the one agent people tag, so it holds every
+        // tool Bays holds, writes included, on this same key. ask_genie is left off: Genie does not ask itself.
+        ...[...BAYS_TOOLS].filter((t) => t !== 'ask_genie'),
         // 2026-11-14 (D4): the daily outside digest from BHA RSS, the one read of outside sources.
         'read_outside_digest',
         // 2026-11-17 (Genie rebuild 7 and 8): one shared memory, and what every part of the engine is doing.

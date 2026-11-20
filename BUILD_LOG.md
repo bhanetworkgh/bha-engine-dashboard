@@ -15845,3 +15845,10 @@ Decision:   A part that cannot be read is said, never nought; the total is print
 ## 2026-11-20 — read_engine_activity: Genie asks sorted by time, not by text
 
 The Genie part of `read_engine_activity` (server/src/sharedMemory.ts) sorted its rows with `String(occurred_at).localeCompare(...)`. `occurred_at` comes back from Postgres as a Date, and `String(Date)` starts with the weekday name, so "Thu ..." sorted ahead of "Fri ..." and on 20 Nov the read showed 19 Nov 22:23 UTC as Genie's latest ask while 43 newer asks sat in engine_genie_events (latest 14:57 UTC). Bays and Genie read this to know what the other is doing (Genie rebuild step 8.6). Now sorted by getTime(). Reproduced the wrong order and the fix with the two real timestamps before pushing.
+
+## 2026-11-20 — Genie rebuild step 13.1: Genie's dashboard key is a write key with Bays' whole scope
+
+Destiny's direction (20 Nov): Genie becomes the one agent people tag; Bays keeps the fixed jobs (log command, scheduled posts, cards). Plan: claude/Genie_Step_13_Bays_Fixed_Jobs.md in the BHA Agent project.
+- `server/src/mcp/index.ts`: Bays' tool list moved into `BAYS_TOOLS`; the `genie` key (`READONLY_SECRETS_GENIE`, name kept so nothing on Render changes) is now `access: 'write'` and holds `BAYS_TOOLS` (less `ask_genie`) plus its own reads. One key, one connection (`/mcp/agent`).
+- `server/src/intentCheck.ts`: `CHECKED_AGENTS` now holds `genie`, so Genie's loop, watch, nudge, file and SOP writes are checked against the ask exactly as Bays' are, and the three approval-gated tools post the same Approve / Deny card.
+- `server/test/genie-doctrine.test.cjs` checks 1 and 2 updated to the new scope. Not run here: installs are blocked in this environment; the server type check shows the same 1,128 environment errors before and after, none new.

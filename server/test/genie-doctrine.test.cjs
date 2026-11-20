@@ -103,21 +103,22 @@ let server;
   let passed = 0;
   const ok = (name) => { passed++; console.log(`  ok  ${name}`); };
   try {
-    // 1. Genie's tool list, exactly.
-    assert.deepEqual(await listOf(TOKENS.genie), ['classify_outages', 'find_records', 'get_vfarm_gates', 'read_buyer_flow', 'read_code_checks', 'read_engine_activity', 'read_engine_events', 'read_engine_strain', 'read_evidence', 'read_help_pages', 'read_logstream', 'read_media_doctrine', 'read_monitoring_twin', 'read_open_loops', 'read_outside_digest', 'read_providers', 'read_publication_decision', 'read_record_history', 'read_slack', 'read_shared_memory', 'read_sop', 'read_true_home', 'read_vfarm_history']);
-    ok("Genie's token lists exactly read_logstream, read_engine_events, read_media_doctrine, read_publication_decision, read_buyer_flow, read_sop, read_monitoring_twin, get_vfarm_gates, read_vfarm_history, read_engine_strain, read_help_pages, read_evidence, the five service reads, read_providers, classify_outages, read_true_home, read_record_history, read_outside_digest, read_shared_memory and read_engine_activity");
+    // 1. Genie's tool list (Genie rebuild step 13.1, 20 Nov 2026): Bays' whole scope plus Genie's own reads.
+    const genieTools = await listOf(TOKENS.genie);
+    for (const name of ['create_record', 'update_record', 'archive_record', 'open_decision_watch', 'close_decision_watch', 'send_nudge', 'find_records',
+      'read_logstream', 'read_engine_events', 'read_media_doctrine', 'read_buyer_flow', 'read_monitoring_twin', 'read_shared_memory', 'read_engine_activity', 'classify_outages']) {
+      assert.ok(genieTools.includes(name), `${name} should be on Genie's token`);
+    }
+    assert.ok(!genieTools.includes('ask_genie'), 'Genie does not ask itself');
+    ok("Genie's token holds Bays' writes and its own reads, and not ask_genie");
 
-    // 2. Refusals: an unrelated read, the gap summary it was not given, and writes.
-    for (const name of ['find_records', 'read_doctrine_gap_summary']) {
+    // 2. Refusals: a tool in neither scope.
+    for (const name of ['reject_codex_log', 'ask_genie']) {
       const r = await call(TOKENS.genie, name, {});
       assert.ok(r.rpcError, `${name} should be refused`);
       assert.match(r.rpcError.message, /is not one of the tools this connection \(genie\) may call/);
     }
-    for (const name of ['create_record', 'update_record', 'delete_record']) {
-      const r = await call(TOKENS.genie, name, {});
-      assert.ok(r.rpcError, `${name} should be refused`);
-    }
-    ok('Genie is refused find_records, read_doctrine_gap_summary and every write tool');
+    ok('Genie is refused a tool outside its scope');
 
     // Doctrine v1, through the real write route.
     const t1 = new Date(Date.now() - 60_000).toISOString();
@@ -198,8 +199,8 @@ let server;
     }
     ok('North Star, Research Twin and Bays still list read_media_doctrine, read_publication_decision and read_doctrine_gap_summary');
 
-    assert.match(log, /genie \(READONLY_SECRETS_GENIE, read, 24 tools\)/);
-    ok('the boot line names genie as read, 11 tools');
+    assert.match(log, /genie \(READONLY_SECRETS_GENIE, write, \d+ tools\)/);
+    ok('the boot line names genie as a write key (step 13.1)');
   } finally {
     const ev = await query(`DELETE FROM engine_events WHERE subject_id LIKE $1`, [`${DOC}:%`]);
     const doc = await query(`DELETE FROM engine_media_doctrine WHERE doctrine_id = $1`, [DOC]);
