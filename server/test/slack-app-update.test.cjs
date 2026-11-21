@@ -69,4 +69,18 @@ check('a request URL must be https', () => {
   assert.match(applyChanges(genie(), { event_url: 'http://x/slack/events' }).problems.join(), /https URL/);
 });
 
+check('sign-in redirect URLs are added and removed', () => {
+  const base = genie();
+  base.oauth_config = { ...(base.oauth_config || {}), redirect_urls: ['https://old.example.com/auth/slack/callback'] };
+  const r = applyChanges(base, { redirect_urls_add: ['https://genie.bhanetwork.org/auth/slack/callback'] });
+  assert.deepEqual(r.problems, []);
+  assert.deepEqual(r.manifest.oauth_config.redirect_urls, ['https://old.example.com/auth/slack/callback', 'https://genie.bhanetwork.org/auth/slack/callback']);
+  assert.equal(r.changes[0].field, 'oauth_config.redirect_urls');
+  assert.deepEqual(applyChanges(base, { redirect_urls_add: ['https://old.example.com/auth/slack/callback'] }).changes, []);
+  assert.match(applyChanges(base, { redirect_urls_add: ['http://x/cb'] }).problems.join(), /https URL/);
+  assert.match(applyChanges(base, { redirect_urls_remove: ['https://nope.example.com/cb'] }).problems.join(), /not a redirect URL/);
+  const gone = applyChanges(base, { redirect_urls_remove: ['https://old.example.com/auth/slack/callback'] });
+  assert.equal(gone.manifest.oauth_config.redirect_urls, undefined);
+});
+
 console.log(`\n${n} checks passed`);

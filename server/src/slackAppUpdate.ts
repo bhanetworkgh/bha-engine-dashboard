@@ -27,6 +27,9 @@ export type Changes = {
   bot_events_remove?: string[];
   event_url?: string;
   interactivity_url?: string;
+  /** Sign in with Slack: the addresses Slack may send a person back to (oauth_config.redirect_urls). */
+  redirect_urls_add?: string[];
+  redirect_urls_remove?: string[];
 };
 
 export type Change = { field: string; before: unknown; after: unknown };
@@ -134,6 +137,18 @@ export function applyChanges(manifest: Record<string, any>, c: Changes): { manif
     set(`settings.${path}.request_url`, m.settings[path].request_url ?? null, v);
     m.settings[path].request_url = v;
     if (path === 'interactivity') m.settings.interactivity.is_enabled = true;
+  }
+
+  if (c.redirect_urls_add?.length || c.redirect_urls_remove?.length) {
+    m.oauth_config ??= {};
+    const before: string[] = Array.isArray(m.oauth_config.redirect_urls) ? m.oauth_config.redirect_urls.map(String) : [];
+    for (const u of c.redirect_urls_add ?? []) if (!/^https:\/\/[^\s]+$/.test(u)) problems.push(`redirect URL "${u}" must be an https URL`);
+    for (const u of c.redirect_urls_remove ?? []) if (!before.includes(u)) problems.push(`"${u}" is not a redirect URL of this app`);
+    const rm = new Set(c.redirect_urls_remove ?? []);
+    const after = uniq([...before.filter((u) => !rm.has(u)), ...(c.redirect_urls_add ?? [])]);
+    set('oauth_config.redirect_urls', before, after);
+    if (after.length) m.oauth_config.redirect_urls = after;
+    else delete m.oauth_config.redirect_urls;
   }
 
   return { manifest: m, changes, problems };

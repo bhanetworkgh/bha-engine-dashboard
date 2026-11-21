@@ -15928,3 +15928,9 @@ Files:      server/src/laneHealth.ts
 Problem:    the convergence query counted closed loops with a per-loop EXISTS over `events`, with an OR on record_id, so Postgres re-read the events table (7,240 rows) for each of 1,804 loop rows. engine_writes shows lane_health at 13.9 s, 14.7 s and 17.9 s on quiet days and 61.5 s under load; the same SQL through query_postgres hit the 5-second cap.
 Fix:        the closes are read once into a `closed` CTE and matched by hash (IN). Run on the live database through query_postgres before the push: 78 ms, twelve lanes, the counts as before.
 Decision:   no index added; the rewrite alone takes it from seconds to milliseconds.
+
+## 2026-11-21 07:45 — update_slack_app can change an app's sign-in redirect URLs
+Intent:     Destiny signed in at genie.bhanetwork.org and got "Invalid Slack OAuth state.": Genie's Slack app only lists its onrender.com callback addresses, so Slack sent him back to a different host from the one that set the sign-in cookie. The fix needs genie.bhanetwork.org added to the app's redirect URLs, and the tool had no way to do it.
+Files:      server/src/slackAppUpdate.ts, server/src/mcp/slackAppUpdateTools.ts, server/test/slack-app-update.test.cjs, CLAUDE.md
+Fix:        two new kinds of change, redirect_urls_add and redirect_urls_remove, on oauth_config.redirect_urls: https only, a removal must name a URL the app holds, a URL already held is no change. Same preview, Slack validation, confirm and read-back as every other change.
+Decision:   added to the existing tool, not a new one. npm run test:slack-app-update (7 checks) run against the compiled file with a stand-in for pg, because packages cannot be installed in this session.
