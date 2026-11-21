@@ -4992,6 +4992,16 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
        WHERE id = 'board-prod-income-vfarm-cst-production-income-bo'`,
     ],
   },
+  {
+    id: 147,
+    name: "Genie approvals from the chat app are decided in the app by the person who asked (21 Nov 2026, Destiny, genieApprovals.ts)",
+    statements: [
+      `ALTER TABLE engine_genie_approvals ADD COLUMN IF NOT EXISTS surface text NOT NULL DEFAULT 'slack' CHECK (surface IN ('slack', 'chat'))`,
+      `ALTER TABLE engine_genie_approvals DROP CONSTRAINT IF EXISTS engine_genie_approvals_decided_by_check`,
+      `ALTER TABLE engine_genie_approvals DROP CONSTRAINT IF EXISTS engine_genie_approvals_decider_check`,
+      `ALTER TABLE engine_genie_approvals ADD CONSTRAINT engine_genie_approvals_decider_check CHECK (decided_by IS NULL OR decided_by IN ('U0AEW3TBYH1', 'U0A9V97949F') OR (surface = 'chat' AND decided_by = requester))`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

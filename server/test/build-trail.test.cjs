@@ -24,4 +24,15 @@ assert.equal(demotes({ ...ok, last_up: '2026-11-20' }).demote, false, 'an up aft
 assert.equal(conv.judge({ progress: 3, closed_since: false }), true);
 assert.equal(conv.judge({ progress: 2, closed_since: false }), false);
 assert.equal(conv.judge({ progress: 5, closed_since: true }), false);
-console.log('build-trail: 15 checks passed');
+
+// 21 Nov 2026: who may decide a held Genie change. Slack: Destiny or Jason only. The chat app: also the asker, while an active builder.
+const ga = require('../../server-dist/server/src/genieApprovals.js');
+const AHAD = 'U0AC6RFNP3P', HARDIK = 'U0BKT6MAW2Y', DESTINY = 'U0AEW3TBYH1';
+assert.equal(ga.mayDecide({ surface: 'slack', requester: AHAD }, AHAD, true), false, 'a Slack request is never decided by its asker');
+assert.equal(ga.mayDecide({ surface: 'slack', requester: AHAD }, DESTINY, true), true);
+assert.equal(ga.mayDecide({ surface: 'chat', requester: AHAD }, AHAD, true), true, 'in the app the asker decides their own');
+assert.equal(ga.mayDecide({ surface: 'chat', requester: AHAD }, AHAD, false), false, 'not once they are no longer an active builder');
+assert.equal(ga.mayDecide({ surface: 'chat', requester: AHAD }, HARDIK, true), false, 'nobody decides another person\'s request');
+assert.equal(ga.mayDecide({ surface: 'chat', requester: AHAD }, DESTINY, false), true, 'Destiny and Jason can decide any request');
+assert.equal(ga.mayDecide({ surface: 'chat', requester: null }, '', true), false);
+console.log('build-trail: 22 checks passed');

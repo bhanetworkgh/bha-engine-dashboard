@@ -12,6 +12,13 @@
  * - a click by anyone else changes nothing and is kept in attempts;
  * - 24 hours with no answer is expired, and an expired request is never run;
  * - every step is one engine event (lane GENIE).
+ *
+ * The chat app approves in the chat (21 Nov 2026, Destiny: a builder working in the app should not wait on
+ * Destiny or Jason in Slack, any more than Destiny waits on someone at Anthropic to approve his own change).
+ * A request held from the app carries `surface: 'chat'`: no card is posted, and the person who asked decides
+ * it themself, in the app. That holds only for a person with an active Builder Profile (or Destiny or Jason),
+ * checked here when the request is stored and again when it is decided; Destiny and Jason can still decide
+ * any request. A request from Slack is unchanged: only Destiny or Jason decide it. Who decided is on the row.
  */
 import { createHash } from 'node:crypto';
 import { query } from './pg';
@@ -19,6 +26,7 @@ import * as engineEvents from './engineEvents';
 import * as reuse from './reuseCheck';
 import * as trust from './patternTrust';
 import * as timers from './timers';
+import { isFormerBuilder } from './sources';
 
 export const APPROVERS = new Set(['U0AEW3TBYH1', 'U0A9V97949F']);
 export const APPROVAL_EVENTS = ['genie_approval_requested', 'genie_approval_decided', 'genie_approval_finished', 'genie_approval_expired', 'genie_build_planned', 'genie_build_built', 'genie_build_rated'];
@@ -38,6 +46,24 @@ export const RATE_WITHIN_HOURS = 48;
 type Row = Record<string, unknown>;
 const str = (v: unknown, max = 2000) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 const CHANNEL = /^[CGD][A-Z0-9]{6,}$/;
+const SLACK_USER = /^[UW][A-Z0-9]{6,}$/;
+
+/**
+ * Who may decide a request. Pure. Destiny or Jason, always. For a request held from the chat app, also the
+ * person who asked, while they are an active builder. Nobody decides another person's request.
+ */
+export function mayDecide(row: { surface?: unknown; requester?: unknown }, who: string, activeBuilder: boolean): boolean {
+  if (APPROVERS.has(who)) return true;
+  return row.surface === 'chat' && !!who && who === row.requester && activeBuilder;
+}
+
+/** An active builder has a Builder Profile and has not left BHA. Destiny and Jason always count. */
+export async function isActiveBuilder(id: string): Promise<boolean> {
+  if (APPROVERS.has(id)) return true;
+  if (!SLACK_USER.test(id) || isFormerBuilder(id)) return false;
+  const r = await query<Row>(`SELECT 1 FROM engine_builder_profiles WHERE natural_id = $1 LIMIT 1`, [id]);
+  return r.rows.length > 0;
+}
 const NAME = /^[a-z0-9_-]{1,40}$/;
 
 export class ApprovalError extends Error {
@@ -59,28 +85,38 @@ export function digestOf(server: string, tool: string, args: unknown): string {
 export async function request(b: Row): Promise<Row> {
   const server = str(b.server, 40);
   const tool = str(b.tool, 120);
-  const channel = str(b.channel_id, 40);
+  const surface = str(b.surface, 10) === 'chat' ? 'chat' : 'slack';
+  const requester = str(b.requester, 40);
   if (!NAME.test(server)) throw new ApprovalError(422, 'server is required: the MCP server id.');
   if (!tool) throw new ApprovalError(422, 'tool is required.');
-  if (!CHANNEL.test(channel)) throw new ApprovalError(422, 'channel_id is required: where the approval card is posted.');
+  let channel = str(b.channel_id, 40);
+  if (surface === 'chat') {
+    // No card and no channel: the request waits in the app, on the person who asked.
+    if (!SLACK_USER.test(requester)) throw new ApprovalError(422, 'requester is required for a request from the chat app: the Slack id of the person who asked.');
+    if (!(await isActiveBuilder(requester))) {
+      return { ok: false, reason: 'not_permitted', message: 'Only a person with an active Builder Profile can ask Genie for a change from the chat app. Nothing was held.' };
+    }
+    channel = 'chat';
+  } else if (!CHANNEL.test(channel)) throw new ApprovalError(422, 'channel_id is required: where the approval card is posted.');
   const summary = str(b.summary, 1500) || `${server}: ${tool}`;
   const args = b.args && typeof b.args === 'object' ? b.args : {};
-  const digest = digestOf(server, tool, args);
+  // In the app the same call asked by two people is two requests: each decides their own.
+  const digest = surface === 'chat' ? createHash('sha256').update(JSON.stringify([server, tool, args ?? {}, 'chat', requester])).digest('hex') : digestOf(server, tool, args);
   const held = await query<Row>(`SELECT id, card_ts FROM engine_genie_approvals WHERE digest = $1 AND status = 'pending' AND expires_at > now()`, [digest]);
   if (held.rows[0]) return { ok: true, id: held.rows[0].id, repeat: true, card_ts: held.rows[0].card_ts };
   const id = `GAP-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
   const goal = str(b.goal, 3000);
-  const thread = str(b.thread_ts, 40) || null;
+  const thread = surface === 'chat' ? str(b.conversation_id, 80) || null : str(b.thread_ts, 40) || null;
   const check = await reuse.check({ text: `${goal}\n${summary}`, source_ref: id, thread: thread ? `${channel}:${thread}` : null });
   const plan = { goal: goal || null, change: summary, reuse: { ran: check.ran, reason: check.reason ?? null, summary: check.summary, matches: check.matches }, patterns_used: [] as string[] };
   await query(
-    `INSERT INTO engine_genie_approvals (id, server, tool, args, summary, channel_id, thread_ts, requester, request_id, digest, plan)
-     VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb)`,
-    [id, server, tool, JSON.stringify(args), summary, channel, thread, str(b.requester, 40) || null, str(b.request_id, 80) || null, digest, JSON.stringify(plan)],
+    `INSERT INTO engine_genie_approvals (id, server, tool, args, summary, channel_id, thread_ts, requester, request_id, digest, plan, surface)
+     VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb, $12)`,
+    [id, server, tool, JSON.stringify(args), summary, channel, thread, requester || null, str(b.request_id, 80) || null, digest, JSON.stringify(plan), surface],
   );
-  await log('genie_approval_requested', id, str(b.requester, 40) || 'genie', { server, tool, summary, channel_id: channel, thread_ts: thread });
+  await log('genie_approval_requested', id, requester || 'genie', { server, tool, summary, channel_id: channel, thread_ts: thread, surface });
   await log('genie_build_planned', id, str(b.requester, 40) || 'genie', { goal: goal || null, change: summary, reuse_ran: check.ran, matches: check.matches.map((m) => m.id) });
-  return { ok: true, id, repeat: false, plan };
+  return { ok: true, id, repeat: false, plan, surface };
 }
 
 export async function setCard(b: Row): Promise<Row> {
@@ -102,9 +138,12 @@ export async function decide(b: Row): Promise<Row> {
   const r = await query<Row>(`SELECT * FROM engine_genie_approvals WHERE id = $1`, [id]);
   const row = r.rows[0];
   if (!row) return { ok: false, reason: 'not_found', message: `No approval ${id}.` };
-  if (!APPROVERS.has(who)) {
+  if (!mayDecide(row, who, row.surface === 'chat' && who === row.requester ? await isActiveBuilder(who) : false)) {
     await query(`UPDATE engine_genie_approvals SET attempts = attempts || $2::jsonb WHERE id = $1`, [id, JSON.stringify([{ by: who, at: new Date().toISOString(), decision }])]);
-    return { ok: false, reason: 'not_permitted', message: 'Only Destiny or Jason can approve or deny this.' , row };
+    const message = row.surface === 'chat'
+      ? 'Only the person who asked for this (while they are an active builder), Destiny or Jason can approve or deny it.'
+      : 'Only Destiny or Jason can approve or deny this.';
+    return { ok: false, reason: 'not_permitted', message, row };
   }
   if (row.status !== 'pending') return { ok: false, reason: 'already_decided', message: `This was already ${String(row.status)}.`, row };
   if (new Date(String(row.expires_at)).getTime() <= Date.now()) {
@@ -125,7 +164,7 @@ export async function decide(b: Row): Promise<Row> {
     [id, status, who, choice, JSON.stringify(patternsUsed)],
   );
   if (!claimed.rows[0]) return { ok: false, reason: 'already_decided', message: 'Someone decided this a moment ago.' };
-  await log('genie_approval_decided', id, who, { decision: status, choice, server: row.server, tool: row.tool, summary: row.summary });
+  await log('genie_approval_decided', id, who, { decision: status, choice, server: row.server, tool: row.tool, summary: row.summary, surface: row.surface ?? 'slack', self_approved: row.surface === 'chat' && who === row.requester });
   const thread = row.thread_ts ? `${String(row.channel_id)}:${String(row.thread_ts)}` : null;
   for (const p of matched) {
     if (choice === 'reuse' || choice === 'extend') await trust.vote({ pattern_id: p, kind: 'up', reason: choice, voter: who, thread, source_ref: id });
@@ -201,7 +240,7 @@ export async function expire(): Promise<Row> {
 
 export async function list(): Promise<Row[]> {
   const r = await query<Row>(`SELECT id, server, tool, summary, channel_id, thread_ts, requester, status, decided_by, decided_at, result, error, created_at, finished_at,
-            plan, choice, built, rating, rating_reason, rated_by, rated_at
+            plan, choice, built, rating, rating_reason, rated_by, rated_at, surface
       FROM engine_genie_approvals ORDER BY created_at DESC LIMIT 100`);
   return r.rows;
 }

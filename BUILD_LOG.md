@@ -15940,3 +15940,11 @@ Intent:     Genie answered Hardik twice overnight (03:50 and 05:34 UTC, requests
 Files:      server/src/genieControl.ts, CLAUDE.md
 Fix:        the people answer carries active (false for sources.FORMER_BUILDERS). Genie reads it and treats a Slack asker with an active Builder Profile as staff when its own map has no row (Genie repo, the same day).
 Decision:   Builder Profiles is the true home of who is a builder, so Genie reads it there and no second list is corrected by hand. Kaiqi's row in Genie's own map is left as it is: removing it is Destiny's call.
+
+## 2026-11-21 09:55 — Genie approvals from the chat app are decided in the app
+Intent:     Destiny, 21 Nov: a builder working in the Genie chat app (Ahad on CST, Hardik on the dashboard) approves their own change in the chat, the way he approves a code change himself, instead of waiting on Destiny or Jason in Slack.
+Files:      server/src/genieApprovals.ts, server/src/migrations.ts (147), server/test/build-trail.test.cjs, CLAUDE.md
+Problem:    engine_genie_approvals let only Destiny or Jason decide, in code (APPROVERS) and in the table's CHECK (engine_genie_approvals_decided_by_check), and request() refused anything without a Slack channel id for the card.
+Fix:        request() takes surface 'chat': no card, channel_id 'chat', the conversation id as the thread, the requester required and checked as an active builder. mayDecide (pure) lets the requester of a chat request decide it while they are an active builder; Destiny and Jason still decide anything; a Slack request is unchanged. Migration 147 adds the surface column and replaces the CHECK with decided_by Destiny, Jason, or the requester of a chat request.
+Decision:   The asker's standing is checked twice, at request and at decide, from Builder Profiles and FORMER_BUILDERS, so a person who leaves BHA cannot approve a request they left pending. The digest of a chat request includes the requester, so two people asking for the same call hold two requests and each decides their own. Genie sends surface 'chat' only for a Slack sign-in session, never for a caller holding the shared inbound key, because every n8n workflow holds that key.
+
