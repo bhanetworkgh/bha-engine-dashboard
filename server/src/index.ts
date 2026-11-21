@@ -97,6 +97,7 @@ import * as intentCheck from './intentCheck';
 import * as loopConvergence from './loopConvergence';
 import * as patternTrust from './patternTrust';
 import * as reuseCheck from './reuseCheck';
+import * as recordCheck from './recordCheck';
 import * as intentHeal from './intentHeal';
 import * as layer0Notice from './layer0Notice';
 import * as baysAsks from './baysAsks';
@@ -809,6 +810,17 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       await mirror.logWrite({ endpoint, kind: 'file_text', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: null, outcome: 'read', detail: `${name} (${bytes.length} bytes) → ${ft.ok ? `${ft.text.length} chars` : String((ft as Record<string, unknown>).reason)}`.slice(0, 300) });
       if (!ft.ok) return send(res, 200, ft);
       return send(res, 200, { ok: true, outcome: 'extracted', ...ft.extra, bytes: bytes.length, chars: ft.text.length, text: ft.text });
+    }
+    // The record check, for Genie (21 Nov 2026, Destiny): the ids a file names, looked up before Genie answers
+    // about it, so a file's claim about a loop, watch, incident or log is read beside what is on record.
+    // Reads only; the log line carries the counts and the ids not held.
+    if (p === '/api/engine/record-check') {
+      if (method !== 'POST') throw new HttpError(405, 'POST {ids: [LOOP-…, DW-…, INC-…, CODEX-…, EV-…, CAND-…, TASK-…, BP-…]}.');
+      const body = decodeBodyB64(await readJson(req, 64 * 1024));
+      if (!Array.isArray(body.ids)) throw new HttpError(422, 'ids is required: a list of record ids.');
+      const out = await recordCheck.check(body.ids);
+      await mirror.logWrite({ endpoint, kind: 'record_check', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: null, outcome: 'read', detail: `${out.checked} checked, ${out.on_record} on record${out.not_on_record.length ? `, not held: ${out.not_on_record.join(', ')}` : ''}`.slice(0, 400), ms: Date.now() - t0 });
+      return send(res, 200, out);
     }
     // run_stress_test (10 Nov 2026, LOOP-1794168643405-SK22), the same handler, for when the connector's tool list has not picked it up.
     if (p === '/api/engine/stress-test') {
