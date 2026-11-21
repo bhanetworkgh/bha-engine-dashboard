@@ -15934,3 +15934,9 @@ Intent:     Destiny signed in at genie.bhanetwork.org and got "Invalid Slack OAu
 Files:      server/src/slackAppUpdate.ts, server/src/mcp/slackAppUpdateTools.ts, server/test/slack-app-update.test.cjs, CLAUDE.md
 Fix:        two new kinds of change, redirect_urls_add and redirect_urls_remove, on oauth_config.redirect_urls: https only, a removal must name a URL the app holds, a URL already held is no change. Same preview, Slack validation, confirm and read-back as every other change.
 Decision:   added to the existing tool, not a new one. npm run test:slack-app-update (7 checks) run against the compiled file with a stand-in for pg, because packages cannot be installed in this session.
+
+## 2026-11-21 07:55 — genie-control op people says who is active
+Intent:     Genie answered Hardik twice overnight (03:50 and 05:34 UTC, requests 29471716 and 77b1e54f) as a guest with no tools. Genie decides staff from its own developer_map table, which holds Hardik under an old Slack id (U0AEYQ6QB1B, not U0BKT6MAW2Y) and has no row for Kavin.
+Files:      server/src/genieControl.ts, CLAUDE.md
+Fix:        the people answer carries active (false for sources.FORMER_BUILDERS). Genie reads it and treats a Slack asker with an active Builder Profile as staff when its own map has no row (Genie repo, the same day).
+Decision:   Builder Profiles is the true home of who is a builder, so Genie reads it there and no second list is corrected by hand. Kaiqi's row in Genie's own map is left as it is: removing it is Destiny's call.

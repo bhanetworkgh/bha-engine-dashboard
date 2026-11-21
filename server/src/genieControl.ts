@@ -23,6 +23,7 @@ import * as approvals from './genieApprovals';
 import * as reuseCheck from './reuseCheck';
 import * as patternTrust from './patternTrust';
 import * as shared from './sharedMemory';
+import { isFormerBuilder } from './sources';
 
 export const CONTROL_EVENTS = ['genie_channel_updated', 'genie_memory_added', 'genie_memory_removed', 'genie_limit_reached', 'genie_task_created', 'genie_task_cancelled', 'genie_task_ran', 'genie_nudge_posted'];
 export const ADMINS = new Set(['U0AEW3TBYH1', 'U0A9V97949F']);
@@ -363,13 +364,15 @@ export async function handle(b: Row): Promise<Row> {
 
 /**
  * Who is who (16 Nov 2026, Destiny: a summary called him "she"). Each Builder Profile's
- * Slack id, name and pronouns, read live, so Genie refers to people as their profile says.
- * Nothing else on the profile is returned.
+ * Slack id, name and pronouns, read live, so Genie refers to people as their profile says,
+ * and whether they are active (not a former builder). Nothing else on the profile is returned.
  */
 export async function people(): Promise<Row> {
   const r = await query<Row>(`SELECT natural_id AS user_id, fields->>'name' AS name, NULLIF(TRIM(fields->>'pronouns'), '') AS pronouns
       FROM engine_builder_profiles WHERE natural_id IS NOT NULL ORDER BY fields->>'name'`);
-  return { ok: true, people: r.rows };
+  // active (21 Nov 2026): false for a builder who has left (sources.FORMER_BUILDERS). Genie treats a person with
+  // an active profile as staff, so a new builder is never answered as a guest for want of a row in Genie's own map.
+  return { ok: true, people: r.rows.map((p) => ({ ...p, active: !isFormerBuilder(String(p.user_id ?? '')) })) };
 }
 
 /** What the Genie page's Controls tab shows: channels, recurring tasks and the last 100 control actions. */
