@@ -13,13 +13,33 @@
  * cannot delete more than was shown. 50 at most a call. With `with_replies` a deleted post's thread replies by the same
  * bots go too. The whole text of every post is kept on the audit line before it is deleted, so what went can still be
  * read. Each run that deletes is one `slack_messages_deleted` event.
+ *
+ * Genie's posts can go too (21 Nov 2026, Destiny: a Genie reply that missed an attached file had to come down so
+ * Genie could answer again). This server holds no Genie token, so Genie is asked to delete its own post on
+ * POST /api/genie/delete-message, with the inbound key Genie already holds, the way post_channel_message asks it to
+ * post. Genie says who it is in Slack on the same route, which is how a Genie post is told from a person's.
  */
 import * as slack from './slack';
 
 export const MAX_DELETE = 50;
 export const MAX_WINDOW_HOURS = 168;
 
-type Bot = { name: string; token: string; user_id: string | null; bot_id: string | null };
+type Bot = { name: string; token: string; user_id: string | null; bot_id: string | null; via?: 'genie' };
+
+const genieUrl = () => `${(process.env.GENIE_URL || 'https://genie-v3-migration-u82u.onrender.com').replace(/\/+$/, '')}/api/genie/delete-message`;
+
+/** Asks Genie about, or to delete, one of its own posts. Never throws. */
+async function askGenie(body: Record<string, unknown>): Promise<{ ok: boolean; error?: string; user_id?: string; bot_id?: string }> {
+  const key = process.env.DASHBOARD_INBOUND_KEY?.trim();
+  if (!key) return { ok: false, error: 'DASHBOARD_INBOUND_KEY is not set, so Genie cannot be asked' };
+  try {
+    const res = await fetch(genieUrl(), { method: 'POST', headers: { 'content-type': 'application/json', 'x-dashboard-key': key }, body: JSON.stringify(body), signal: AbortSignal.timeout(15_000) });
+    const j = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; user_id?: string; bot_id?: string };
+    return res.ok && j.ok ? { ok: true, user_id: j.user_id, bot_id: j.bot_id } : { ok: false, error: `Genie answered HTTP ${res.status}: ${String(j.error ?? 'no reason given')}` };
+  } catch (e) {
+    return { ok: false, error: `Genie could not be reached: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
 export type Msg = { channel: string; ts: string; thread_ts?: string; text?: string; user?: string; bot_id?: string; blocks?: unknown; reply_count?: number };
 export type Found = { channel: string; ts: string; link: string; posted_by: string | null; text: string; thread_ts: string | null; reply: boolean };
 export type Skipped = { ref: string; reason: string };
@@ -69,6 +89,10 @@ async function bots(): Promise<Bot[]> {
     const r = await slack.botCall('auth.test', {}, 'form', token);
     if (r.ok) out.push({ name, token, user_id: (r.user_id as string) ?? null, bot_id: (r.bot_id as string) ?? null });
   }
+  // Genie holds its own token: it is asked who it is, and later asked to delete. Left out when it cannot be asked,
+  // so its posts read as not ours and are left alone.
+  const genie = await askGenie({ whoami: true });
+  if (genie.ok && (genie.user_id || genie.bot_id)) out.push({ name: 'Genie', token: '', user_id: genie.user_id ?? null, bot_id: genie.bot_id ?? null, via: 'genie' });
   botsCache = { at: Date.now(), bots: out };
   return out;
 }
@@ -79,6 +103,7 @@ const owner = (m: Msg, list: Bot[]): Bot | null => list.find((b) => (m.bot_id &&
 async function read(method: string, params: Record<string, unknown>, list: Bot[]): Promise<{ ok: true; body: slack.SlackBody } | { ok: false; error: string }> {
   const errors: string[] = [];
   for (const b of list) {
+    if (!b.token) continue;
     const r = await slack.botCall(method, params, 'form', b.token);
     if (r.ok) return { ok: true, body: r };
     errors.push(`${b.name}: ${r.error}`);
@@ -138,7 +163,7 @@ export async function find(o: { messages?: unknown[]; channel?: string; contains
     if (seen.has(key)) return;
     const b = owner(m, list);
     if (!b) {
-      skipped.push({ ref, reason: 'not posted by an engine bot (Bays, North Star or Research Twin), so it is left alone' });
+      skipped.push({ ref, reason: 'not posted by an engine bot (Bays, North Star, Research Twin or Genie), so it is left alone' });
       return;
     }
     seen.add(key);
@@ -203,6 +228,12 @@ export async function remove(found: Found[]): Promise<{ deleted: Found[]; failed
     const b = list.find((x) => x.name === f.posted_by);
     if (!b) {
       failed.push({ ...f, error: 'the bot that posted it has no token here' });
+      continue;
+    }
+    if (b.via === 'genie') {
+      const g = await askGenie({ channel: f.channel, ts: f.ts });
+      if (g.ok) deleted.push(f);
+      else failed.push({ ...f, error: String(g.error) });
       continue;
     }
     const r = await slack.botCall('chat.delete', { channel: f.channel, ts: f.ts }, 'form', b.token);

@@ -794,6 +794,22 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       await mirror.logWrite({ endpoint, kind: 'slack', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: null, outcome: out.ok ? 'updated' : 'rejected', detail: `${out.deleted_count != null ? `deleted ${out.deleted_count}` : `preview ${out.found_count ?? 0}`}${out.ok ? '' : `: ${out.reason ?? 'failed'} ${out.message ?? ''}`}`.slice(0, 400), ms: Date.now() - t0 });
       return send(res, 200, out);
     }
+    // A file's text, for Genie (21 Nov 2026, Destiny): Genie downloads a file attached in Slack with its own bot
+    // token and sends a PDF's or a Word file's bytes here, so they are read by the one extractor read_slack_file
+    // and the evidence store use. Reads only: nothing is stored, and the log line carries the name and size, never the text.
+    if (p === '/api/engine/file-text') {
+      if (method !== 'POST') throw new HttpError(405, 'POST {name, content_type, bytes_b64}.');
+      const body = await readJson(req, 22 * 1024 * 1024);
+      const name = String(body.name ?? 'file').slice(0, 200);
+      const b64 = typeof body.bytes_b64 === 'string' ? body.bytes_b64 : '';
+      if (!b64) throw new HttpError(422, 'bytes_b64 is required: the file, base64.');
+      const bytes = Buffer.from(b64, 'base64');
+      if (!bytes.length || bytes.length > 15 * 1024 * 1024) throw new HttpError(422, 'The file must be between 1 byte and 15 MB.');
+      const ft = extractFileText(bytes, String(body.content_type ?? ''));
+      await mirror.logWrite({ endpoint, kind: 'file_text', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: null, outcome: 'read', detail: `${name} (${bytes.length} bytes) → ${ft.ok ? `${ft.text.length} chars` : String((ft as Record<string, unknown>).reason)}`.slice(0, 300) });
+      if (!ft.ok) return send(res, 200, ft);
+      return send(res, 200, { ok: true, outcome: 'extracted', ...ft.extra, bytes: bytes.length, chars: ft.text.length, text: ft.text });
+    }
     // run_stress_test (10 Nov 2026, LOOP-1794168643405-SK22), the same handler, for when the connector's tool list has not picked it up.
     if (p === '/api/engine/stress-test') {
       if (method !== 'POST') throw new HttpError(405, 'POST {farm_id, window_minutes, label, record}.');

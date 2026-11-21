@@ -154,10 +154,13 @@ export function extractFileText(bytes: Buffer, content_type: string): FileText {
 
 export const readSlackFile: ToolDefinition = {
   name: 'read_slack_file',
-  description: `Read a file somebody shared in Slack, as text. Only https://files.slack.com/ addresses (url_private or url_private_download) — anything else is refused not_a_slack_file_url. Downloaded with the Bays bot token. A PDF has its text layer extracted; a Word file (.docx) has its body read, paragraphs in order and each table row as one line with its cells joined by " | "; a plain text file is returned as text. Anything else (a spreadsheet, slides, an image, an old .doc, a zip) is refused unsupported_type naming what it is, never returned as bytes: ask the person for a PDF or a .docx. At most ${TEXT_CAP} characters, with truncated: true beyond that. Outcomes: extracted, no_text_layer (a scanned or image-only PDF, an encrypted one, or a Word file with no text), unsupported_type, unreadable (a damaged Word file), file_not_found (404), not_authorised (401/403, or Slack redirecting to sign-in). Read only.`,
+  description: `Read a file somebody shared in Slack, as text. Only https://files.slack.com/ addresses (url_private or url_private_download) — anything else is refused not_a_slack_file_url. Downloaded with the Bays bot token. A PDF has its text layer extracted; a Word file (.docx) has its body read, paragraphs in order and each table row as one line with its cells joined by " | "; a plain text file is returned as text. Anything else (a spreadsheet, slides, an image, an old .doc, a zip) is refused unsupported_type naming what it is, never returned as bytes: ask the person for a PDF or a .docx. At most ${TEXT_CAP} characters a call: when truncated is true, call again with offset = next_offset for the rest. Outcomes: extracted, no_text_layer (a scanned or image-only PDF, an encrypted one, or a Word file with no text), unsupported_type, unreadable (a damaged Word file), file_not_found (404), not_authorised (401/403, or Slack redirecting to sign-in). Read only.`,
   inputSchema: {
     type: 'object',
-    properties: { url: { type: 'string', description: 'The file’s url_private or url_private_download, e.g. https://files.slack.com/files-pri/T…/F…/report.pdf' } },
+    properties: {
+      url: { type: 'string', description: 'The file’s url_private or url_private_download, e.g. https://files.slack.com/files-pri/T…/F…/report.pdf' },
+      offset: { type: 'number', description: 'Character to start from, for a long file. Default 0.' },
+    },
     required: ['url'],
     additionalProperties: false,
   },
@@ -173,8 +176,11 @@ export const readSlackFile: ToolDefinition = {
       const ft = extractFileText(d.bytes, d.content_type);
       if (!ft.ok) return ft;
       const { text, extra } = ft;
-      const truncated = text.length > TEXT_CAP;
-      return { ok: true, outcome: 'extracted', ...extra, bytes: d.bytes.length, chars: text.length, truncated, text: truncated ? text.slice(0, TEXT_CAP) : text, ...(truncated ? { cap: TEXT_CAP } : {}) };
+      // 21 Nov 2026: a long file is read on with offset. Until then anything past the cap could not be read at all
+      // (Ahad's 63 KB evidence report would have been cut at 30,000 characters).
+      const offset = Math.max(0, Math.floor(Number(args.offset) || 0));
+      const truncated = offset + TEXT_CAP < text.length;
+      return { ok: true, outcome: 'extracted', ...extra, bytes: d.bytes.length, chars: text.length, offset, truncated, ...(truncated ? { cap: TEXT_CAP, next_offset: offset + TEXT_CAP } : {}), text: text.slice(offset, offset + TEXT_CAP) };
     })();
     await mirror.logWrite({
       endpoint: 'mcp:read_slack_file',
