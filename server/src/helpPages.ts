@@ -383,7 +383,7 @@ export function helpDocument(p: HelpPage, who: string): bharag.IngestDocument {
 
 const words = (t: string): string => t.split(/\s+/).filter(Boolean).join(' ');
 
-export async function publish(i: PublishInput, opts: { dry_run?: boolean } & PublishDeps = {}): Promise<{ ok: true; written: boolean; page: HelpPage; message: string; bharag_doc_id?: string; read_back?: string }> {
+export async function publish(i: PublishInput, opts: { dry_run?: boolean; retire?: RetireDeps } & PublishDeps = {}): Promise<{ ok: true; written: boolean; page: HelpPage; message: string; bharag_doc_id?: string; read_back?: string; old_copies?: Awaited<ReturnType<typeof retireOldCopies>> }> {
   const who = (i.requester_user_id ?? '').trim();
   if (who !== DESTINY && who !== JASON) throw new HelpPageError('not_permitted', 'Only Destiny or Jason puts a page into cst-help-manuals.');
   const page = await get((i.page_id ?? '').trim());
@@ -411,5 +411,79 @@ export async function publish(i: PublishInput, opts: { dry_run?: boolean } & Pub
   if (!exact && words(back.raw_content ?? '') !== words(doc.content)) throw new HelpPageError('not_verified', `${page.page_id} was sent as ${sent.id}, but the stored text differs from the text Hardik checked. The page stays checked; that document should be removed.`);
   const read_back = exact ? 'stored text matches exactly' : 'stored text matches word for word (BHARAG normalised some whitespace)';
   const r = await setStage({ page_id: page.page_id, action: 'in_corpus', requester_user_id: who, bharag_doc_id: sent.id, body_sha256: page.body_sha256, note: (i.note ?? '').trim() || `Sent to cst-help-manuals and read back: ${read_back}.` });
-  return { ok: true, written: true, page: r.page, message: `${page.page_id} is in cst-help-manuals as ${sent.id}; ${read_back}.`, bharag_doc_id: sent.id, read_back };
+  const old_copies = await retireOldCopies(page.page_id, sent.id, who, opts.retire);
+  const oldLine = old_copies.removed.length ? ` Older copies removed: ${old_copies.removed.join(', ')}.` : '';
+  const failLine = old_copies.ok ? '' : ` Older copies NOT all removed: ${old_copies.detail}`;
+  return { ok: true, written: true, page: r.page, message: `${page.page_id} is in cst-help-manuals as ${sent.id}; ${read_back}.${oldLine}${failLine}`, bharag_doc_id: sent.id, read_back, old_copies };
+}
+
+/* ------------------------------------------------- older copies */
+
+/**
+ * A page published again (a corrected version) must not leave its earlier copy in cst-help-manuals beside
+ * the new one, or CST can still answer from the old wording (21 Nov 2026, Destiny: Hardik's OT7N pass asked
+ * for confirmation that the old wording is no longer served, and publish only ever added). Every document in
+ * the workspace whose metadata page_id is this page, other than the one kept, is deleted and then read again;
+ * it counts as removed only when BHARAG no longer has it. Never throws: a failure is on the answer and on the
+ * event, and the new copy stays recorded. One `help_page_old_copies_removed` event per run that found any.
+ */
+export interface RetireDeps {
+  find?: (pageId: string) => Promise<{ ids: string[]; complete: boolean }>;
+  remove?: (id: string) => Promise<{ ok: boolean; detail: string }>;
+  exists?: (id: string) => Promise<boolean>;
+}
+
+export async function retireOldCopies(pageId: string, keepId: string, who: string, deps: RetireDeps = {}): Promise<{ ok: boolean; found: string[]; removed: string[]; failed: { id: string; detail: string }[]; complete: boolean; detail: string }> {
+  const find = deps.find ?? (async (pid: string) => bharag.findByMetadata(HELP_KEY_VAR, 'page_id', pid));
+  const remove = deps.remove ?? (async (id: string) => bharag.deleteDocument(HELP_KEY_VAR, id));
+  const exists = deps.exists ?? (async (id: string) => (await bharag.getDocument('codex', id, HELP_KEY_VAR)) !== null);
+  let found: string[] = [];
+  let complete = false;
+  try {
+    const f = await find(pageId);
+    found = f.ids.filter((id) => id !== keepId);
+    complete = f.complete;
+  } catch (e) {
+    return { ok: false, found: [], removed: [], failed: [], complete: false, detail: `could not list cst-help-manuals: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  const removed: string[] = [];
+  const failed: { id: string; detail: string }[] = [];
+  for (const id of found) {
+    const d = await remove(id);
+    let gone = false;
+    try {
+      gone = !(await exists(id));
+    } catch (e) {
+      failed.push({ id, detail: `deleted, but reading it again failed: ${e instanceof Error ? e.message : String(e)}` });
+      continue;
+    }
+    if (gone) removed.push(id);
+    else failed.push({ id, detail: d.ok ? 'BHARAG still has it after the delete' : d.detail });
+  }
+  const ok = failed.length === 0 && complete;
+  const detail = !complete ? 'the workspace was not read to the end, so an older copy may remain' : failed.length ? failed.map((f) => `${f.id}: ${f.detail}`).join('; ') : found.length ? `${removed.length} removed` : 'none found';
+  if (found.length || !ok) {
+    try {
+      await record({ event_type: 'help_page_old_copies_removed', subject_id: pageId, lane: 'CST', actor: who, detail: { kept: keepId, found, removed, failed, complete } });
+    } catch { /* the answer still says what happened */ }
+  }
+  return { ok, found, removed, failed, complete, detail };
+}
+
+/** For a page already in_corpus: remove every copy but the one recorded. Destiny or Jason. A copy not proved gone is a refusal naming it. */
+export async function retireOldForPage(pageId: string, who: string, opts: { dry_run?: boolean } & RetireDeps = {}): Promise<{ ok: true; written: boolean; page: HelpPage; message: string; kept: string; found: string[]; removed: string[]; complete: boolean }> {
+  if (who !== DESTINY && who !== JASON) throw new HelpPageError('not_permitted', 'Only Destiny or Jason removes copies from cst-help-manuals.');
+  const page = await get(pageId);
+  if (!page) throw new HelpPageError('not_found', `No help page "${pageId}".`);
+  const kept = page.bharag_doc_id;
+  if (page.stage !== 'in_corpus' || !kept) throw new HelpPageError('wrong_stage', `${pageId} is ${stageLabel(page)}; only an in_corpus page has a copy to keep.`);
+  if (opts.dry_run) {
+    const find = opts.find ?? (async (pid: string) => bharag.findByMetadata(HELP_KEY_VAR, 'page_id', pid));
+    const f = await find(pageId);
+    const found = f.ids.filter((id) => id !== kept);
+    return { ok: true, written: false, page, kept, found, removed: [], complete: f.complete, message: `Dry run: ${found.length} older cop${found.length === 1 ? 'y' : 'ies'} of ${pageId} would be removed, keeping ${kept}.${f.complete ? '' : ' The workspace was not read to the end.'}` };
+  }
+  const r = await retireOldCopies(pageId, kept, who, opts);
+  if (!r.ok) throw new HelpPageError('old_copies_remain', `${pageId}: kept ${kept}; removed ${r.removed.join(', ') || 'none'}; ${r.detail}.`);
+  return { ok: true, written: r.removed.length > 0, page, kept, found: r.found, removed: r.removed, complete: r.complete, message: `${pageId}: kept ${kept}; ${r.detail}${r.removed.length ? ` (${r.removed.join(', ')})` : ''}.` };
 }

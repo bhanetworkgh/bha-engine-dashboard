@@ -154,7 +154,7 @@ export const setHelpPageStage: ToolDefinition = {
 
 export const publishHelpPage: ToolDefinition = {
   name: 'publish_help_page',
-  description: `Put one checked CST help page into BHARAG's cst-help-manuals, the library CST answers customers from, and record it in_corpus. Only a page at checked whose text is still the text Hardik checked. The exact text is sent through the write guard with ${help.HELP_KEY_VAR}, read back from BHARAG by its document id and compared word for word, and only then is the page marked in_corpus with that id. Any refusal leaves the page at checked. HELD HERE: Destiny or Jason only (requester_user_id). Pass body_sha256 from read_help_pages. dry_run sends nothing. Refused on any agent token. Audited on engine_mcp_writes.`,
+  description: `Put one checked CST help page into BHARAG's cst-help-manuals, the library CST answers customers from, and record it in_corpus. Only a page at checked whose text is still the text Hardik checked. The exact text is sent through the write guard with ${help.HELP_KEY_VAR}, read back from BHARAG by its document id and compared word for word, and only then is the page marked in_corpus with that id; then every older copy of the page in the workspace is removed and read again to prove it gone (remove_old_copies: true does only that, for a page already in_corpus). Any refusal leaves the page at checked. HELD HERE: Destiny or Jason only (requester_user_id). Pass body_sha256 from read_help_pages. dry_run sends nothing. Refused on any agent token. Audited on engine_mcp_writes.`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -162,15 +162,18 @@ export const publishHelpPage: ToolDefinition = {
       body_sha256: { type: 'string', description: 'The body_sha256 you read. Optional, recommended.' },
       note: { type: 'string' },
       requester_user_id: { type: 'string', description: 'Destiny or Jason.' },
+      remove_old_copies: { type: 'boolean', description: 'For a page already in_corpus: send nothing, and remove every other copy of it from cst-help-manuals, keeping the one recorded. Each removal is read again to prove it gone.' },
       dry_run: { type: 'boolean' },
     },
     required: ['page_id', 'requester_user_id'],
     additionalProperties: false,
   },
-  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: 'Put a checked CST help page into cst-help-manuals' },
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: 'Put a checked CST help page into cst-help-manuals' },
   handler: (args, deps) =>
     guarded('publish_help_page', args, deps, (dry) =>
-      help.publish(
+      args.remove_old_copies === true
+        ? help.retireOldForPage(str(args, 'page_id'), str(args, 'requester_user_id'), { dry_run: dry })
+        : help.publish(
         {
           page_id: str(args, 'page_id'),
           requester_user_id: str(args, 'requester_user_id'),

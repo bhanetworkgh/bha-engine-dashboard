@@ -149,7 +149,8 @@
     "test:record-check": "npm run build:server --silent && node server/test/record-check.test.cjs",
     "test:intent-heal": "npm run build:server --silent && node server/test/intent-heal.test.cjs",
     "test:ask-genie": "npm run build:server --silent && node server/test/ask-genie.test.cjs",
-    "test:held-pay": "npm run build:server --silent && node server/test/held-pay.test.cjs"
+    "test:held-pay": "npm run build:server --silent && node server/test/held-pay.test.cjs",
+    "test:help-old-copies": "npm run build:server --silent && node server/test/help-old-copies.test.cjs"
   },
   "dependencies": {
     "pg": "^8.23.0",

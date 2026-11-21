@@ -3241,6 +3241,8 @@ default for either: unset is 503 naming the variable; a wrong key is 401. Every 
 (13 Nov 2026, Jason: rack care stays out of CST until Jegan's sources and deep-clean confirmation are logged): the
 agent gets its title and who owes it under `held`, never its text. `npm run test:cst-help`.
 
+**A republished help page leaves no older copy** (21 Nov 2026, Destiny: Hardik's OT7N pass asked for proof the old wording is no longer served, and publish only ever added). After `publish_help_page` reads the new copy back and records it in_corpus, `helpPages.retireOldCopies` deletes every other document in cst-help-manuals whose metadata `page_id` is the page and reads each again; a copy counts as removed only when BHARAG no longer has it, and a workspace not read to the end is never a clean result. It never undoes the publish: what was not removed is on the answer and on one `help_page_old_copies_removed` event. `remove_old_copies: true` does only that for a page already in_corpus (refused `old_copies_remain`, naming what is left). `npm run test:help-old-copies`.
+
 **The missing Codex log check** (2026-10-22, Destiny — DW-1792516757092-9EP8; Jason, 20 Oct: a
 standing mechanism, not a reminder, after Kavin's 20 Oct log broke on submission and nothing said so).
 `server/src/codexGap.ts`, a timer every hour, its numbers in `RULE` and nowhere else. A builder who
