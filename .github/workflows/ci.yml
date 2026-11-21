@@ -1,0 +1,128 @@
+# CI for bha-engine-dashboard (DW-1794923440819-1GXJ, part 1: green CI on the validator PR).
+#
+# What this is: tests only. It reads the repository, builds it and runs the acceptance tests and two
+# database regression tests against a throwaway Postgres that lives and dies with the job.
+# What this is NOT: a deploy (Render deploys on its own when main moves; nothing here talks to Render),
+# an acceptance decision (a green run is evidence about code, never acceptance_evidence_recorded),
+# or a way to reach production (no secrets are read; the only database is the job's own).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# The workflow token can read the code and nothing else.
+permissions:
+  contents: read
+
+# A newer push to the same branch or PR cancels the run it replaces.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# bash with -e and -o pipefail, so a failing command, or a failing test piped through tee, fails the step.
+defaults:
+  run:
+    shell: bash
+
+env:
+  # render.yaml's NODE_VERSION; package.json engines asks for >=22.13.
+  NODE_VERSION: '22.22.0'
+
+jobs:
+  unit:
+    name: Typecheck, build and acceptance tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      # No database in this job: a test that reaches for one finds nothing.
+      DATABASE_URL: ''
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      # Builds server-dist, which every test below reads.
+      - run: npm run build
+      - run: npm run test:acceptance-evidence
+      - run: npm run test:acceptance-check
+      - run: npm run test:event-ingress
+      # The M1 decision core (PR #26) is not on main. Its tests run on any branch that defines the
+      # script, and this step says so, by name, where it does not.
+      - name: test:acceptance-decision (M1, where the branch has it)
+        run: |
+          if node -e "process.exit(require('./package.json').scripts?.['test:acceptance-decision'] ? 0 : 1)"; then
+            npm run test:acceptance-decision
+          else
+            echo "::notice title=M1 tests not on this branch::test:acceptance-decision exists only on feature/o7cu-m1-acceptance-decision-core (PR #26), so it was not run here."
+          fi
+
+  database:
+    name: Database regression tests (throwaway Postgres)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        # Production runs Postgres 18.6.
+        image: postgres:18.6
+        env:
+          # A container that exists only for this job; not a credential for anything else.
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: bha_ci_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d bha_ci_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      # The tests run their database half only against localhost or 127.0.0.1 and a name ending _test.
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/bha_ci_test
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build:server
+      - name: The database is the job's own
+        run: |
+          case "$DATABASE_URL" in
+            postgres://*@127.0.0.1:5432/*_test|postgres://*@localhost:5432/*_test) echo "DATABASE_URL is the job's throwaway database." ;;
+            *) echo "::error::DATABASE_URL is not a local _test database; refusing to run."; exit 1 ;;
+          esac
+      # Each test skips its database half, and still passes, when it has no _test database. So each step
+      # fails if the skip line appears, and passes only if a check that exists only in the database half
+      # was printed.
+      - name: test:charge-gate (database half must run)
+        run: |
+          npm run test:charge-gate 2>&1 | tee charge-gate.log
+          if grep -q 'part 2 skipped' charge-gate.log; then echo "::error::test:charge-gate skipped its database half."; exit 1; fi
+          grep -q 'migration 105 holds the decision identity as a unique index' charge-gate.log || { echo "::error::test:charge-gate did not reach its database checks."; exit 1; }
+      - name: test:evidence (database half must run)
+        run: |
+          npm run test:evidence 2>&1 | tee evidence.log
+          if grep -q 'part 2 skipped' evidence.log; then echo "::error::test:evidence skipped its database half."; exit 1; fi
+          grep -q 'a dry run reads the document and writes nothing' evidence.log || { echo "::error::test:evidence did not reach its database checks."; exit 1; }
+      # A check from outside the tests: the migrations they ran left the two tables behind.
+      - name: The database half really wrote to the database
+        run: |
+          node -e "
+            const { Client } = require('pg');
+            const c = new Client({ connectionString: process.env.DATABASE_URL });
+            c.connect()
+              .then(() => c.query(\"SELECT to_regclass('public.engine_charge_gate') AS gate, to_regclass('public.engine_evidence') AS evidence\"))
+              .then((r) => { const row = r.rows[0]; console.log(row); if (!row.gate || !row.evidence) process.exit(1); return c.end(); })
+              .catch((e) => { console.error(e); process.exit(1); });
+          "
