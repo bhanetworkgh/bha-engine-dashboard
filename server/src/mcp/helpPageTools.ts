@@ -171,7 +171,7 @@ export const publishHelpPage: ToolDefinition = {
   annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true, title: 'Put a checked CST help page into cst-help-manuals' },
   handler: (args, deps) =>
     guarded('publish_help_page', args, deps, (dry) =>
-      args.remove_old_copies === true
+      args.remove_old_copies === true || args.remove_old_copies === 'true'
         ? help.retireOldForPage(str(args, 'page_id'), str(args, 'requester_user_id'), { dry_run: dry })
         : help.publish(
         {
