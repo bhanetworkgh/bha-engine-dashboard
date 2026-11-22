@@ -530,6 +530,7 @@ export interface ApprovalAction {
   surface: string | null;
   requester: string | null;
   decided_by: string | null;
+  decided_at?: string | Date | null;
   status: string;
   result: string | null;
   error: string | null;
@@ -677,19 +678,54 @@ export async function linkAction(a: ApprovalAction): Promise<string | null> {
       );
     }
     await db.query(`UPDATE engine_genie_approvals SET build_id = $2 WHERE id = $1`, [a.id, id]);
+    await fillApproval(db, id, a);
     events.changed('genie_builder', null, db);
     return id;
   });
 }
 
+/**
+ * The approval stage, from the approval log (22 Nov 2026: Genie's terminal stage was refused three times because the
+ * change it reported live had been approved in the chat, and the record held no approval stage). Filled once, from the
+ * first approved change, and only when it is honest: a live-touching build approved by the person who asked is left
+ * for a second builder, never recorded as passed. A change that went to production or was published also marks the
+ * build live_effect.
+ */
+async function fillApproval(db: { query: (sql: string, params?: unknown[]) => Promise<{ rows: Obj[] }> }, id: string, a: ApprovalAction): Promise<void> {
+  if (!a.decided_by) return;
+  const r = await db.query(`SELECT requester_id, live_touching, approval_decision FROM engine_genie_builder_interactions WHERE interaction_id = $1`, [id]);
+  const h = r.rows[0];
+  if (!h) return;
+  const self = h.requester_id === a.decided_by;
+  if (!h.approval_decision && !(h.live_touching === true && self)) {
+    const two = h.live_touching === true;
+    await db.query(
+      `UPDATE engine_genie_builder_interactions SET approver_id = $2, approved_at = coalesce($3::timestamptz, now()), approvals_required = $4,
+              two_builder_check = $5, approval_decision = 'granted',
+              stages = stages || jsonb_build_object('approval', jsonb_build_object('at', coalesce($3::timestamptz, now()), 'received_at', now(), 'from_approval_log', $6::text))
+        WHERE interaction_id = $1 AND approval_decision IS NULL`,
+      [id, a.decided_by, a.decided_at ? new Date(a.decided_at).toISOString() : null, two ? 2 : 1, two ? 'passed' : 'not_required', a.id],
+    );
+  }
+  const args = asObj(a.args);
+  const live = a.status === 'done' && a.server === 'n8n' && (a.tool === 'publish_workflow' || (a.tool === 'execute_workflow' && args.executionMode === 'production'));
+  if (live) await db.query(`UPDATE engine_genie_builder_interactions SET live_effect = true WHERE interaction_id = $1 AND approval_decision = 'granted'`, [id]);
+}
+
 /** Finished changes from the last 14 days not yet on a build. Run at boot, after migration 149. */
 export async function backfillActions(): Promise<{ linked: number; unlinked: number }> {
   const r = await query<ApprovalAction>(
-    `SELECT id, server, tool, args, summary, thread_ts, channel_id, surface, requester, decided_by, status, result, error, plan, created_at, finished_at
+    `SELECT id, server, tool, args, summary, thread_ts, channel_id, surface, requester, decided_by, decided_at, status, result, error, plan, created_at, finished_at
        FROM engine_genie_approvals WHERE build_id IS NULL AND status IN ('done','failed') AND created_at > now() - interval '14 days' ORDER BY created_at`,
   );
   let linked = 0;
   for (const a of r.rows) if (await linkAction(a)) linked++;
+  // Builds whose changes were linked before the approval stage was filled from the log.
+  const older = await query<ApprovalAction & { build_id: string; decided_at: string }>(
+    `SELECT a.* FROM engine_genie_approvals a JOIN engine_genie_builder_interactions b ON b.interaction_id = a.build_id
+      WHERE a.status = 'done' AND (b.approval_decision IS NULL OR (b.live_effect IS NOT TRUE AND a.tool IN ('publish_workflow','execute_workflow'))) ORDER BY a.created_at`,
+  );
+  for (const a of older.rows) await withTransaction((db) => fillApproval(db as never, a.build_id, a));
   return { linked, unlinked: r.rows.length - linked };
 }
 
