@@ -59,3 +59,22 @@ Refused: two approvals required with `not_required`; a `rejected_self_approval` 
 { "interaction_id": "req_8f2c", "rail_id": "genie-slack-n8n", "stage": "review", "proof_type": "live_natural",
   "rater_id": "U0AD1V1D65N", "builder_decision": "accepted", "usefulness_rating": 4, "review_note": "Worked first time" }
 ```
+
+## Every build, with Genie or without (22 Nov 2026)
+
+Jason, #bha-coordination 1795291672.614769 and 1795291916.233199 (thread 1795286817.701399): the record holds every build, wherever it happened, and nothing is marked production without it and a logged reuse check. Two more stages and these fields, beside the four above:
+
+- **queued** also requires `surface` (`slack`, `web_chat`, `claude_code`, `other`) and `reuse_check`: `{ "result": "reused" | "extended" | "forked" | "built_new", "matches": [what was found], "justification": "..." }`. `built_new` needs a justification of 10 characters or more; the other three need at least one match. `build_ref` (optional) names the build: a loop, PR, workflow or Codex id. `intent` also takes `github_change`, `infra_change`, `dashboard_change`, `other_build`.
+- **terminal** may carry `tools_invoked`: the tool names Genie called.
+- **not_used**, a build done without Genie, its own interaction_id: `requester_id`, `surface`, `build_ref`, `plan_summary` (what was built), `not_used_category` (`missing_tool`, `trust`, `too_slow`, `ux`, `not_applicable`, `other`), `not_used_reason` (one to three lines), `reuse_check`. Such a record takes no approval, terminal or review stage.
+- **production**: `marked_by` (Slack id), `marked_at` optional. Refused unless a reuse check is logged and either the Genie build finished and was reviewed accepted or modified, or Genie was not used and the reason is recorded.
+
+Sent as before to `POST /api/engine/genie-builder`, or through the MCP write tool `record_genie_build` (one message or up to 50, `dry_run`), which Genie holds on its own key beside `read_genie_builder`. Genie reads past builds with `read_genie_builder` (filters: surface, used_genie, requester_id, search) before planning one, and cites a past build by its interaction_id.
+
+```json
+{ "interaction_id": "cc_20261122_builder", "rail_id": "claude-code", "stage": "not_used", "proof_type": "live_natural",
+  "requester_id": "U0AEW3TBYH1", "surface": "claude_code", "build_ref": "bha-engine-dashboard <commit>",
+  "plan_summary": "Genie Builder record widened to every build", "not_used_category": "not_applicable",
+  "not_used_reason": "Built in the dashboard repo directly to save tokens on a heavy records change.",
+  "reuse_check": { "result": "extended", "matches": ["genie.builder.interaction.v1"], "justification": null } }
+```

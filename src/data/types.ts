@@ -4871,7 +4871,7 @@ export interface GenieBuilderInteraction {
   interaction_id: string;
   rail_id: string;
   proof_type: 'test_forced' | 'live_natural' | string;
-  stage_reached: 'queued' | 'approval' | 'terminal' | 'review';
+  stage_reached: 'queued' | 'approval' | 'terminal' | 'review' | 'not_used' | 'production';
   requester_id: string | null;
   queued_at: string | null;
   intent: string | null;
@@ -4900,6 +4900,17 @@ export interface GenieBuilderInteraction {
   builder_decision: string | null;
   usefulness_rating: number | null;
   review_note: string | null;
+  surface: string | null;
+  used_genie: boolean;
+  not_used_category: string | null;
+  not_used_reason: string | null;
+  tools_invoked: string[] | null;
+  reuse_check: { result: string; matches: unknown[]; justification: string | null } | null;
+  reuse_result: string | null;
+  build_ref: string | null;
+  production_marked_at: string | null;
+  production_marked_by: string | null;
+  production_blockers: string[];
   counts_toward_proof: boolean;
   feedback_failed: boolean;
   received_at: string;
@@ -4920,6 +4931,14 @@ export interface GenieBuilderFigures {
   live_effect: number;
   self_approval_refused: number;
   denied: number;
+  builds: number;
+  with_genie: number;
+  without_genie: number;
+  reuse: Record<'reused' | 'extended' | 'forked' | 'built_new', number>;
+  no_reuse_check: number;
+  not_used_by_category: Record<string, number>;
+  by_surface: Record<string, number>;
+  marked_production: number;
 }
 
 export interface GenieBuilderData {

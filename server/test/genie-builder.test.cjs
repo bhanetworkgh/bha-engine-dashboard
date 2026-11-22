@@ -12,7 +12,7 @@ const ok = (m) => { n += 1; console.log('  ok  ' + m); };
 const refuses = (fn, re, m) => { assert.throws(fn, (e) => e.status === 422 && re.test(e.message)); ok(m); };
 
 const base = { interaction_id: 'req_1', rail_id: 'genie-slack-n8n', proof_type: 'test_forced' };
-const queued = { ...base, stage: 'queued', requester_id: 'U0AD1V1D65N', intent: 'publish_workflow', live_touching: true, live_touching_reason: 'publish activates a workflow', genie_plan_id: 'p1', plan_summary: 'publish it', context_sources: ['none found'] };
+const queued = { ...base, stage: 'queued', requester_id: 'U0AD1V1D65N', intent: 'publish_workflow', live_touching: true, live_touching_reason: 'publish activates a workflow', genie_plan_id: 'p1', plan_summary: 'publish it', context_sources: ['none found'], surface: 'slack', reuse_check: { result: 'built_new', matches: [], justification: 'no flow publishes this workflow yet' } };
 
 const q = gb.parseStage(queued);
 assert.equal(q.stage, 'queued'); assert.equal(q.cols.live_touching, true); ok('a full queued message parses');
@@ -56,5 +56,30 @@ assert.equal(done.counts_toward_proof, true); assert.equal(done.stage_reached, '
 const s = gb.summarise([done, late, gb.derive(row({ proof_type: 'test_forced', finished_at: '2026-11-10T00:00:00Z', usefulness_rating: 2, builder_decision: 'rejected' }), now)]);
 assert.equal(s.live_natural.counted_toward_proof, 1); assert.equal(s.live_natural.average_rating, 4); assert.equal(s.test_forced.rejected, 1); assert.equal(s.live_natural.feedback_failed, 1);
 ok('the summary keeps tests apart from real use');
+
+
+// 22 Nov 2026: every build is recorded, with its surface and reuse check; a build without Genie carries its reason;
+// production is marked only once the rule holds.
+refuses(() => gb.parseStage({ ...queued, surface: undefined }), /surface is required/, 'a planned build with no surface is refused');
+refuses(() => gb.parseStage({ ...queued, reuse_check: undefined }), /reuse_check is required/, 'a planned build with no reuse check is refused');
+refuses(() => gb.parseStage({ ...queued, reuse_check: { result: 'built_new', matches: [] } }), /needs a justification/, 'built new with no justification is refused');
+refuses(() => gb.parseStage({ ...queued, reuse_check: { result: 'extended', matches: [] } }), /needs matches/, 'extended naming nothing is refused');
+assert.equal(gb.parseStage({ ...queued, reuse_check: { result: 'extended', matches: ['BP-GENIE-1'] } }).cols.reuse_result, 'extended'); ok('an extended build naming its pattern parses');
+const notUsed = { ...base, interaction_id: 'cc_1', rail_id: 'claude-code', stage: 'not_used', requester_id: 'U0AEW3TBYH1', surface: 'claude_code', build_ref: 'bha-engine-dashboard commit abc', plan_summary: 'Genie Builder record widened', not_used_category: 'not_applicable', not_used_reason: 'built in the dashboard repo directly to save tokens', reuse_check: { result: 'extended', matches: ['genie.builder.interaction.v1'] } };
+const nu = gb.parseStage(notUsed);
+assert.equal(nu.cols.used_genie, false); ok('a build done without Genie parses with used_genie false');
+refuses(() => gb.parseStage({ ...notUsed, not_used_reason: '' }), /not_used_reason is required/, 'a build without Genie and no reason is refused');
+refuses(() => gb.parseStage({ ...notUsed, not_used_category: 'lazy' }), /not_used_category/, 'an unknown not-used category is refused');
+refuses(() => gb.crossCheck(gb.parseStage({ ...appr, interaction_id: 'cc_1' }), { ...held, used_genie: false }), /Genie was not used/, 'an approval on a build done without Genie is refused');
+const prod = { ...base, stage: 'production', marked_by: 'U0AEW3TBYH1' };
+refuses(() => gb.crossCheck(gb.parseStage(prod), null), /no Genie Builder record/, 'production with no record is refused');
+refuses(() => gb.crossCheck(gb.parseStage(prod), { ...held, used_genie: true, reuse_result: 'reused', finished_at: 'x', builder_decision: null }), /not reviewed it as accepted/, 'production before an accepted review is refused');
+refuses(() => gb.crossCheck(gb.parseStage(prod), { ...held, used_genie: true, reuse_result: null, finished_at: 'x', builder_decision: 'accepted' }), /no reuse check/, 'production with no reuse check is refused');
+gb.crossCheck(gb.parseStage(prod), { ...held, used_genie: true, reuse_result: 'reused', finished_at: 'x', builder_decision: 'modified' }); ok('production after a modified review and a reuse check passes');
+gb.crossCheck(gb.parseStage(prod), { ...held, used_genie: false, reuse_result: 'built_new', not_used_reason: 'too slow' }); ok('production for a build without Genie, reason recorded, passes');
+const nuRow = gb.derive(row({ used_genie: false, not_used_reason: 'x', reuse_result: 'extended' }), now);
+assert.equal(nuRow.stage_reached, 'not_used'); assert.equal(nuRow.counts_toward_proof, false); assert.deepEqual(nuRow.production_blockers, []); ok('a build without Genie reads not_used, counts nothing, and may be marked production');
+const s2 = gb.summarise([done, nuRow]);
+assert.equal(s2.all.without_genie, 1); assert.equal(s2.all.with_genie, 1); assert.equal(s2.all.reuse.extended, 1); ok('the summary counts builds with and without Genie and the reuse results');
 
 console.log(`\n${n} passed`);

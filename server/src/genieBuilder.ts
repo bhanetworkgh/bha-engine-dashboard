@@ -24,6 +24,21 @@
  *   - a rating is never null: the review stage needs it, and a finished interaction with no review
  *     after 48 hours reads as a failed feedback loop, never as closed. Only a reviewed interaction
  *     counts toward the proof.
+ *
+ * **Every build, not only the n8n rail** (22 Nov 2026, Destiny; Jason in #bha-coordination
+ * 1795291672.614769 and 1795291916.233199, thread 1795286817.701399). Two more stages and the fields
+ * Jason listed:
+ *   - queued also carries `surface` (slack, web_chat, claude_code, other) and the `reuse_check`
+ *     (`result`: reused, extended, forked or built_new; `matches`: what was found; `justification`,
+ *     required for built_new), both required: no build is planned without the dedupe check logged.
+ *     `build_ref` names the build (a loop, PR, workflow or Codex id).
+ *   - terminal may carry `tools_invoked`, the tools Genie called (n8n, GitHub, BHARAG ...).
+ *   - `not_used` records a build done without Genie: who, where, what was built, the reason in one of
+ *     six categories with a short why, and its own reuse check. `used_genie` is false on that row.
+ *   - `production` marks the build production, and is refused unless the rule holds: a reuse check is
+ *     logged, and either Genie was not used (reason recorded) or the Genie build finished and was
+ *     reviewed accepted or modified (Jason's SOP: no production pattern without this record and the
+ *     reuse check).
  */
 import { query, withTransaction } from './pg';
 import * as events from './events';
@@ -32,10 +47,13 @@ import { FeedError } from './systemFeeds';
 type Obj = Record<string, unknown>;
 
 export const SCHEMA = 'genie.builder.interaction.v1';
-export const STAGES = ['queued', 'approval', 'terminal', 'review'] as const;
+export const STAGES = ['queued', 'approval', 'terminal', 'review', 'not_used', 'production'] as const;
 export type Stage = (typeof STAGES)[number];
 export const PROOF_TYPES = ['test_forced', 'live_natural'] as const;
-export const INTENTS = ['create_workflow', 'modify_workflow', 'publish_workflow'] as const;
+export const INTENTS = ['create_workflow', 'modify_workflow', 'publish_workflow', 'github_change', 'infra_change', 'dashboard_change', 'other_build'] as const;
+export const SURFACES = ['slack', 'web_chat', 'claude_code', 'other'] as const;
+export const REUSE_RESULTS = ['reused', 'extended', 'forked', 'built_new'] as const;
+export const NOT_USED_CATEGORIES = ['missing_tool', 'trust', 'too_slow', 'ux', 'not_applicable', 'other'] as const;
 export const TWO_BUILDER = ['not_required', 'passed', 'rejected_self_approval'] as const;
 export const APPROVAL = ['granted', 'denied'] as const;
 export const DECISIONS = ['accepted', 'modified', 'rejected'] as const;
@@ -94,6 +112,21 @@ export interface StageRow {
   payload: Obj;
 }
 
+/** The reuse / dedupe check, required before a build (Jason, 21 Nov). Exported for the test. */
+export function parseReuse(v: unknown, w: string): { json: string; result: (typeof REUSE_RESULTS)[number] } {
+  if (!isObj(v)) throw new FeedError(422, `${w}: reuse_check is required: { result: reused | extended | forked | built_new, matches: [...], justification }. No build is planned or recorded without the dedupe check logged.`);
+  const result = oneOf(v.result, REUSE_RESULTS, w, 'reuse_check.result', true) as (typeof REUSE_RESULTS)[number];
+  const matches = Array.isArray(v.matches) ? v.matches.slice(0, 20) : [];
+  const justification = text(v.justification, 2000);
+  if (result === 'built_new' && (!justification || justification.length < 10)) {
+    throw new FeedError(422, `${w}: reuse_check.result built_new needs a justification: why no existing pattern, flow or build could be reused or extended.`);
+  }
+  if (result !== 'built_new' && matches.length === 0) {
+    throw new FeedError(422, `${w}: reuse_check.result ${result} needs matches naming what was ${result === 'reused' ? 'reused' : result === 'extended' ? 'extended' : 'forked'} (an id and what it is).`);
+  }
+  return { json: JSON.stringify({ result, matches, justification }), result };
+}
+
 export function parseStage(m: unknown, where = 'The message'): StageRow {
   if (!isObj(m)) throw new FeedError(422, `${where} is not an object.`);
   if (m.schema !== undefined && m.schema !== SCHEMA) throw new FeedError(422, `${where}: schema must be "${SCHEMA}" (or left out).`);
@@ -118,6 +151,30 @@ export function parseStage(m: unknown, where = 'The message'): StageRow {
     cols.context_sources = json(m.context_sources ?? null);
     if (cols.context_sources === null) throw new FeedError(422, `${w}: context_sources is required: what the reuse lookup found, or ["none found"].`);
     cols.subagent_query = json(m.subagent_query ?? null);
+    cols.surface = oneOf(m.surface, SURFACES, w, 'surface', true);
+    const reuse = parseReuse(m.reuse_check, w);
+    cols.reuse_check = reuse.json;
+    cols.reuse_result = reuse.result;
+    cols.build_ref = text(m.build_ref, 300);
+  } else if (stage === 'not_used') {
+    cols.requester_id = need(text(m.requester_id, 40), w, 'requester_id');
+    at = iso(m.queued_at, w, 'queued_at') ?? now;
+    cols.queued_at = at;
+    cols.surface = oneOf(m.surface, SURFACES, w, 'surface', true);
+    cols.intent = oneOf(m.intent, INTENTS, w, 'intent', false);
+    cols.build_ref = need(text(m.build_ref, 300), w, 'build_ref');
+    cols.plan_summary = need(text(m.plan_summary, 4000), w, 'plan_summary (what was built)');
+    cols.not_used_category = oneOf(m.not_used_category, NOT_USED_CATEGORIES, w, 'not_used_category', true);
+    cols.not_used_reason = text(m.not_used_reason, 1000);
+    if (!cols.not_used_reason) throw new FeedError(422, `${w}: not_used_reason is required: one to three lines on why Genie was not used.`);
+    const reuse = parseReuse(m.reuse_check, w);
+    cols.reuse_check = reuse.json;
+    cols.reuse_result = reuse.result;
+    cols.used_genie = false;
+  } else if (stage === 'production') {
+    cols.production_marked_by = need(text(m.marked_by, 40), w, 'marked_by');
+    at = iso(m.marked_at, w, 'marked_at') ?? now;
+    cols.production_marked_at = at;
   } else if (stage === 'approval') {
     cols.approver_id = need(text(m.approver_id, 40), w, 'approver_id');
     at = iso(m.approved_at, w, 'approved_at') ?? now;
@@ -145,6 +202,10 @@ export function parseStage(m: unknown, where = 'The message'): StageRow {
     cols.submission = json(m.submission ?? null);
     if (cols.submission === null && !stop) throw new FeedError(422, `${w}: submission is required: what was actually shipped back (G3).`);
     cols.evidence_links = json(Array.isArray(m.evidence_links) ? m.evidence_links : []);
+    if (m.tools_invoked !== undefined) {
+      if (!Array.isArray(m.tools_invoked) || m.tools_invoked.some((t) => typeof t !== 'string')) throw new FeedError(422, `${w}: tools_invoked must be a list of tool names.`);
+      cols.tools_invoked = json((m.tools_invoked as string[]).slice(0, 100));
+    }
   } else {
     cols.rater_id = need(text(m.rater_id, 40), w, 'rater_id');
     at = iso(m.reviewed_at, w, 'reviewed_at') ?? now;
@@ -160,12 +221,14 @@ export function parseStage(m: unknown, where = 'The message'): StageRow {
 
 /** Each stage's own columns, the only ones that stage may write. */
 const STAGE_COLS: Record<Stage, string[]> = {
-  queued: ['requester_id', 'queued_at', 'intent', 'live_touching', 'live_touching_reason', 'genie_plan_id', 'plan_summary', 'context_sources', 'subagent_query'],
+  queued: ['requester_id', 'queued_at', 'intent', 'live_touching', 'live_touching_reason', 'genie_plan_id', 'plan_summary', 'context_sources', 'subagent_query', 'surface', 'reuse_check', 'reuse_result', 'build_ref'],
   approval: ['approver_id', 'approved_at', 'approvals_required', 'two_builder_check', 'approval_decision'],
-  terminal: ['finished_at', 'status', 'backend_artifact_id', 'backend_artifact_version', 'backend_debrief', 'submission', 'live_effect', 'evidence_links'],
+  terminal: ['finished_at', 'status', 'backend_artifact_id', 'backend_artifact_version', 'backend_debrief', 'submission', 'live_effect', 'evidence_links', 'tools_invoked'],
   review: ['rater_id', 'reviewed_at', 'builder_decision', 'usefulness_rating', 'review_note'],
+  not_used: ['requester_id', 'queued_at', 'surface', 'intent', 'build_ref', 'plan_summary', 'not_used_category', 'not_used_reason', 'reuse_check', 'reuse_result', 'used_genie'],
+  production: ['production_marked_by', 'production_marked_at'],
 };
-const JSON_COLS = new Set(['context_sources', 'subagent_query', 'backend_debrief', 'submission', 'evidence_links']);
+const JSON_COLS = new Set(['context_sources', 'subagent_query', 'backend_debrief', 'submission', 'evidence_links', 'tools_invoked', 'reuse_check']);
 
 interface HeldRow {
   rail_id: string;
@@ -173,12 +236,42 @@ interface HeldRow {
   live_touching: boolean | null;
   approval_decision: string | null;
   two_builder_check: string | null;
+  used_genie?: boolean | null;
+  reuse_result?: string | null;
+  not_used_reason?: string | null;
+  finished_at?: string | null;
+  builder_decision?: string | null;
+  queued_at?: string | null;
+}
+
+/** Why a build may not be marked production yet; empty when it may. Exported for the test. */
+export function productionBlockers(h: Partial<HeldRow> | null): string[] {
+  if (!h) return ['no Genie Builder record exists for this build'];
+  const out: string[] = [];
+  if (!h.reuse_result) out.push('no reuse check is logged');
+  if (h.used_genie === false) {
+    if (!h.not_used_reason) out.push('Genie was not used and no reason is recorded');
+  } else {
+    if (!h.finished_at) out.push('the Genie build has not finished');
+    if (h.builder_decision !== 'accepted' && h.builder_decision !== 'modified') out.push('the builder has not reviewed it as accepted or modified');
+  }
+  return out;
 }
 
 /** The checks that need what is already held for the interaction. Exported for the test. */
 export function crossCheck(s: StageRow, held: HeldRow | null): void {
   const w = `${s.interaction_id} (${s.stage})`;
   if (held && held.rail_id !== s.rail_id) throw new FeedError(422, `${w}: rail_id "${s.rail_id}" differs from the "${held.rail_id}" this interaction was opened on.`);
+  if (s.stage === 'not_used' && held && held.used_genie !== false && held.queued_at) {
+    throw new FeedError(422, `${w}: this interaction was opened as a Genie build; a build done without Genie is its own record with its own interaction_id.`);
+  }
+  if (['approval', 'terminal', 'review'].includes(s.stage) && held?.used_genie === false) {
+    throw new FeedError(422, `${w}: this record says Genie was not used, so it has no ${s.stage} stage.`);
+  }
+  if (s.stage === 'production') {
+    const blockers = productionBlockers(held);
+    if (blockers.length) throw new FeedError(422, `${w}: not marked production: ${blockers.join('; ')}. Rule: no production pattern without a Genie Builder record and a logged reuse check.`);
+  }
   if (s.stage === 'approval' && s.cols.approval_decision === 'granted' && held?.live_touching === true) {
     if (held.requester_id && held.requester_id === s.cols.approver_id) {
       throw new FeedError(422, `${w}: the requester (${held.requester_id}) approved their own live-touching action. The two-builder gate refuses self-approval; send it as denied with two_builder_check rejected_self_approval.`);
@@ -203,7 +296,7 @@ export async function store(body: Obj): Promise<{ received: number; inserted: nu
     let updated = 0;
     for (const s of rows) {
       const h = await db.query<HeldRow>(
-        `SELECT rail_id, requester_id, live_touching, approval_decision, two_builder_check FROM engine_genie_builder_interactions WHERE interaction_id = $1 FOR UPDATE`,
+        `SELECT rail_id, requester_id, live_touching, approval_decision, two_builder_check, used_genie, reuse_result, not_used_reason, finished_at, builder_decision, queued_at FROM engine_genie_builder_interactions WHERE interaction_id = $1 FOR UPDATE`,
         [s.interaction_id],
       );
       const held = h.rows[0] ?? null;
@@ -289,6 +382,18 @@ export interface Interaction {
   builder_decision: string | null;
   usefulness_rating: number | null;
   review_note: string | null;
+  surface: string | null;
+  used_genie: boolean;
+  not_used_category: string | null;
+  not_used_reason: string | null;
+  tools_invoked: unknown;
+  reuse_check: unknown;
+  reuse_result: string | null;
+  build_ref: string | null;
+  production_marked_at: string | null;
+  production_marked_by: string | null;
+  /** Why this build may not be marked production yet; empty when it may (or already is). */
+  production_blockers: string[];
   /** Reviewed with a rating, after a finish: the only interactions the proof counts (G2). */
   counts_toward_proof: boolean;
   /** Finished, no review, and the review window has passed. Never read as closed. */
@@ -298,12 +403,15 @@ export interface Interaction {
 }
 
 /** What a row adds up to. Exported for the test. */
-export function derive(r: Omit<Interaction, 'stage_reached' | 'counts_toward_proof' | 'feedback_failed'>, now = Date.now()): Interaction {
+type Raw = Omit<Interaction, 'stage_reached' | 'counts_toward_proof' | 'feedback_failed' | 'production_blockers'>;
+export function derive(r: Raw, now = Date.now()): Interaction {
+  const used = r.used_genie !== false;
   const reviewed = r.usefulness_rating !== null && r.builder_decision !== null;
   const finished = r.finished_at !== null;
-  const stage_reached: Stage = reviewed ? 'review' : finished ? 'terminal' : r.approved_at ? 'approval' : 'queued';
-  const late = finished && now - Date.parse(r.finished_at as string) > REVIEW_WINDOW_HOURS * 3600_000;
-  return { ...r, stage_reached, counts_toward_proof: reviewed && finished, feedback_failed: finished && !reviewed && late };
+  const stage_reached: Stage = r.production_marked_at ? 'production' : !used ? 'not_used' : reviewed ? 'review' : finished ? 'terminal' : r.approved_at ? 'approval' : 'queued';
+  const late = used && finished && now - Date.parse(r.finished_at as string) > REVIEW_WINDOW_HOURS * 3600_000;
+  const production_blockers = r.production_marked_at ? [] : productionBlockers({ ...r, used_genie: used });
+  return { ...r, used_genie: used, stage_reached, production_blockers, counts_toward_proof: used && reviewed && finished, feedback_failed: used && finished && !reviewed && late };
 }
 
 const ROW_SQL = `SELECT interaction_id, rail_id, proof_type, requester_id,
@@ -312,6 +420,8 @@ const ROW_SQL = `SELECT interaction_id, rail_id, proof_type, requester_id,
   two_builder_check, approval_decision, to_char(finished_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS finished_at, status, backend_artifact_id,
   backend_artifact_version, backend_debrief, submission, live_effect, evidence_links, error_or_stop_reason, rater_id,
   to_char(reviewed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS reviewed_at, builder_decision, usefulness_rating, review_note,
+  surface, used_genie, not_used_category, not_used_reason, tools_invoked, reuse_check, reuse_result, build_ref,
+  to_char(production_marked_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS production_marked_at, production_marked_by,
   to_char(received_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS received_at, to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
   FROM engine_genie_builder_interactions`;
 
@@ -334,17 +444,32 @@ export function summarise(rows: Interaction[]) {
       live_effect: xs.filter((r) => r.live_effect).length,
       self_approval_refused: xs.filter((r) => r.two_builder_check === 'rejected_self_approval').length,
       denied: xs.filter((r) => r.approval_decision === 'denied').length,
+      builds: xs.length,
+      with_genie: xs.filter((r) => r.used_genie).length,
+      without_genie: xs.filter((r) => !r.used_genie).length,
+      reuse: Object.fromEntries(REUSE_RESULTS.map((k) => [k, xs.filter((r) => r.reuse_result === k).length])) as Record<(typeof REUSE_RESULTS)[number], number>,
+      no_reuse_check: xs.filter((r) => !r.reuse_result).length,
+      not_used_by_category: Object.fromEntries(NOT_USED_CATEGORIES.map((k) => [k, xs.filter((r) => r.not_used_category === k).length])) as Record<(typeof NOT_USED_CATEGORIES)[number], number>,
+      by_surface: Object.fromEntries([...SURFACES, 'not_sent'].map((k) => [k, xs.filter((r) => (r.surface ?? 'not_sent') === k).length])),
+      marked_production: xs.filter((r) => r.production_marked_at).length,
     };
   };
   return { all: pick(null), live_natural: pick('live_natural'), test_forced: pick('test_forced') };
 }
 
-export async function read(opts: { rail_id?: string | null; interaction_id?: string | null; limit?: number } = {}) {
+export async function read(opts: { rail_id?: string | null; interaction_id?: string | null; surface?: string | null; used_genie?: boolean | null; requester_id?: string | null; search?: string | null; limit?: number } = {}) {
   const where: string[] = [];
   const params: unknown[] = [];
   if (opts.rail_id) { params.push(opts.rail_id); where.push(`rail_id = $${params.length}`); }
   if (opts.interaction_id) { params.push(opts.interaction_id); where.push(`interaction_id = $${params.length}`); }
-  const r = await query<Omit<Interaction, 'stage_reached' | 'counts_toward_proof' | 'feedback_failed'>>(
+  if (opts.surface) { params.push(opts.surface); where.push(`surface = $${params.length}`); }
+  if (typeof opts.used_genie === 'boolean') { params.push(opts.used_genie); where.push(`used_genie = $${params.length}`); }
+  if (opts.requester_id) { params.push(opts.requester_id); where.push(`requester_id = $${params.length}`); }
+  if (opts.search) {
+    params.push(opts.search.toLowerCase());
+    where.push(`strpos(lower(coalesce(interaction_id,'') || ' ' || coalesce(plan_summary,'') || ' ' || coalesce(build_ref,'') || ' ' || coalesce(not_used_reason,'') || ' ' || coalesce(reuse_check::text,'')), $${params.length}) > 0`);
+  }
+  const r = await query<Raw>(
     `${ROW_SQL}${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY coalesce(queued_at, received_at) DESC`,
     params,
   );
@@ -365,6 +490,9 @@ export async function read(opts: { rail_id?: string | null; interaction_id?: str
       'proof_type test_forced is never counted as real use: the live_natural figures are the ones that answer "does Genie help in real use".',
       'A requester approving their own live-touching action is refused, and live_effect true needs a granted approval already held.',
       'Nothing here is inferred: a field Genie did not send is null.',
+      'Every build is recorded, with Genie or without: a build done without Genie is a not_used record with its reason (missing_tool, trust, too_slow, ux, not_applicable, other).',
+      'No build is planned or recorded without the reuse check: reused, extended, forked or built_new, with what was found, and built_new says why.',
+      'A build is marked production only once its reuse check is logged and either its Genie build was reviewed accepted or modified, or Genie was not used and the reason is recorded. Cite a past build by its interaction_id.',
     ],
   };
 }

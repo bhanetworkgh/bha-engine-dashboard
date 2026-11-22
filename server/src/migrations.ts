@@ -5002,6 +5002,24 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `ALTER TABLE engine_genie_approvals ADD CONSTRAINT engine_genie_approvals_decider_check CHECK (decided_by IS NULL OR decided_by IN ('U0AEW3TBYH1', 'U0A9V97949F') OR (surface = 'chat' AND decided_by = requester))`,
     ],
   },
+  {
+    id: 148,
+    name: "Genie Builder record for every build: surface, tools, reuse check, Genie not used, marked production (22 Nov 2026, Destiny; Jason 1795291672.614769 and 1795291916.233199)",
+    statements: [
+      `ALTER TABLE engine_genie_builder_interactions DROP CONSTRAINT IF EXISTS engine_genie_builder_interactions_intent_check`,
+      `ALTER TABLE engine_genie_builder_interactions ADD CONSTRAINT engine_genie_builder_interactions_intent_check CHECK (intent IS NULL OR intent IN ('create_workflow', 'modify_workflow', 'publish_workflow', 'github_change', 'infra_change', 'dashboard_change', 'other_build'))`,
+      `ALTER TABLE engine_genie_builder_interactions ADD COLUMN IF NOT EXISTS surface text CHECK (surface IS NULL OR surface IN ('slack', 'web_chat', 'claude_code', 'other'))`,
+      `ALTER TABLE engine_genie_builder_interactions ADD COLUMN IF NOT EXISTS used_genie boolean NOT NULL DEFAULT true`,
+      `ALTER TABLE engine_genie_builder_interactions ADD COLUMN IF NOT EXISTS not_used_category text CHECK (not_used_category IS NULL OR not_used_category IN ('missing_tool', 'trust', 'too_slow', 'ux', 'not_applicable', 'other'))`,
+      `ALTER TABLE engine_genie_builder_interactions ADD COLUMN IF NOT EXISTS not_used_reason text`,
+      `ALTER TABLE engine_genie_builder_interactions ADD COLUMN IF NOT EXISTS tools_invoked jsonb`,
+      `ALTER TABLE engine_genie_builder_interactions ADD COLUMN IF NOT EXISTS reuse_check jsonb`,
+      `ALTER TABLE engine_genie_builder_interactions ADD COLUMN IF NOT EXISTS reuse_result text CHECK (reuse_result IS NULL OR reuse_result IN ('reused', 'extended', 'forked', 'built_new'))`,
+      `ALTER TABLE engine_genie_builder_interactions ADD COLUMN IF NOT EXISTS build_ref text`,
+      `ALTER TABLE engine_genie_builder_interactions ADD COLUMN IF NOT EXISTS production_marked_at timestamptz`,
+      `ALTER TABLE engine_genie_builder_interactions ADD COLUMN IF NOT EXISTS production_marked_by text`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

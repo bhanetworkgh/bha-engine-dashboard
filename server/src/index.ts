@@ -2578,7 +2578,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       case '/api/pattern-trust':
         return send(res, 200, await patternTrust.read());
       case '/api/genie/builder':
-        return send(res, 200, await genieBuilder.read({ rail_id: url.searchParams.get('rail_id') }));
+        return send(res, 200, await genieBuilder.read({
+          rail_id: url.searchParams.get('rail_id'),
+          surface: url.searchParams.get('surface'),
+          used_genie: url.searchParams.get('used_genie') === 'true' ? true : url.searchParams.get('used_genie') === 'false' ? false : null,
+          search: url.searchParams.get('q'),
+          limit: 500,
+        }));
       /** Bays' own ledger: Slack turns, scheduled task runs and panel questions (2026-10-05). */
       case '/api/bays':
         return send(res, 200, await baysAsks.baysData());
