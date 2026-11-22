@@ -39,6 +39,16 @@
  *     logged, and either Genie was not used (reason recorded) or the Genie build finished and was
  *     reviewed accepted or modified (Jason's SOP: no production pattern without this record and the
  *     reuse check).
+ *
+ * **The record keeps itself current** (22 Nov 2026, Destiny: "immediately Genie finishes doing something ... it should
+ * always update the build record"). Genie wrote its row twice and then never again, so a build published, switched to
+ * Genie's own Slack login and run live still read "inactive, sandbox only". Now every change Genie makes through an
+ * approval (genieApprovals.finish) is added to its build as it lands: `actions` (the ask in the person's words, the
+ * call, who approved it, what came back) and the facts the call settles merged into `backend_debrief` (published,
+ * active version, credential, the last test and live execution). Which build a change belongs to: the build carrying
+ * the conversation (`thread_ref`, which Genie's chat app stamps on every record_genie_build call), else the build
+ * naming the same workflow, else the one open build the same person queued from the same place in the last 12 hours.
+ * A change that fits none is left unlinked, never guessed onto a build.
  */
 import { query, withTransaction } from './pg';
 import * as events from './events';
@@ -325,6 +335,8 @@ export async function store(body: Obj): Promise<{ received: number; inserted: nu
       );
       if (r.rows[0]?.inserted) inserted++;
       else updated++;
+      const ref = text((s.payload as Obj).thread_ref, 120);
+      if (ref) await db.query(`UPDATE engine_genie_builder_interactions SET thread_ref = coalesce(thread_ref, $2) WHERE interaction_id = $1`, [s.interaction_id, ref]);
     }
     events.changed('genie_builder', null, db);
     return { received: rows.length, inserted, updated, interaction_ids: rows.map((s) => s.interaction_id) };
@@ -392,6 +404,11 @@ export interface Interaction {
   build_ref: string | null;
   production_marked_at: string | null;
   production_marked_by: string | null;
+  /** The chat conversation or Slack thread the build was asked in. */
+  thread_ref: string | null;
+  /** Every approved change Genie made for this build, oldest first, added as it landed. */
+  actions: unknown;
+  last_action_at: string | null;
   /** Why this build may not be marked production yet; empty when it may (or already is). */
   production_blockers: string[];
   /** Reviewed with a rating, after a finish: the only interactions the proof counts (G2). */
@@ -422,6 +439,7 @@ const ROW_SQL = `SELECT interaction_id, rail_id, proof_type, requester_id,
   to_char(reviewed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS reviewed_at, builder_decision, usefulness_rating, review_note,
   surface, used_genie, not_used_category, not_used_reason, tools_invoked, reuse_check, reuse_result, build_ref,
   to_char(production_marked_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS production_marked_at, production_marked_by,
+  thread_ref, actions, to_char(last_action_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS last_action_at,
   to_char(received_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS received_at, to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
   FROM engine_genie_builder_interactions`;
 
@@ -492,7 +510,191 @@ export async function read(opts: { rail_id?: string | null; interaction_id?: str
       'Nothing here is inferred: a field Genie did not send is null.',
       'Every build is recorded, with Genie or without: a build done without Genie is a not_used record with its reason (missing_tool, trust, too_slow, ux, not_applicable, other).',
       'No build is planned or recorded without the reuse check: reused, extended, forked or built_new, with what was found, and built_new says why.',
+      'Every approved change Genie makes is added to its build as it lands (actions), and the facts it settles (published, active version, credential, last test and live run) are merged into backend_debrief. A change is linked by the conversation it was asked in, else the workflow it names, else the one open build the same person queued from the same place in the last 12 hours; otherwise it is left unlinked.',
       'A build is marked production only once its reuse check is logged and either its Genie build was reviewed accepted or modified, or Genie was not used and the reason is recorded. Cite a past build by its interaction_id.',
     ],
   };
+}
+
+/* ------------------------------------------------- the record keeps itself current (22 Nov 2026) */
+
+/** An approved change, as genieApprovals holds it. */
+export interface ApprovalAction {
+  id: string;
+  server: string;
+  tool: string;
+  args: unknown;
+  summary: string | null;
+  thread_ts: string | null;
+  channel_id: string | null;
+  surface: string | null;
+  requester: string | null;
+  decided_by: string | null;
+  status: string;
+  result: string | null;
+  error: string | null;
+  plan: unknown;
+  created_at: string | Date;
+  finished_at: string | Date | null;
+}
+
+const asObj = (v: unknown): Obj => (isObj(v) ? v : {});
+function parseJson(v: string | null): Obj {
+  if (!v) return {};
+  try {
+    const j = JSON.parse(v);
+    return isObj(j) ? j : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * What one finished change settles about the build, merged into backend_debrief. Pure: exported for the test. Only
+ * facts the call itself states are taken; nothing is guessed from a call that failed.
+ */
+export function factsFrom(a: Pick<ApprovalAction, 'server' | 'tool' | 'args' | 'status' | 'result'>): { debrief: Obj; ids: string[]; live_execution: string | null } {
+  const args = asObj(a.args);
+  const res = parseJson(a.result);
+  const debrief: Obj = {};
+  const ids = [args.workflowId, args.workflow_id, res.workflowId, res.id].filter((x): x is string => typeof x === 'string' && x.length > 0 && x.length < 80);
+  let live: string | null = null;
+  if (a.status !== 'done') return { debrief, ids: [...new Set(ids)], live_execution: null };
+  if (a.server === 'n8n') {
+    const wf = (typeof args.workflowId === 'string' && args.workflowId) || (typeof res.workflowId === 'string' && res.workflowId) || null;
+    if (wf) debrief.workflow_id = wf;
+    if (a.tool === 'publish_workflow') {
+      debrief.published = true;
+      debrief.active = true;
+      if (typeof res.activeVersionId === 'string') debrief.active_version_id = res.activeVersionId;
+    } else if (a.tool === 'unpublish_workflow') {
+      debrief.published = false;
+      debrief.active = false;
+    } else if (a.tool === 'update_workflow') {
+      if (typeof args.versionName === 'string') debrief.last_change = args.versionName;
+      for (const op of Array.isArray(args.operations) ? args.operations : []) {
+        const o = asObj(op);
+        if (o.type === 'setNodeCredential' && typeof o.credentialName === 'string') {
+          const key = typeof o.credentialKey === 'string' ? o.credentialKey : 'credential';
+          if (key === 'slackApi') debrief.slack_credential = o.credentialName;
+          else debrief[`${key}_credential`] = o.credentialName;
+        }
+      }
+    } else if (a.tool === 'execute_workflow') {
+      const ex = typeof res.executionId === 'string' ? res.executionId : null;
+      if (ex) {
+        if (args.executionMode === 'production') {
+          debrief.live_execution_id = ex;
+          live = ex;
+        } else debrief.test_execution_id = ex;
+      }
+    }
+  }
+  return { debrief, ids: [...new Set(ids)], live_execution: live };
+}
+
+const SURFACE_OF: Record<string, string> = { chat: 'web_chat', slack: 'slack' };
+
+/**
+ * Adds one finished change to the build it belongs to. Returns the interaction_id, or null when it fits no build.
+ * Safe to run twice: a change already on a build is never added again.
+ */
+export async function linkAction(a: ApprovalAction): Promise<string | null> {
+  if (a.status !== 'done' && a.status !== 'failed') return null;
+  const thread = a.thread_ts ? String(a.thread_ts) : null;
+  const facts = factsFrom(a);
+  return withTransaction(async (db) => {
+    let id: string | null = null;
+    if (thread) {
+      const r = await db.query<{ interaction_id: string }>(
+        `SELECT interaction_id FROM engine_genie_builder_interactions WHERE thread_ref = $1 AND used_genie ORDER BY coalesce(queued_at, received_at) DESC LIMIT 1`,
+        [thread],
+      );
+      id = r.rows[0]?.interaction_id ?? null;
+    }
+    if (!id && facts.ids.length && a.requester) {
+      const r = await db.query<{ interaction_id: string }>(
+        `SELECT interaction_id FROM engine_genie_builder_interactions
+          WHERE used_genie AND requester_id = $1 AND (backend_artifact_id = ANY($2) OR backend_debrief->>'workflow_id' = ANY($2) OR build_ref = ANY($2))
+          ORDER BY coalesce(queued_at, received_at) DESC LIMIT 1`,
+        [a.requester, facts.ids],
+      );
+      id = r.rows[0]?.interaction_id ?? null;
+    }
+    if (!id && a.requester) {
+      const r = await db.query<{ interaction_id: string }>(
+        `SELECT interaction_id FROM engine_genie_builder_interactions
+          WHERE used_genie AND requester_id = $1 AND thread_ref IS NULL AND production_marked_at IS NULL
+            AND surface IS NOT DISTINCT FROM $2
+            AND coalesce(queued_at, received_at) BETWEEN $3::timestamptz - interval '12 hours' AND $3::timestamptz + interval '1 hour'`,
+        [a.requester, SURFACE_OF[String(a.surface ?? 'slack')] ?? null, new Date(a.created_at).toISOString()],
+      );
+      if (r.rows.length === 1) id = r.rows[0].interaction_id;
+    }
+    if (!id) return null;
+    const held = await db.query<{ actions: unknown[] }>(`SELECT actions FROM engine_genie_builder_interactions WHERE interaction_id = $1 FOR UPDATE`, [id]);
+    const already = (held.rows[0]?.actions ?? []).some((x) => asObj(x).approval_id === a.id);
+    if (!already) {
+      const at = new Date(a.finished_at ?? Date.now()).toISOString();
+      const action = {
+        approval_id: a.id,
+        at,
+        server: a.server,
+        tool: a.tool,
+        change: a.summary ? a.summary.slice(0, 600) : `${a.server}: ${a.tool}`,
+        ask: (typeof asObj(a.plan).goal === 'string' ? (asObj(a.plan).goal as string) : '').slice(0, 1000) || null,
+        approved_by: a.decided_by,
+        ok: a.status === 'done',
+        result: a.status === 'done' ? (a.result ?? '').slice(0, 400) || null : null,
+        error: a.status === 'failed' ? (a.error ?? '').slice(0, 400) || null : null,
+      };
+      const evidence = facts.live_execution && facts.debrief.workflow_id
+        ? [`https://bayshorizonnetwork.app.n8n.cloud/workflow/${String(facts.debrief.workflow_id)}/executions/${facts.live_execution}`]
+        : [];
+      await db.query(
+        `UPDATE engine_genie_builder_interactions SET
+            actions = actions || $2::jsonb,
+            last_action_at = greatest(coalesce(last_action_at, $3::timestamptz), $3::timestamptz),
+            backend_debrief = coalesce(backend_debrief, '{}'::jsonb) || $4::jsonb,
+            backend_artifact_id = coalesce(backend_artifact_id, $5),
+            backend_artifact_version = coalesce($6, backend_artifact_version),
+            evidence_links = coalesce(evidence_links, '[]'::jsonb) || $7::jsonb,
+            tools_invoked = CASE WHEN coalesce(tools_invoked, '[]'::jsonb) @> $8::jsonb THEN tools_invoked ELSE coalesce(tools_invoked, '[]'::jsonb) || $8::jsonb END,
+            thread_ref = coalesce(thread_ref, $9),
+            updated_at = now()
+          WHERE interaction_id = $1`,
+        [
+          id,
+          JSON.stringify([action]),
+          at,
+          JSON.stringify(facts.debrief),
+          (facts.debrief.workflow_id as string | undefined) ?? null,
+          (facts.debrief.active_version_id as string | undefined) ?? null,
+          JSON.stringify(evidence),
+          JSON.stringify([`${a.server} ${a.tool}`]),
+          thread,
+        ],
+      );
+    }
+    await db.query(`UPDATE engine_genie_approvals SET build_id = $2 WHERE id = $1`, [a.id, id]);
+    events.changed('genie_builder', null, db);
+    return id;
+  });
+}
+
+/** Finished changes from the last 14 days not yet on a build. Run at boot, after migration 149. */
+export async function backfillActions(): Promise<{ linked: number; unlinked: number }> {
+  const r = await query<ApprovalAction>(
+    `SELECT id, server, tool, args, summary, thread_ts, channel_id, surface, requester, decided_by, status, result, error, plan, created_at, finished_at
+       FROM engine_genie_approvals WHERE build_id IS NULL AND status IN ('done','failed') AND created_at > now() - interval '14 days' ORDER BY created_at`,
+  );
+  let linked = 0;
+  for (const a of r.rows) if (await linkAction(a)) linked++;
+  return { linked, unlinked: r.rows.length - linked };
+}
+
+/** The builds asked for in one conversation or thread, newest first: what the chat app shows to rate. */
+export async function forThread(threadRef: string): Promise<Interaction[]> {
+  const r = await query<Raw>(`${ROW_SQL} WHERE thread_ref = $1 ORDER BY coalesce(queued_at, received_at) DESC LIMIT 20`, [threadRef]);
+  return r.rows.map((x) => derive({ ...x, approvals_required: x.approvals_required === null ? null : Number(x.approvals_required), usefulness_rating: x.usefulness_rating === null ? null : Number(x.usefulness_rating) }));
 }

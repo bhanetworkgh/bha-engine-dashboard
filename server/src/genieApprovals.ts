@@ -27,6 +27,7 @@ import * as reuse from './reuseCheck';
 import * as trust from './patternTrust';
 import * as timers from './timers';
 import { isFormerBuilder } from './sources';
+import * as builder from './genieBuilder';
 
 export const APPROVERS = new Set(['U0AEW3TBYH1', 'U0A9V97949F']);
 export const APPROVAL_EVENTS = ['genie_approval_requested', 'genie_approval_decided', 'genie_approval_finished', 'genie_approval_expired', 'genie_build_planned', 'genie_build_built', 'genie_build_rated'];
@@ -179,13 +180,21 @@ export async function finish(b: Row): Promise<Row> {
   const ok = b.ok === true;
   const built = { ok, what: ok ? str(b.result, 600) || 'done, with no output' : null, error: ok ? null : str(b.error, 600) || 'no reason given', at: new Date().toISOString() };
   const r = await query<Row>(
-    `UPDATE engine_genie_approvals SET status = $2, result = $3, error = $4, finished_at = now(), built = $5::jsonb WHERE id = $1 AND status = 'approved' RETURNING id, server, tool, requester`,
+    `UPDATE engine_genie_approvals SET status = $2, result = $3, error = $4, finished_at = now(), built = $5::jsonb WHERE id = $1 AND status = 'approved' RETURNING *`,
     [id, ok ? 'done' : 'failed', str(b.result, 4000) || null, ok ? null : str(b.error, 2000) || 'no reason given', JSON.stringify(built)],
   );
   if (!r.rows[0]) return { ok: false, reason: 'not_approved', message: `${id} is not waiting on a result.` };
   await log('genie_approval_finished', id, 'genie', { ok, server: r.rows[0].server, tool: r.rows[0].tool, error: ok ? null : str(b.error, 500) });
   await log('genie_build_built', id, 'genie', { ok, server: r.rows[0].server, tool: r.rows[0].tool });
-  return { ok: true, rate_by: r.rows[0].requester ?? null };
+  // The Genie Builder record keeps itself current (22 Nov 2026): the change goes onto its build now. Never able to
+  // fail the finish: the change has already happened, and the boot backfill picks up anything missed.
+  let build_id: string | null = null;
+  try {
+    build_id = await builder.linkAction(r.rows[0] as unknown as builder.ApprovalAction);
+  } catch (e) {
+    console.error(`[genie-approvals] ${id} could not be added to its build record: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  return { ok: true, rate_by: r.rows[0].requester ?? null, build_id };
 }
 
 /** Where the rating message sits, so Genie can rewrite it once rated. */
@@ -261,4 +270,75 @@ export function startSweeping(): void {
   setTimeout(tick, 60_000).unref();
   timer = setInterval(tick, 15 * 60_000);
   timer.unref();
+}
+
+/* -------------------------------------------- reviewing a build from the chat app (22 Nov 2026) */
+
+export const BUILD_DECISIONS = ['accepted', 'modified', 'rejected'] as const;
+
+/** How a build review reads as the per-change rating. Pure: exported for the test. */
+export function ratingFromReview(decision: string, stars: number): { rating: (typeof RATINGS)[number]; reason: string | null } {
+  if (decision === 'rejected' || stars <= 1) return { rating: 'not_useful', reason: 'wrong' };
+  if (decision === 'accepted' && stars >= 4) return { rating: 'useful', reason: null };
+  return { rating: 'partly', reason: null };
+}
+
+/**
+ * The builds asked for in one conversation, for the chat app's Rate this build card: each with what it did and whether
+ * it is reviewed. Only the person who asked, Destiny or Jason see a build's details.
+ */
+export async function buildsForThread(b: Row): Promise<Row> {
+  const thread = str(b.thread_ref, 120);
+  const who = str(b.requester, 40);
+  if (!thread) throw new ApprovalError(422, 'thread_ref is required.');
+  const rows = (await builder.forThread(thread)).filter((x) => APPROVERS.has(who) || x.requester_id === who);
+  return {
+    ok: true,
+    builds: rows.map((x) => ({
+      interaction_id: x.interaction_id,
+      plan_summary: x.plan_summary,
+      build_ref: x.build_ref,
+      stage_reached: x.stage_reached,
+      finished_at: x.finished_at,
+      actions: Array.isArray(x.actions) ? (x.actions as Row[]).map((a) => ({ at: a.at, change: a.change, ok: a.ok })) : [],
+      live: (x.backend_debrief as Row | null)?.published === true,
+      reviewed: x.builder_decision !== null && x.usefulness_rating !== null,
+      builder_decision: x.builder_decision,
+      usefulness_rating: x.usefulness_rating,
+      review_note: x.review_note,
+      production: x.production_marked_at !== null,
+      production_blockers: x.production_blockers,
+    })),
+  };
+}
+
+/**
+ * The person's review of a build: accepted, modified or rejected, 1 to 5, a note, and whether it is in production. Only
+ * the person who asked, Destiny or Jason. Written as the record's review stage (and production stage, which the
+ * record still refuses unless its rule holds); every change of that build not yet rated takes its rating from it.
+ */
+export async function reviewBuild(b: Row): Promise<Row> {
+  const id = str(b.interaction_id, 200);
+  const who = str(b.rater, 40);
+  const decision = str(b.decision, 12);
+  const stars = Number(b.rating);
+  const note = str(b.note, 4000) || null;
+  if (!(BUILD_DECISIONS as readonly string[]).includes(decision)) throw new ApprovalError(422, 'decision is accepted, modified or rejected.');
+  if (!Number.isInteger(stars) || stars < 1 || stars > 5) throw new ApprovalError(422, 'rating is a whole number from 1 to 5.');
+  const held = await builder.read({ interaction_id: id, limit: 1 });
+  const row = held.interactions[0];
+  if (!row) return { ok: false, reason: 'not_found', message: `No build ${id}.` };
+  if (who !== row.requester_id && !APPROVERS.has(who)) return { ok: false, reason: 'not_permitted', message: 'Only the person who asked for this build, Destiny or Jason can review it.' };
+  if (!row.finished_at) return { ok: false, reason: 'not_finished', message: 'This build has not finished yet, so it cannot be reviewed.' };
+  const base = { interaction_id: id, rail_id: row.rail_id, proof_type: row.proof_type };
+  const messages: Row[] = [{ ...base, stage: 'review', rater_id: who, builder_decision: decision, usefulness_rating: stars, ...(note ? { review_note: note } : {}) }];
+  if (b.production === true && decision !== 'rejected' && !row.production_marked_at) messages.push({ ...base, stage: 'production', marked_by: who });
+  await builder.store({ messages });
+  const mapped = ratingFromReview(decision, stars);
+  const open = await query<Row>(`SELECT id FROM engine_genie_approvals WHERE build_id = $1 AND status IN ('done','failed') AND (rating IS NULL OR rating = 'not_rated')`, [id]);
+  for (const a of open.rows) {
+    await query(`UPDATE engine_genie_approvals SET rating = $2, rating_reason = $3, rated_by = $4, rated_at = now() WHERE id = $1`, [a.id, mapped.rating, mapped.reason, who]);
+    await log('genie_build_rated', String(a.id), who, { rating: mapped.rating, reason: mapped.reason, from_review: id });
+  }
+  return { ok: true, interaction_id: id, decision, rating: stars, production: messages.length > 1, changes_rated: open.rows.length };
 }

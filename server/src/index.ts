@@ -3870,6 +3870,10 @@ async function boot(): Promise<void> {
     loopConvergence.startSweeping();
     patternTrust.startSweeping();
     genieApprovals.startSweeping();
+    // 22 Nov 2026: changes Genie made before the build record kept itself current go onto their builds once.
+    genieBuilder.backfillActions()
+      .then((r) => { if (r.linked || r.unlinked) console.log(`[genie-builder] backfill: ${r.linked} change(s) added to their builds, ${r.unlinked} fit no build`); })
+      .catch((e) => console.error(`[genie-builder] backfill failed: ${e instanceof Error ? e.message : String(e)}`));
     renewalReminder.startSweeping();
     codeCheckWatch.startSweeping();
     slackApps.startReading();

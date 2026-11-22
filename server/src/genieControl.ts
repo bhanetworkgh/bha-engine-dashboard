@@ -344,6 +344,11 @@ export async function handle(b: Row): Promise<Row> {
       return approvals.rate(b);
     case 'build_rate_card':
       return approvals.setRateCard(b);
+    // 22 Nov 2026: the chat app's Rate this build card, and the record keeping itself current.
+    case 'builds_for_thread':
+      return approvals.buildsForThread(b);
+    case 'build_review':
+      return approvals.reviewBuild(b);
     case 'reuse_check':
       return { ...(await reuseCheck.check(b)) };
     case 'pattern_trust':

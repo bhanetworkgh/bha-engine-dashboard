@@ -70,6 +70,7 @@ export const recordGenieBuild: ToolDefinition = {
       message: { type: 'object', description: 'One stage message.' },
       messages: { type: 'array', items: { type: 'object' }, description: 'Up to 50 stage messages, in order.' },
       requester_user_id: { type: 'string', description: 'Slack id of the person asking for this record.' },
+      thread_ref: { type: 'string', description: 'The chat conversation id or Slack channel:thread the build was asked in. Genie\'s chat app fills it in. Every approved change Genie makes there is then added to this build by itself.' },
       dry_run: { type: 'boolean' },
     },
     additionalProperties: false,
@@ -79,7 +80,9 @@ export const recordGenieBuild: ToolDefinition = {
     const dry = args.dry_run === true;
     const requester = typeof args.requester_user_id === 'string' ? args.requester_user_id.trim() : null;
     const audit = await auditOpen({ tool: 'record_genie_build', args, access: deps.access, kind: 'genie_builder', requester, dry_run: dry });
-    const list = Array.isArray(args.messages) ? args.messages : args.message !== undefined ? [args.message] : [];
+    const ref = typeof args.thread_ref === 'string' && args.thread_ref.trim() ? args.thread_ref.trim().slice(0, 120) : null;
+    const raw = Array.isArray(args.messages) ? args.messages : args.message !== undefined ? [args.message] : [];
+    const list = ref ? raw.map((m) => (m && typeof m === 'object' && !Array.isArray(m) && !(m as Record<string, unknown>).thread_ref ? { ...(m as Record<string, unknown>), thread_ref: ref } : m)) : raw;
     if (!list.length) {
       await auditClose(audit, { outcome: 'refused', detail: 'no message', guard_result: { reason: 'no_message' } });
       return { ok: false, written: false, reason: 'no_message', message: 'Send message (one stage) or messages (up to 50). Nothing was written.', audit_id: audit };

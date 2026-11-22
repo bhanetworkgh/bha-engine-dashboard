@@ -82,4 +82,22 @@ assert.equal(nuRow.stage_reached, 'not_used'); assert.equal(nuRow.counts_toward_
 const s2 = gb.summarise([done, nuRow]);
 assert.equal(s2.all.without_genie, 1); assert.equal(s2.all.with_genie, 1); assert.equal(s2.all.reuse.extended, 1); ok('the summary counts builds with and without Genie and the reuse results');
 
+// 22 Nov 2026: the record keeps itself current. What a finished change settles about its build.
+const pub = gb.factsFrom({ server: 'n8n', tool: 'publish_workflow', args: { workflowId: 'SGq' }, status: 'done', result: '{"success":true,"workflowId":"SGq","activeVersionId":"v9"}' });
+assert.deepEqual(pub.debrief, { workflow_id: 'SGq', published: true, active: true, active_version_id: 'v9' }); ok('a publish marks the build published with its active version');
+const cred = gb.factsFrom({ server: 'n8n', tool: 'update_workflow', args: { workflowId: 'SGq', versionName: 'Switch to Genie', operations: [{ type: 'setNodeCredential', credentialKey: 'slackApi', credentialName: 'Genie' }] }, status: 'done', result: '{}' });
+assert.equal(cred.debrief.slack_credential, 'Genie'); assert.equal(cred.debrief.last_change, 'Switch to Genie'); ok('a credential switch records the new Slack login');
+const live = gb.factsFrom({ server: 'n8n', tool: 'execute_workflow', args: { workflowId: 'SGq', executionMode: 'production' }, status: 'done', result: '{"executionId":"107354","status":"started"}' });
+assert.equal(live.debrief.live_execution_id, '107354'); assert.equal(live.live_execution, '107354'); ok('a production run is the live execution');
+const test = gb.factsFrom({ server: 'n8n', tool: 'execute_workflow', args: { workflowId: 'SGq', executionMode: 'manual' }, status: 'done', result: '{"executionId":"107343"}' });
+assert.equal(test.debrief.test_execution_id, '107343'); assert.equal(test.live_execution, null); ok('a manual run is a test execution, never live');
+const failed = gb.factsFrom({ server: 'n8n', tool: 'publish_workflow', args: { workflowId: 'SGq' }, status: 'failed', result: null });
+assert.deepEqual(failed.debrief, {}); assert.deepEqual(failed.ids, ['SGq']); ok('a failed call settles nothing but still names its workflow');
+
+const ga = require(path.join(DIST, 'server/src/genieApprovals'));
+assert.deepEqual(ga.ratingFromReview('accepted', 5), { rating: 'useful', reason: null });
+assert.deepEqual(ga.ratingFromReview('accepted', 3), { rating: 'partly', reason: null });
+assert.deepEqual(ga.ratingFromReview('modified', 5), { rating: 'partly', reason: null });
+assert.deepEqual(ga.ratingFromReview('rejected', 4), { rating: 'not_useful', reason: 'wrong' }); ok('a build review reads as the per-change rating');
+
 console.log(`\n${n} passed`);

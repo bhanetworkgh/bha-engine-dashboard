@@ -5020,6 +5020,17 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `ALTER TABLE engine_genie_builder_interactions ADD COLUMN IF NOT EXISTS production_marked_by text`,
     ],
   },
+  {
+    id: 149,
+    name: "Genie Builder record keeps itself current: every approved change Genie makes is added to its build (22 Nov 2026, Destiny)",
+    statements: [
+      `ALTER TABLE engine_genie_builder_interactions ADD COLUMN IF NOT EXISTS thread_ref text`,
+      `ALTER TABLE engine_genie_builder_interactions ADD COLUMN IF NOT EXISTS actions jsonb NOT NULL DEFAULT '[]'::jsonb`,
+      `ALTER TABLE engine_genie_builder_interactions ADD COLUMN IF NOT EXISTS last_action_at timestamptz`,
+      `CREATE INDEX IF NOT EXISTS engine_genie_builder_thread ON engine_genie_builder_interactions (thread_ref)`,
+      `ALTER TABLE engine_genie_approvals ADD COLUMN IF NOT EXISTS build_id text`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
