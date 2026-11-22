@@ -196,6 +196,66 @@ export async function executionDetail(id: string): Promise<N8nExecutionDetail | 
 }
 
 /**
+ * One execution with its data, read only up to `maxBytes` (2026-11-22, Destiny: the model-usage scan
+ * read a Submit Actions run whole, its JSON outgrew the 256 MB heap, the process died 45 seconds
+ * after every boot, and the same run was the first in line again on the next boot). The body is read
+ * as a stream and abandoned the moment it passes the cap, so an oversized run costs at most
+ * `maxBytes` and is answered `too_large`, never parsed. A run n8n no longer holds is `gone`.
+ */
+export type BoundedDetail =
+  | { status: 'ok'; execution: N8nExecutionDetail }
+  | { status: 'gone' }
+  | { status: 'too_large'; bytes: number };
+
+export async function executionDetailBounded(id: string, maxBytes: number): Promise<BoundedDetail> {
+  if (!KEY) throw new N8nError(`${N8N_API_VAR} is not set on this server, so n8n could not be asked anything.`, 503);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS * 3);
+  try {
+    let res: Response;
+    try {
+      res = await fetch(`${BASE}/executions/${encodeURIComponent(id)}?includeData=true`, {
+        headers: { 'X-N8N-API-KEY': KEY, Accept: 'application/json' },
+        signal: controller.signal,
+      });
+    } catch (e) {
+      const timedOut = e instanceof Error && e.name === 'AbortError';
+      throw new N8nError(timedOut ? 'n8n did not answer in time.' : 'Could not reach n8n.', 0);
+    }
+    if (res.status === 404) { await res.body?.cancel().catch(() => {}); return { status: 'gone' }; }
+    const declared = Number(res.headers.get('content-length'));
+    if (Number.isFinite(declared) && declared > maxBytes) {
+      controller.abort();
+      return { status: 'too_large', bytes: declared };
+    }
+    if (!res.body) throw new N8nError(`n8n answered ${res.status} with no body.`, res.status);
+    const reader = res.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let bytes = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > maxBytes) {
+        controller.abort();
+        await reader.cancel().catch(() => {});
+        return { status: 'too_large', bytes };
+      }
+      chunks.push(value);
+    }
+    const text = Buffer.concat(chunks.map((c) => Buffer.from(c.buffer, c.byteOffset, c.byteLength))).toString('utf8');
+    if (!res.ok) throw new N8nError(`n8n answered ${res.status}${text ? `: ${text.slice(0, 200)}` : '.'}`, res.status);
+    try {
+      return { status: 'ok', execution: JSON.parse(text) as N8nExecutionDetail };
+    } catch {
+      throw new N8nError(`n8n answered ${res.status} with a body that was not JSON.`, res.status);
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Every execution newer than `afterId`, newest first. `afterId` of 0 reads the
  * whole history the instance holds.
  *

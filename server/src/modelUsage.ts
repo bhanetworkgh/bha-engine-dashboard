@@ -57,6 +57,10 @@ export async function storeUsage(key: string, at: string, workflow: string, node
   [key, at, workflow, node, usage.provider, usage.model, usage.input, usage.output, usage.read, usage.write5, usage.write1, usage.cost]);
 }
 
+/** The most of one execution's data the scan will read. The process has a 256 MB heap, and a parsed
+ *  object takes several times its JSON's size. */
+const MAX_SCAN_BYTES = 15_000_000;
+
 let busy = false;
 let lastError: string | null = null;
 let lastScan: string | null = null;
@@ -70,7 +74,13 @@ export async function collectUsage(): Promise<void> {
       WHERE e.id_epoch=0 AND e.status IN ('success','error','crashed','canceled') AND e.started_at >= '2026-11-03T00:00:00Z'
         AND s.execution_id IS NULL ORDER BY e.execution_id ASC LIMIT 40`);
     for (const row of pending.rows) {
-      const execution = await n8n.executionDetail(String(row.execution_id)) as (n8n.N8nExecutionDetail & { data?: Obj }) | null;
+      // Bounded read (2026-11-22): a run larger than MAX_SCAN_BYTES is recorded as scanned and not
+      // available, so it is never fetched again, instead of being parsed whole and killing the process.
+      const read = await n8n.executionDetailBounded(String(row.execution_id), MAX_SCAN_BYTES);
+      if (read.status === 'too_large') {
+        console.warn(`[model-usage] execution ${row.execution_id} skipped: its data is over ${Math.round(MAX_SCAN_BYTES / 1e6)} MB (${Math.round(read.bytes / 1e6)} MB read before stopping)`);
+      }
+      const execution = read.status === 'ok' ? read.execution as (n8n.N8nExecutionDetail & { data?: Obj }) : null;
       if (execution) {
         const nodes = execution.workflowData?.nodes ?? [];
         const runs = execution.data?.resultData?.runData ?? {};

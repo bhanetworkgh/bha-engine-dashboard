@@ -16016,3 +16016,18 @@ Files:      docs/contracts/outage-classification.md, server/src/outageClass.ts, 
 Problem:    The contract and RULE excluded every clean reboot as "proposed". Genie read the file in the thread but stopped before writing.
 Fix:        A clean reboot is excluded only when a `maintenance` record (a LOOP-, INC-, CODEX-, DW-, EV- or TASK- id plus the upgrade or maintenance it served) covers it; otherwise it counts and says what would exclude it. classify_outages takes `maintenance`. Test: 17 checks pass.
 Decision:   The 29 Oct 10:43 clean reboot in the 408M reference has no planned-maintenance record, so the November run now counts 26 minutes (16 + 10). Shown rather than assumed; a record for it would bring it back to 16.
+
+## 2026-11-22 18:15 — Dashboard out of memory every minute: the model-usage scan reads a run too big to parse
+Intent:     stop the crash loop that made every n8n call to the dashboard answer 502 (the "Bays errors").
+Files:      server/src/n8n.ts, server/src/modelUsage.ts
+Problem:    "FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory" at 18:05:47 and
+            18:06:43 UTC, about 50 seconds after each boot, in JSON.parse. collectUsage (45 s after boot, then every
+            minute) fetched each pending execution whole with includeData=true; one was larger than the 256 MB heap
+            could parse, so the process died before writing its engine_model_usage_scans row and met the same run first
+            on every boot.
+Fix:        n8n.executionDetailBounded reads the body as a stream and stops at a cap (Content-Length checked first),
+            answering ok, gone or too_large without parsing. collectUsage reads at most 15 MB a run; a larger one is
+            recorded scanned and not available, with a warning naming it, and is never fetched again. Checked against a
+            local stand-in: ok, a 404 as gone, and a 60 MB body stopped at 15,007,434 bytes.
+Decision:   cap rather than raise the heap: the scan only needs the model nodes' usage, and a run that large was never
+            going to be worth holding in memory for that.
