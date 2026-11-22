@@ -14,7 +14,10 @@
  *   - a deploy or clean reboot on the boot record is its own incident, DEPLOY_REBOOT or CLEAN_REBOOT.
  *
  * The stability rule for a run (Jegan's November run, 2 Nov): power cuts the unit recovered from on its
- * own, deploy reboots and clean reboots are excluded; gateway link drops, board hardware and valve coil
+ * own and deploy reboots are excluded; a clean reboot is excluded only as planned maintenance (Jason,
+ * 22 Nov 2026, DW-1795169091957-80T8, C0ASMPYQLG3 1795367485.917309: scheduled or operationally
+ * necessary for upgrades or maintenance, AND tracked in our own incident or maintenance system as planned
+ * maintenance, not an outage), otherwise it counts; gateway link drops, board hardware and valve coil
  * outages count. An unresolved outage inside the run counts until it is resolved, because it may be a
  * link drop and an SLA must not quietly assume the kinder reading. Changing a rule is a decision from
  * Jason, then an edit to RULE here, the doc (docs/contracts/outage-classification.md) and the tests.
@@ -29,10 +32,23 @@ export const RULE = {
   excluded: {
     POWER_CUT: 'site mains power, which the unit recovered from on its own',
     DEPLOY_REBOOT: 'our own deploy, logged as ours',
-    CLEAN_REBOOT: 'a planned, clean reboot',
   } as Partial<Record<OutageType, string>>,
+  /** Jason, 22 Nov 2026 (DW-1795169091957-80T8): excluded if and only if a planned-maintenance record covers it. */
+  clean_reboot: {
+    excluded_when: 'a planned-maintenance record in our own system covers it: scheduled or operationally necessary for an upgrade or maintenance, and tracked as planned maintenance, not as an outage',
+    otherwise: 'counts: a clean reboot with no planned-maintenance record is treated as an outage',
+  },
   unresolved_counts: true,
 };
+
+/** A planned-maintenance record from our own system (a loop, incident or Codex entry naming the restart as planned). */
+export interface Maintenance extends Window {
+  /** The record in our own system that tracks it, e.g. LOOP-…, INC-…, CODEX-…, DW-… */
+  ref: string;
+  /** Why the restart was needed: the upgrade or maintenance it served. */
+  reason: string;
+}
+export const MAINTENANCE_REF = /^(LOOP|INC|CODEX|DW|EV|TASK)-[A-Za-z0-9._-]+$/;
 
 export interface Window { start: string; end: string }
 export interface BootRecord {
@@ -54,6 +70,8 @@ export interface ClassifyInput {
   /** From when the Pi's boot record exists; before it, a gateway event's cause cannot be read from it. */
   boot_record_since: string | null;
   annotations?: Annotation[];
+  /** Planned-maintenance records; only these exclude a CLEAN_REBOOT (Jason, 22 Nov 2026). */
+  maintenance?: Maintenance[];
   /** The window being judged, e.g. the 16 Oct burn-in start to now. */
   from?: string;
   to?: string;
@@ -85,10 +103,15 @@ function bootWindow(b: BootRecord): Window {
   return { start: iso(start), end: iso(back) };
 }
 
-function judge(type: OutageType | null, start: string, run?: { name: string; start: string }): { counts: boolean | null; why: string } {
+function judge(type: OutageType | null, start: string, run?: { name: string; start: string }, planned?: Maintenance | null): { counts: boolean | null; why: string } {
   if (!run) return { counts: null, why: 'no run given' };
   if (ms(start) < ms(run.start)) return { counts: false, why: `before the ${run.name} started` };
   if (type === null) return { counts: RULE.unresolved_counts, why: 'unresolved: counted until it is shown to be an excluded kind' };
+  if (type === 'CLEAN_REBOOT') {
+    return planned
+      ? { counts: false, why: `excluded: planned maintenance (${planned.ref}: ${planned.reason})` }
+      : { counts: true, why: `CLEAN_REBOOT counts against the ${run.name}: no planned-maintenance record covers it` };
+  }
   if (RULE.counts.includes(type)) return { counts: true, why: `${type} counts against the ${run.name}` };
   return { counts: false, why: `excluded: ${RULE.excluded[type] ?? type}` };
 }
@@ -134,10 +157,12 @@ export function classify(input: ClassifyInput): { incidents: Incident[]; summary
     if (!inRange(w)) continue;
     const type: OutageType = b.cause === 'deploy' ? 'DEPLOY_REBOOT' : b.cause === 'clean' ? 'CLEAN_REBOOT' : 'POWER_CUT';
     const staled = input.board.some((x) => overlaps(x, w));
-    const j = judge(type, w.start, input.run);
+    const planned = type === 'CLEAN_REBOOT' ? (input.maintenance ?? []).find((m) => MAINTENANCE_REF.test(m.ref) && String(m.reason ?? '').trim() && overlaps(m, w)) ?? null : null;
+    const j = judge(type, w.start, input.run, planned);
     out.push({
       start: w.start, end: w.end, duration_min: Math.round(b.down_s / 60), path: 'pi_only', outage_type: type, candidates: [],
-      resolved_by: 'boot_record', needs: null, source: `boot record: ${b.cause}, ${b.down_s} s down${staled ? ', the board was stale too' : ', the board did not go stale'}`,
+      resolved_by: 'boot_record', needs: type === 'CLEAN_REBOOT' && !planned ? 'a planned-maintenance record (LOOP-, INC-, CODEX- or DW- id with the upgrade or maintenance it served) to exclude it' : null,
+      source: `boot record: ${b.cause}, ${b.down_s} s down${staled ? ', the board was stale too' : ', the board did not go stale'}${planned ? `; planned maintenance ${planned.ref}` : ''}`,
       counts_against_run: j.counts, reason: j.why,
     });
   }

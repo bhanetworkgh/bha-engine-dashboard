@@ -10,7 +10,7 @@ import type { ToolDefinition } from './tools';
 
 export const classifyOutages: ToolDefinition = {
   name: 'classify_outages',
-  description: `Sorts the vFarm rack's sensor-path outages by cause and says which count against a run, by Jegan's 408M method. Each outage comes back with its start, end, duration, outage_type (${oc.OUTAGE_TYPES.join(', ')}) and counts_against_run. A gateway outage from before the Pi's boot record existed, or a board outage with no named cause, comes back outage_type null with both candidates and what would settle it: say it is unresolved, never pick one. Excluded from a run: power cuts the unit recovered from on its own, deploy reboots and clean reboots. Counted: gateway link drops, board hardware and valve coil, and anything unresolved. With no inputs it answers for the 408M reference dataset (Jegan's 2 Nov production read). Otherwise send board and pi stale windows, the boot record, boot_record_since and any annotations (a builder's log or the Pi journal naming a cause). This is what reliability wording about the rack rests on: never quote an uptime figure from it, and say which outages were excluded and why. Read only.`,
+  description: `Sorts the vFarm rack's sensor-path outages by cause and says which count against a run, by Jegan's 408M method. Each outage comes back with its start, end, duration, outage_type (${oc.OUTAGE_TYPES.join(', ')}) and counts_against_run. A gateway outage from before the Pi's boot record existed, or a board outage with no named cause, comes back outage_type null with both candidates and what would settle it: say it is unresolved, never pick one. Excluded from a run: power cuts the unit recovered from on its own, deploy reboots, and a clean reboot only when a planned-maintenance record in our own system covers it (Jason, 22 Nov 2026, DW-1795169091957-80T8); a clean reboot with none counts. Counted: gateway link drops, board hardware and valve coil, unrecorded clean reboots, and anything unresolved. With no inputs it answers for the 408M reference dataset (Jegan's 2 Nov production read). Otherwise send board and pi stale windows, the boot record, boot_record_since and any annotations (a builder's log or the Pi journal naming a cause). This is what reliability wording about the rack rests on: never quote an uptime figure from it, and say which outages were excluded and why. Read only.`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -19,6 +19,7 @@ export const classifyOutages: ToolDefinition = {
       boot: { type: 'array', description: "The Pi's boot record: [{at, cause: deploy|clean|power_loss, down_s, last_alive?}].", items: { type: 'object' } },
       boot_record_since: { type: 'string', description: 'When the boot record begins (ISO).' },
       annotations: { type: 'array', description: 'Causes named by a person or the Pi journal: [{start, end, outage_type, source}].', items: { type: 'object' } },
+      maintenance: { type: 'array', description: 'Planned-maintenance records from our own system: [{start, end, ref (a LOOP-, INC-, CODEX-, DW-, EV- or TASK- id), reason (the upgrade or maintenance it served)}]. Only these exclude a clean reboot.', items: { type: 'object' } },
       from: { type: 'string' }, to: { type: 'string' },
       run: { type: 'object', description: 'The run being judged: {name, start}.' },
     },
@@ -32,7 +33,7 @@ export const classifyOutages: ToolDefinition = {
     if (!reference && (!Array.isArray(a.pi) || !Array.isArray(a.boot))) {
       return { ok: false, reason: 'bad_input', message: 'Send board, pi and boot together (empty arrays are fine), or none of them for the 408M reference dataset.' };
     }
-    const input: oc.ClassifyInput = reference ? oc.REFERENCE_408M : { boot_record_since: null, annotations: [], ...a } as oc.ClassifyInput;
+    const input: oc.ClassifyInput = reference ? oc.REFERENCE_408M : { boot_record_since: null, annotations: [], maintenance: [], ...a } as oc.ClassifyInput;
     const bad = (input.annotations ?? []).find((n) => !oc.OUTAGE_TYPES.includes(n.outage_type));
     if (bad) return { ok: false, reason: 'unknown_outage_type', message: `annotation outage_type must be one of ${oc.OUTAGE_TYPES.join(', ')}.` };
     const out = oc.classify(input);

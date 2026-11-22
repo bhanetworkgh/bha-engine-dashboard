@@ -16009,3 +16009,10 @@ Files:      server/src/genieBuilder.ts, BUILD_LOG.md
 Problem:    In the chat app each change is approved on engine_genie_approvals; nothing wrote that onto the record's approval stage, so a build approved ten times read as never approved.
 Fix:        linkAction fills the approval stage once, from the first approved change (approver, time, granted; one approval, or two-builder passed on a live-touching build), and marks live_effect when a publish or a production run lands. A live-touching build approved by its own requester is left for a second builder. The boot backfill fills builds already linked.
 Decision:   Filled only from the log, never assumed: the stage says which approval it came from (stages.approval.from_approval_log).
+
+## 2026-11-22 18:35 — Clean reboots excluded only as planned maintenance (DW-80T8)
+Intent:     Write Jason's 22 Nov ruling (DW-1795169091957-80T8, C0ASMPYQLG3 1795367485.917309) into the outage contract and the code that applies it.
+Files:      docs/contracts/outage-classification.md, server/src/outageClass.ts, server/src/mcp/outageTools.ts, server/test/outage-class.test.cjs, CLAUDE.md
+Problem:    The contract and RULE excluded every clean reboot as "proposed". Genie read the file in the thread but stopped before writing.
+Fix:        A clean reboot is excluded only when a `maintenance` record (a LOOP-, INC-, CODEX-, DW-, EV- or TASK- id plus the upgrade or maintenance it served) covers it; otherwise it counts and says what would exclude it. classify_outages takes `maintenance`. Test: 17 checks pass.
+Decision:   The 29 Oct 10:43 clean reboot in the 408M reference has no planned-maintenance record, so the November run now counts 26 minutes (16 + 10). Shown rather than assumed; a record for it would bring it back to 16.

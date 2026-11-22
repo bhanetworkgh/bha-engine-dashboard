@@ -46,12 +46,24 @@ ok('three deploy reboots and one clean reboot on the boot record, none of which 
 
 // The November-run view.
 const r = summary.run;
-assert.deepEqual(r.counted.map((c) => [c.start, c.outage_type, c.duration_min]), [['2026-11-02T05:50:00Z', 'GATEWAY_LINK', 16]]);
-assert.equal(r.counted_minutes, 16);
-ok('November run: only the 2 Nov 16-min link drop counts against it');
-assert.deepEqual(r.excluded.map((e) => e.outage_type).sort(), ['CLEAN_REBOOT', 'DEPLOY_REBOOT', 'DEPLOY_REBOOT', 'DEPLOY_REBOOT', 'POWER_CUT']);
+// Jason, 22 Nov 2026 (DW-1795169091957-80T8): a clean reboot is excluded only as planned maintenance. The
+// 29 Oct 10:43 clean reboot has no planned-maintenance record, so it now counts.
+assert.deepEqual(r.counted.map((c) => [c.start, c.outage_type, c.duration_min]), [['2026-10-29T10:33:03Z', 'CLEAN_REBOOT', 10], ['2026-11-02T05:50:00Z', 'GATEWAY_LINK', 16]]);
+assert.equal(r.counted_minutes, 26);
+ok('November run: the 2 Nov 16-min link drop and the unrecorded 29 Oct clean reboot (10 min) count, 26 min');
+assert.deepEqual(r.excluded.map((e) => e.outage_type).sort(), ['DEPLOY_REBOOT', 'DEPLOY_REBOOT', 'DEPLOY_REBOOT', 'POWER_CUT']);
 assert.match(r.excluded.find((e) => e.outage_type === 'POWER_CUT').reason, /site mains power/);
-ok('November run: the 15.1 h power cut, three deploy reboots and the clean reboot are excluded, each with its reason');
+ok('November run: the 15.1 h power cut and three deploy reboots are excluded, each with its reason');
+const clean = incidents.find((i) => i.outage_type === 'CLEAN_REBOOT');
+assert.match(clean.reason, /no planned-maintenance record/); assert.match(clean.needs, /planned-maintenance record/);
+ok('a clean reboot with no planned-maintenance record counts and says what would exclude it');
+const planned = oc.classify({ ...oc.REFERENCE_408M, maintenance: [{ start: '2026-10-29T10:30:00Z', end: '2026-10-29T10:45:00Z', ref: 'LOOP-1790000000000-TEST', reason: 'boot record install' }] });
+assert.equal(planned.summary.run.counted_minutes, 16);
+assert.match(planned.incidents.find((i) => i.outage_type === 'CLEAN_REBOOT').reason, /planned maintenance \(LOOP-1790000000000-TEST/);
+ok('the same clean reboot covered by a planned-maintenance record is excluded, naming the record');
+const noRef = oc.classify({ ...oc.REFERENCE_408M, maintenance: [{ start: '2026-10-29T10:30:00Z', end: '2026-10-29T10:45:00Z', ref: 'planned', reason: 'x' }] });
+assert.equal(noRef.summary.run.counted_minutes, 26);
+ok('a maintenance note that names no record in our own system does not exclude it');
 assert.ok(incidents.filter((i) => Date.parse(i.start) < Date.parse('2026-10-29T00:00:00Z')).every((i) => i.counts_against_run === false));
 ok('everything before the run started (29 Oct) is outside it');
 
