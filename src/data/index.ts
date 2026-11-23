@@ -746,6 +746,16 @@ export interface BlockersData { rows: BlockedLoop[]; late: number; no_date: numb
 export const getBlockers = () => api<BlockersData>('/api/income-board/blockers');
 export const setBlocked = (loopId: string, body: { blocked_by?: string; unblock_date?: string; tag?: string; why?: string; clear?: boolean }) =>
   api<{ ok: boolean; loop_id: string; cleared: boolean }>(`/api/income-board/blockers/${encodeURIComponent(loopId)}`, { method: 'POST', body });
+/** Knowledge capture on the Income Board (23 Nov 2026): server/src/knowledgeCapture.ts. */
+export interface KnowledgeRef { kind: string; ref: string; url: string | null }
+export interface KnowledgeRow {
+  item_id: string; holder: string; holder_name: string | null; area: string; piece: string; lives_in: KnowledgeRef[];
+  mark: 'KNOWLEDGE_CAPTURE_REQUIRED' | 'BLOCKS_PILOT_1'; picked_up_by: string | null; picked_up_by_name: string | null;
+  handover_date: string | null; status: 'not_started' | 'in_progress' | 'captured'; proof_ref: string | null; to_confirm: string | null; notes: string | null; late: boolean; updated_at: string;
+}
+export interface KnowledgeData { rows: KnowledgeRow[]; total: number; blocks_pilot: number; captured: number; no_pickup: number; no_date: number; late: number; to_confirm: number; by_holder: Record<string, number>; rule: string; read_at: string }
+export const getKnowledge = () => api<KnowledgeData>('/api/income-board/knowledge');
+export const setKnowledge = (body: Record<string, unknown>) => api<{ ok: boolean; item_id?: string }>('/api/income-board/knowledge', { method: 'POST', body });
 export const getModelSpend = () => api<import('./types').ModelSpendData>('/api/model-spend');
 /** Logstream v0: repeating faults, what crossed a threshold and what was done (2026-10-10). */
 export const getLogstream = () => api<LogstreamData>('/api/logstream');

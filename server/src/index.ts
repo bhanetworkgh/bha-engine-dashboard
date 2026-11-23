@@ -71,6 +71,7 @@ import * as adminAuth from './adminAuth';
 import * as agreements from './agreements';
 import * as compSnapshot from './compSnapshot';
 import * as incomeBoard from './incomeBoard';
+import * as knowledgeCapture from './knowledgeCapture';
 import { extractFileText } from './mcp/docTools';
 import * as earlyAccess from './earlyAccess';
 import * as stripeLedger from './stripeLedger';
@@ -2359,6 +2360,18 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       return send(res, 200, await incomeBoard.setBlocked(decodeURIComponent(blockedSet[1]), await readJson(req)));
     } catch (e) {
       if (e instanceof incomeBoard.BlockedError) return send(res, e.status, { ok: false, reason: e.reason, message: e.message });
+      throw e;
+    }
+  }
+  if (p === '/api/income-board/knowledge' && method === 'GET') return send(res, 200, await knowledgeCapture.read());
+  if (p === '/api/income-board/knowledge' && method === 'POST') {
+    try {
+      const admin = adminAuth.readAdmin(req);
+      if (!admin) return send(res, 403, { ok: false, reason: 'admin_login', message: 'Changing a knowledge capture row is behind the admin login. Sign in at /admin.' });
+      const b = (await readJson(req)) as Record<string, unknown>;
+      return send(res, 200, await knowledgeCapture.setItem(b, adminAuth.slackId(admin.by)));
+    } catch (e) {
+      if (e instanceof knowledgeCapture.KnowledgeError) return send(res, e.status, { ok: false, reason: e.reason, message: e.message });
       throw e;
     }
   }

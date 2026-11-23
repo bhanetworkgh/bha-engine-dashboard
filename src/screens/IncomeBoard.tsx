@@ -2,10 +2,10 @@ import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { useData } from '../app/useData';
-import { getBlockers, getIncomeBoard, setBlocked, type BlockedLoop, type IncomeBlocker } from '../data';
+import { getBlockers, getIncomeBoard, getKnowledge, setBlocked, setKnowledge, type BlockedLoop, type IncomeBlocker, type KnowledgeRow } from '../data';
 import { Button, EmptyState, LoadFailed, Loading, PageHeader, Pill, SearchBox, Stat, StatCell, StatStrip, TableFrame, Tabs, Th, Toast, relativeTime, useToast } from '../components/ui';
 
-const VIEWS = ['Board', 'Blockers'] as const;
+const VIEWS = ['Board', 'Blockers', 'Knowledge capture'] as const;
 type View = (typeof VIEWS)[number];
 
 /** Every blocked loop: what blocks it, when it unblocks, lane, tag, why and owner (23 Nov 2026, Destiny). */
@@ -189,8 +189,9 @@ function Rows({ rows, label }: { rows: IncomeBlocker[]; label: string }) {
 
 export default function IncomeBoard() {
   const [params, setParams] = useSearchParams();
-  const view: View = params.get('tab') === 'blockers' ? 'Blockers' : 'Board';
-  const setView = (v: View) => setParams(v === 'Blockers' ? { tab: 'blockers' } : {}, { replace: true });
+  const tab = params.get('tab');
+  const view: View = tab === 'blockers' ? 'Blockers' : tab === 'knowledge' ? 'Knowledge capture' : 'Board';
+  const setView = (v: View) => setParams(v === 'Blockers' ? { tab: 'blockers' } : v === 'Knowledge capture' ? { tab: 'knowledge' } : {}, { replace: true });
   const tabs = <div className="px-6 md:px-8"><Tabs tabs={VIEWS} value={view} onChange={setView} /></div>;
   if (view === 'Blockers') {
     return (
@@ -201,7 +202,158 @@ export default function IncomeBoard() {
       </div>
     );
   }
+  if (view === 'Knowledge capture') {
+    return (
+      <div className="relative flex h-full min-h-0 flex-col">
+        <PageHeader title="Production-Income Board" subtitle="Knowledge capture" />
+        {tabs}
+        <Knowledge />
+      </div>
+    );
+  }
   return <BoardView tabs={tabs} />;
+}
+
+const PEOPLE: [string, string][] = [['U0AEW3TBYH1', 'Destiny'], ['U0A9V97949F', 'Jason'], ['U0AF011R821', 'Jegan'], ['U0BKT6MAW2Y', 'Hardik'], ['U0AC6RFNP3P', 'Ahad'], ['U0BNQGG020Y', 'Kavin']];
+const STATUS_TEXT: Record<KnowledgeRow['status'], string> = { not_started: 'Not started', in_progress: 'In progress', captured: 'Captured' };
+const MARK_TEXT: Record<KnowledgeRow['mark'], string> = { BLOCKS_PILOT_1: 'Blocks Pilot 1', KNOWLEDGE_CAPTURE_REQUIRED: 'Capture required' };
+
+/** What only one person knows that the paid pilot needs written down (23 Nov 2026, Destiny). */
+function Knowledge() {
+  const [bump, setBump] = useState(0);
+  const { status, data, error } = useData(getKnowledge, [bump], { kinds: ['income_board'] });
+  const [holder, setHolder] = useState('all');
+  const [mark, setMark] = useState('all');
+  const [q, setQ] = useState('');
+  const [open, setOpen] = useState<KnowledgeRow | null>(null);
+  const { toast, setToast } = useToast();
+  const rows = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return (data?.rows ?? []).filter((r) => (holder === 'all' || r.holder === holder) && (mark === 'all' || r.mark === mark)
+      && (!needle || [r.item_id, r.area, r.piece, r.notes, r.picked_up_by_name, ...r.lives_in.map((l) => l.ref)].some((v) => (v ?? '').toLowerCase().includes(needle))));
+  }, [data, holder, mark, q]);
+  if (!data) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
+  const holders = Object.entries(data.by_holder).sort((a, b) => a[0].localeCompare(b[0]));
+  return (
+    <>
+      <StatStrip cols={4}>
+        <StatCell><Stat label="Pieces of knowledge" value={data.total} hint={`${data.blocks_pilot} block Pilot 1`} size="lg" /></StatCell>
+        <StatCell><Stat label="Captured" value={data.captured} hint={`of ${data.total}, each with proof`} size="lg" /></StatCell>
+        <StatCell><Stat label="Nobody picking up" value={data.no_pickup} hint={`${data.no_date} with no handover date`} size="lg" /></StatCell>
+        <StatCell><Stat label="To confirm" value={data.to_confirm} hint={data.late ? `${data.late} past their handover date` : 'drafted from the records'} size="lg" /></StatCell>
+      </StatStrip>
+      <p className="px-6 pb-3 pt-3 text-[12px] text-faint md:px-8">{data.rule}</p>
+      <div className="flex flex-wrap items-center gap-3 px-6 pb-3 md:px-8">
+        <SearchBox value={q} onChange={setQ} placeholder="Search areas, repos, loops" />
+        <label className="text-[12.5px] text-dim">
+          Holder{' '}
+          <select className="input ml-1 inline-block w-auto py-1 text-[12.5px]" value={holder} onChange={(e) => setHolder(e.target.value)}>
+            <option value="all">Everyone ({data.total})</option>
+            {holders.map(([name, n]) => { const id = PEOPLE.find((p) => p[1] === name)?.[0] ?? name; return <option key={id} value={id}>{name} ({n})</option>; })}
+          </select>
+        </label>
+        <label className="text-[12.5px] text-dim">
+          Mark{' '}
+          <select className="input ml-1 inline-block w-auto py-1 text-[12.5px]" value={mark} onChange={(e) => setMark(e.target.value)}>
+            <option value="all">Both</option>
+            <option value="BLOCKS_PILOT_1">Blocks Pilot 1</option>
+            <option value="KNOWLEDGE_CAPTURE_REQUIRED">Capture required</option>
+          </select>
+        </label>
+      </div>
+      {rows.length === 0 ? (
+        <EmptyState>{data.total === 0 ? 'No knowledge capture row has been written yet.' : 'No row matches.'}</EmptyState>
+      ) : (
+        <TableFrame grow={false} label="Knowledge capture">
+          <thead><tr><Th>Area</Th><Th>What has to be written down</Th><Th>Holder</Th><Th>Mark</Th><Th>Picked up by</Th><Th>Handover</Th><Th>Status</Th></tr></thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.item_id} className="cursor-pointer border-b border-line align-top hover:bg-hover" onClick={() => setOpen(r)}>
+                <td className="px-3 py-2 text-ink">{r.area}</td>
+                <td className="max-w-[56ch] px-3 py-2 text-ink">{r.piece.length > 180 ? `${r.piece.slice(0, 180)}…` : r.piece}{r.to_confirm && <div className="mt-1 text-[12px] text-degraded">To confirm: {r.to_confirm}</div>}</td>
+                <td className="px-3 py-2 text-dim">{r.holder_name}</td>
+                <td className="px-3 py-2"><span className={r.mark === 'BLOCKS_PILOT_1' ? 'font-medium text-ink' : 'text-dim'}>{MARK_TEXT[r.mark]}</span></td>
+                <td className="px-3 py-2 text-dim">{r.picked_up_by_name ?? <span className="text-faint">nobody yet</span>}</td>
+                <td className="tabular whitespace-nowrap px-3 py-2">{r.handover_date ? (r.late ? <Pill tone="failing">{r.handover_date} · late</Pill> : <span className="text-dim">{r.handover_date}</span>) : <span className="text-faint">not set</span>}</td>
+                <td className="px-3 py-2 text-dim">{STATUS_TEXT[r.status]}</td>
+              </tr>
+            ))}
+          </tbody>
+        </TableFrame>
+      )}
+      {open && <KnowledgeDialog row={open} onClose={() => setOpen(null)} onDone={(t) => { setOpen(null); setToast({ text: t, tone: 'ok' }); setBump((n) => n + 1); }} onError={(t) => setToast({ text: t, tone: 'failing' })} />}
+      <Toast toast={toast} />
+      <div className="h-8" />
+    </>
+  );
+}
+
+/** One row: where the knowledge lives, and the handover fields Destiny or Jason edit (behind the admin login). */
+function KnowledgeDialog({ row, onClose, onDone, onError }: { row: KnowledgeRow; onClose: () => void; onDone: (t: string) => void; onError: (t: string) => void }) {
+  const [pick, setPick] = useState(row.picked_up_by ?? '');
+  const [date, setDate] = useState(row.handover_date ?? '');
+  const [st, setSt] = useState(row.status);
+  const [proof, setProof] = useState(row.proof_ref ?? '');
+  const [notes, setNotes] = useState(row.notes ?? '');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  }, [onClose]);
+  const save = async () => {
+    setBusy(true);
+    try {
+      await setKnowledge({ item_id: row.item_id, picked_up_by: pick, handover_date: date, status: st, proof_ref: proof, notes });
+      onDone(`${row.area} saved.`);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : 'It could not be saved.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const field = 'input mt-1 w-full py-1.5 text-[13px]';
+  return createPortal(
+    <div className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/30 p-4 md:p-10" onClick={onClose}>
+      <div className="card fade-up w-full max-w-[720px] px-6 py-5" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Knowledge capture">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="kicker tabular">{row.item_id} · {MARK_TEXT[row.mark]}</div>
+            <div className="mt-1 text-[15px] font-semibold text-ink">{row.area}</div>
+            <div className="mt-1 text-[13px] text-ink">{row.piece}</div>
+            <div className="mt-1 text-[12px] text-dim">Held by {row.holder_name}</div>
+            {row.to_confirm && <div className="mt-1 text-[12px] text-degraded">To confirm: {row.to_confirm}</div>}
+          </div>
+          <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
+        </div>
+        <div className="mt-4 text-[12.5px] font-medium text-ink">Where it lives</div>
+        {row.lives_in.length === 0 ? <div className="mt-1 text-[12.5px] text-faint">Nothing named yet.</div> : (
+          <ul className="mt-1 grid gap-1 text-[12.5px]">
+            {row.lives_in.map((l, i) => <li key={i} className="text-dim"><span className="text-faint">{l.kind}</span> {l.url ? <a className="text-accent hover:underline" href={l.url} target="_blank" rel="noreferrer">{l.ref}</a> : <span className="text-ink">{l.ref}</span>}</li>)}
+          </ul>
+        )}
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <label className="text-[12.5px] text-dim">Picked up by
+            <select className={field} value={pick} onChange={(e) => setPick(e.target.value)}>
+              <option value="">Nobody yet</option>
+              {PEOPLE.map(([id, n]) => <option key={id} value={id}>{n}</option>)}
+            </select>
+          </label>
+          <label className="text-[12.5px] text-dim">Handover date<input type="date" className={field} value={date} onChange={(e) => setDate(e.target.value)} /></label>
+          <label className="text-[12.5px] text-dim">Status
+            <select className={field} value={st} onChange={(e) => setSt(e.target.value as KnowledgeRow['status'])}>
+              {(Object.keys(STATUS_TEXT) as KnowledgeRow['status'][]).map((k) => <option key={k} value={k}>{STATUS_TEXT[k]}</option>)}
+            </select>
+          </label>
+          <label className="text-[12.5px] text-dim">Proof (EV- id, SOP id or link)<input className={field} value={proof} onChange={(e) => setProof(e.target.value)} placeholder="Needed to mark it captured" /></label>
+        </div>
+        <label className="mt-3 block text-[12.5px] text-dim">Notes<textarea className={field} rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
+        <div className="mt-2 text-[12px] text-faint">Saving is behind the admin login.</div>
+        <div className="mt-4 flex justify-end"><Button variant="primary" loading={busy} onClick={() => void save()}>Save</Button></div>
+      </div>
+    </div>,
+    document.body,
+  );
 }
 
 function BoardView({ tabs }: { tabs: ReactNode }) {

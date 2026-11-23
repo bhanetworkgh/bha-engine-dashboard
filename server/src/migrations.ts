@@ -5031,6 +5031,35 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `ALTER TABLE engine_genie_approvals ADD COLUMN IF NOT EXISTS build_id text`,
     ],
   },
+  {
+    id: 150,
+    name: "Knowledge capture on the Production-Income Board: what only one person knows that the paid pilot needs written down (23 Nov 2026, Destiny; knowledgeCapture.ts)",
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_knowledge_capture (
+        item_id text PRIMARY KEY,
+        holder text NOT NULL,
+        area text NOT NULL,
+        piece text NOT NULL,
+        lives_in jsonb NOT NULL DEFAULT '[]'::jsonb,
+        mark text NOT NULL CHECK (mark IN ('KNOWLEDGE_CAPTURE_REQUIRED', 'BLOCKS_PILOT_1')),
+        picked_up_by text,
+        handover_date date,
+        status text NOT NULL DEFAULT 'not_started' CHECK (status IN ('not_started', 'in_progress', 'captured')),
+        proof_ref text,
+        to_confirm text,
+        notes text,
+        added_by text NOT NULL,
+        added_at timestamptz NOT NULL DEFAULT now(),
+        updated_by text NOT NULL,
+        updated_at timestamptz NOT NULL DEFAULT now(),
+        removed_at timestamptz,
+        removed_by text,
+        removed_reason text,
+        CHECK (status <> 'captured' OR proof_ref IS NOT NULL)
+      )`,
+      `CREATE INDEX IF NOT EXISTS engine_knowledge_capture_holder ON engine_knowledge_capture (holder) WHERE removed_at IS NULL`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

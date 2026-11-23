@@ -16132,3 +16132,10 @@ Decision:   normalise rather than refuse: every form Genie sent carried the chan
 Intent:     Finish the split: the server log still said "posted in one combined post" after the 13:25 pass posted 80 changes as 4 posts.
 Files:      server/src/changeAnnounce.ts, CLAUDE.md
 Fix:        The log line names posts of up to RULE.batch_size; CLAUDE.md's announcer paragraph states the 20-change limit and why.
+
+## 2026-11-23 14:30 — Knowledge capture on the Income Board, and a short read for Genie
+Intent:     D4: one place that names what only Hardik, Ahad, Jegan or Destiny knows that the paid pilot needs written down, where it lives, its mark, who picks it up and when. Destiny: "also include for me and my stuff and jegan, build and finish".
+Files:      server/src/knowledgeCapture.ts (new), server/src/migrations.ts (150), server/src/index.ts, server/src/incomeBoard.ts, server/src/mcp/incomeBoardTools.ts, src/screens/IncomeBoard.tsx, src/data/index.ts, server/test/knowledge-capture.test.cjs, package.json, .github/workflows/ci.yml, CLAUDE.md
+Problem:    read_income_board carried all 97 blocked loops, about 229,000 characters, and Genie's read of it in Jason's thread was cut to 1,000.
+Fix:        engine_knowledge_capture with a captured-needs-proof CHECK; set_knowledge_capture (Destiny or Jason, audited) and an admin-login edit window; the Knowledge capture tab. read_income_board's blocked_loops is the short form by default (counts plus the 25 that matter; full: true for all) and carries knowledge_capture.
+Decision:   Rows drafted from records carry to_confirm naming the holder, never presented as confirmed. The mark is shown in plain text, not red: it is a fact about the row, not a fault.

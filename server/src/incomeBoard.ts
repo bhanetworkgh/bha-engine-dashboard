@@ -335,6 +335,32 @@ export async function blockers(now = new Date()): Promise<{ rows: BlockedLoop[];
 }
 
 /**
+ * The short form of the blockers list for agents (23 Nov 2026: 97 blocked loops made read_income_board about 229,000
+ * characters and Genie's read was cut to 1,000). The counts over every row, then the 25 that matter most: late first,
+ * then those that stop the paid pilot, then the rest by unblock date. Pure.
+ */
+export const SHORT_BLOCKERS = 25;
+export function shortBlockers(b: Awaited<ReturnType<typeof blockers>>) {
+  const pilot = (x: BlockedLoop) => /stops the paid pilot/i.test(x.why ?? '');
+  const by_owner: Record<string, number> = {};
+  for (const x of b.rows) by_owner[x.owner ?? 'none'] = (by_owner[x.owner ?? 'none'] ?? 0) + 1;
+  const ranked = [...b.rows].sort((a, c) => Number(c.late) - Number(a.late) || Number(pilot(c)) - Number(pilot(a)) || (a.unblock_date ?? '9999').localeCompare(c.unblock_date ?? '9999'));
+  const cut = (v: string | null, n: number) => (v && v.length > n ? `${v.slice(0, n)}…` : v);
+  return {
+    total: b.rows.length,
+    late: b.late,
+    no_date: b.no_date,
+    stops_paid_pilot: b.rows.filter(pilot).length,
+    by_owner,
+    shown: Math.min(SHORT_BLOCKERS, b.rows.length),
+    rows: ranked.slice(0, SHORT_BLOCKERS).map((x) => ({ ...x, title: cut(x.title, 160) ?? '', blocked_by: cut(x.blocked_by, 200) ?? '', why: cut(x.why, 200) })),
+    note: b.rows.length > SHORT_BLOCKERS ? `The ${SHORT_BLOCKERS} that matter most of ${b.rows.length}; call again with full: true for every one, or read the page.` : 'Every blocked loop.',
+    rule: b.rule,
+    read_at: b.read_at,
+  };
+}
+
+/**
  * Set or clear a loop's blocked fields from the page (23 Nov 2026, Destiny). Writes into the loop's latest row
  * through engineWrite.patchRecord, the same merge every loop update uses, so nothing else on the loop changes.
  * `clear` removes all four fields, which takes the loop off the page.
