@@ -289,7 +289,7 @@ export async function scheduledRuns(now = Date.now()) {
       state: p.status === 'cancelled' ? 'cancelled' : Date.parse(String(p.post_at)) <= now ? 'handed to Slack' : 'waiting',
       requested_by: p.requested_by,
     })),
-    timers: { since: timers.STARTED_AT, list: timers.list() },
+    timers: { since: timers.STARTED_AT, list: timers.list(), memory: timers.memory() },
     notes: [
       `The agent schedule is read from the agent inventory (last read ${inventoryReadAt ? inventoryReadAt.slice(0, 10) : 'never'}), so a task added or re-timed since then shows on the old schedule until the inventory is recorded again.`,
       `The run log began ${RUN_LOG_SINCE.slice(0, 16).replace('T', ' ')} UTC. Before it a task wrote only a finish line, so a due time with nothing recorded says "no record"; from then on it says "never started".`,

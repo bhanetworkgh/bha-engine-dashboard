@@ -13,6 +13,8 @@ export interface TimerInfo {
   every: string;
   last_tick_at: string | null;
   ticks: number;
+  /** Heap growth seen in the samples this timer ran in, in MB, since the process started. */
+  memory: { grew_mb: number; samples: number; largest_mb: number };
 }
 
 const KNOWN: Array<{ name: string; what: string; every: string }> = [
@@ -54,6 +56,76 @@ const KNOWN: Array<{ name: string; what: string; every: string }> = [
 const state = new Map<string, { last: string; ticks: number }>();
 export const STARTED_AT = new Date().toISOString();
 
+/**
+ * Memory measuring (23 Nov 2026, Destiny). The process crashed out of heap three times in
+ * 12 days, and the total alone cannot say which job is heavy. Every SAMPLE_MS the heap is
+ * read; any growth since the last sample is shared between the timers that ticked in that
+ * window, or put down to "requests and other work" when none did. GC makes single samples
+ * noisy, so the figures are totals of growth over many windows, read as a ranking, never
+ * as an exact cost. Held in memory like the tick counts: a restart starts them again.
+ */
+const SAMPLE_MS = 10_000;
+const SUMMARY_MS = 3_600_000;
+const HIGH_HEAP_MB = 320;
+const OTHER = 'requests and other work';
+const mb = (b: number): number => Math.round((b / 1_048_576) * 10) / 10;
+const growth = new Map<string, { grew: number; samples: number; largest: number }>();
+let windowNames = new Set<string>();
+let lastHeap = process.memoryUsage().heapUsed;
+let peakHeap = lastHeap;
+let highWarnedAt = 0;
+
+function credit(name: string, bytes: number): void {
+  const g = growth.get(name) ?? { grew: 0, samples: 0, largest: 0 };
+  g.grew += bytes;
+  g.samples += 1;
+  if (bytes > g.largest) g.largest = bytes;
+  growth.set(name, g);
+}
+
+export function memoryTop(n = 8): Array<{ name: string; grew_mb: number; samples: number; largest_mb: number }> {
+  return [...growth.entries()]
+    .map(([name, g]) => ({ name, grew_mb: mb(g.grew), samples: g.samples, largest_mb: mb(g.largest) }))
+    .sort((a, b) => b.grew_mb - a.grew_mb)
+    .slice(0, n);
+}
+
+function sample(): void {
+  try {
+    const m = process.memoryUsage();
+    const delta = m.heapUsed - lastHeap;
+    lastHeap = m.heapUsed;
+    if (m.heapUsed > peakHeap) peakHeap = m.heapUsed;
+    const names = windowNames.size ? [...windowNames] : [OTHER];
+    windowNames = new Set();
+    if (delta > 0) for (const name of names) credit(name, delta / names.length);
+    if (mb(m.heapUsed) >= HIGH_HEAP_MB && Date.now() - highWarnedAt > 10 * 60_000) {
+      highWarnedAt = Date.now();
+      console.warn(
+        `[memory] heap ${mb(m.heapUsed)} MB (rss ${mb(m.rss)} MB) is past ${HIGH_HEAP_MB} MB; ran in the last ${SAMPLE_MS / 1000}s: ${names.join(', ')}; most growth so far: ${memoryTop(5).map((t) => `${t.name} ${t.grew_mb} MB`).join('; ')}`,
+      );
+    }
+  } catch {
+    /* measuring must never break the process */
+  }
+}
+
+function summary(): void {
+  try {
+    const m = process.memoryUsage();
+    console.log(
+      `[memory] hourly: heap ${mb(m.heapUsed)} MB of ${mb(m.heapTotal)} MB, peak ${mb(peakHeap)} MB, rss ${mb(m.rss)} MB, since ${STARTED_AT}; most growth: ${memoryTop(8).map((t) => `${t.name} ${t.grew_mb} MB over ${t.samples} samples (largest ${t.largest_mb})`).join('; ') || 'none yet'}`,
+    );
+  } catch {
+    /* never throws */
+  }
+}
+
+if (process.env.NODE_ENV !== 'test') {
+  setInterval(sample, SAMPLE_MS).unref();
+  setInterval(summary, SUMMARY_MS).unref();
+}
+
 /** Called at the top of a timer's tick. Never throws. */
 export function beat(name: string): void {
   const s = state.get(name);
@@ -62,6 +134,22 @@ export function beat(name: string): void {
     s.last = now;
     s.ticks += 1;
   } else state.set(name, { last: now, ticks: 1 });
+  windowNames.add(name);
+}
+
+/** The process's memory now, the peak since it started, and the timers that grew it most. */
+export function memory(): { heap_mb: number; heap_total_mb: number; rss_mb: number; peak_heap_mb: number; since: string; sample_seconds: number; top: ReturnType<typeof memoryTop>; note: string } {
+  const m = process.memoryUsage();
+  return {
+    heap_mb: mb(m.heapUsed),
+    heap_total_mb: mb(m.heapTotal),
+    rss_mb: mb(m.rss),
+    peak_heap_mb: mb(peakHeap),
+    since: STARTED_AT,
+    sample_seconds: SAMPLE_MS / 1000,
+    top: memoryTop(12),
+    note: 'Growth in each 10 second window is shared between the timers that ticked in it; a ranking of what grows the heap, not an exact cost per job. "requests and other work" is growth when no timer ticked.',
+  };
 }
 
 export function list(): TimerInfo[] {
@@ -69,6 +157,14 @@ export function list(): TimerInfo[] {
   return [...names].map((name) => {
     const k = KNOWN.find((x) => x.name === name);
     const s = state.get(name);
-    return { name, what: k?.what ?? 'Not described', every: k?.every ?? 'not recorded', last_tick_at: s?.last ?? null, ticks: s?.ticks ?? 0 };
+    const g = growth.get(name);
+    return {
+      name,
+      what: k?.what ?? 'Not described',
+      every: k?.every ?? 'not recorded',
+      last_tick_at: s?.last ?? null,
+      ticks: s?.ticks ?? 0,
+      memory: { grew_mb: g ? mb(g.grew) : 0, samples: g?.samples ?? 0, largest_mb: g ? mb(g.largest) : 0 },
+    };
   });
 }

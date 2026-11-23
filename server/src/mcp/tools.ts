@@ -14,6 +14,7 @@
  *  2. **Nothing is cut silently.** Every answer that was capped says it was
  *     capped, says what the cap was, and says how to ask for the rest.
  */
+import * as timers from '../timers';
 import { statSync } from 'node:fs';
 import path from 'node:path';
 import { databaseIdentity, query as pgQuery, DATABASE_URL } from '../pg';
@@ -617,6 +618,7 @@ const getHealth: ToolDefinition = {
         started_at: deps.startedAt,
         uptime_seconds: Math.round(upMs / 1000),
         uptime: `${Math.floor(upMs / 3_600_000)}h ${Math.floor((upMs % 3_600_000) / 60_000)}m`,
+        memory: timers.memory(),
       },
       source_tree_readable: sourceAvailable(),
       probed: doProbe,

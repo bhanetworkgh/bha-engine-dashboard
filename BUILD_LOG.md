@@ -16070,3 +16070,10 @@ Files:      package.json (start script)
 Problem:    the server crashed at 10:01:55 UTC with "FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory" (exit 134), after 11 Nov (oomKilled) and the 22 Nov crash loop. Node's default heap on this box is about 256 MB while Render gives 512 MB; the daily average climbed from about 135 MB (26 Oct) to about 250 MB (23 Nov) as background jobs were added, so a burst (19 loop closes, a vFarm snapshot and the executions sync together) tipped it over. Bays — Message Capture's channel lookups got 502 for about three minutes (executions 108911, 108912, 108916 and their retries).
 Fix:        start with --max-old-space-size=400, leaving about 110 MB for everything outside the JavaScript heap.
 Decision:   no plan upgrade yet (Destiny, 23 Nov). Measure per-job memory next and decide on an upgrade from real numbers.
+
+## 2026-11-23 11:40 — Memory measuring: which background job grows the heap
+Intent:     find what fills the dashboard's memory before deciding on a plan upgrade (Destiny).
+Files:      server/src/timers.ts, server/src/scheduledRuns.ts, server/src/mcp/tools.ts
+Problem:    three heap crashes in 12 days and only a total to look at; nothing said which of the 33 timers, or the requests, grows the heap.
+Fix:        timers.ts reads the heap every 10 s and shares any growth between the timers that ticked in that window ("requests and other work" when none did). One [memory] line an hour with heap, peak, rss and the top growers; a warning line (at most every 10 min) when the heap passes 320 MB, naming what ran. The figures show on the Scheduled runs timers (memory per timer) and on get_health (process.memory).
+Decision:   a ranking, not an exact cost per job, because GC makes single samples noisy; the note on the read says so. Held in memory like the tick counts, so a restart starts it again. Nothing a job does is changed.
