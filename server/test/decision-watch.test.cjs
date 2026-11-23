@@ -28,6 +28,15 @@ const srv = http.createServer((req, res) => {
       slack.posts.push({ ...b, channel, ts });
       return send({ ok: true, channel, ts });
     }
+    // The stand-in Genie (23 Nov 2026): reminders, escalations and summaries post as Genie first.
+    if (req.url === '/api/genie/post-card') {
+      if (slack.genieDown) { res.writeHead(502, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ ok: false, error: 'genie is down' })); }
+      if (slack.refusePost) return send({ ok: false, error: 'channel_not_found' });
+      const ts = `${Math.floor(Date.now() / 1000) + slack.posts.length}.00000${slack.posts.length % 10}`;
+      const channel = /^U/.test(b.channel) ? `D${b.channel.slice(1)}` : b.channel;
+      slack.posts.push({ ...b, channel, ts, as: 'Genie' });
+      return send({ ok: true, channel, ts });
+    }
     if (req.url === '/conversations.replies') {
       if (slack.unreadable.has(b.channel)) return send({ ok: false, error: 'channel_not_found' });
       // The open-time check (no oldest): as Slack does, a reply names its thread, an unknown ts is thread_not_found.
@@ -61,6 +70,7 @@ const srv = http.createServer((req, res) => {
   process.env.QUOTA_ALERT_CHANNEL = 'C0ALERTS001';
   process.env.N8N_API_URL = `http://127.0.0.1:${port}/api/v1`;
   process.env.DASHBOARD_INBOUND_KEY = 'test-inbound-key';
+  process.env.GENIE_URL = `http://127.0.0.1:${port}`;
   const req = (m) => require(path.join(DIST, 'server/src', m));
   await req('migrations.js').migrate();
   const { query } = req('pg.js');
@@ -213,7 +223,7 @@ const srv = http.createServer((req, res) => {
   slack.refusePost = true;
   r = await only(B, at(24 * 60 + 1));
   assert.deepEqual(r.failed, [B]);
-  assert.match((await row(B)).last_error, /reminder 1 not posted: chat.postMessage: channel_not_found/);
+  assert.match((await row(B)).last_error, /reminder 1 not posted: as Genie: .*; as Bays: chat.postMessage: channel_not_found/);
   assert.equal((await row(B)).reminders_sent, 0);
   slack.refusePost = false;
   let clock = 24 * 60 + 2;
@@ -245,7 +255,7 @@ const srv = http.createServer((req, res) => {
   await query(`UPDATE engine_decision_watches SET created_at = $2, quiet_since = $2 WHERE watch_id = $1`, [C, at(0).toISOString()]);
   r = await only(C, at(24 * 60 + 1));
   assert.deepEqual(r.reminded, [C]);
-  assert.equal(slack.calls.filter((x) => x.url === '/chat.postMessage').at(-1).channel, OWNER, 'sent as a DM to the owner');
+  assert.equal(slack.calls.filter((x) => x.url === '/chat.postMessage' || x.url === '/api/genie/post-card').at(-1).channel, OWNER, 'sent as a DM to the owner');
   assert.equal((await row(C)).channel_id, `D${OWNER.slice(1)}`, 'the DM channel is kept, to read the answer in');
   // a write that changes nothing is not movement: the second reminder still goes
   await backlog(TASK, { lane: 'GENIE', task: 'Wire the read call', status: true }, at(30 * 60));
@@ -675,6 +685,11 @@ const srv = http.createServer((req, res) => {
   assert.equal(n.decision_watch_closed, 1);
   assert.equal(n.decision_watch_unread, 1);
   ok('every open, reminder, close, escalation and unread thread is an engine event');
+
+  // 23 Nov 2026: reminders post as Genie, guarded; where Genie cannot, Bays posts it and says so.
+  assert.ok(slack.calls.some((c) => c.url === '/api/genie/post-card' && c.guarded === true), 'reminders went to Genie, marked guarded');
+  assert.ok(slack.posts.some((x) => x.as === 'Genie'), 'at least one reminder was posted as Genie');
+  ok('reminders and escalations are posted as Genie');
 
   await query(`DELETE FROM engine_lane_backlog WHERE natural_id LIKE $1`, [`TASK-${T}-%`]);
   await query(`DELETE FROM engine_builder_profiles WHERE natural_id = $1`, [HARDIK]);

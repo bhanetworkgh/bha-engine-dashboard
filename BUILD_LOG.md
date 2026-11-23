@@ -16031,3 +16031,17 @@ Fix:        n8n.executionDetailBounded reads the body as a stream and stops at a
             local stand-in: ok, a 404 as gone, and a 60 MB body stopped at 15,007,434 bytes.
 Decision:   cap rather than raise the heap: the scan only needs the model nodes' usage, and a run that large was never
             going to be worth holding in memory for that.
+
+## 2026-11-23 09:45 — Decision Watch reminders, escalations and summaries post as Genie
+Intent:     Destiny, 23 Nov: "let's use Genie's Slack id for sending the reminders", for Decision Watches and loop reminders.
+Files:      server/src/genieSlack.ts (new), server/src/rssReports.ts, server/src/decisionWatch.ts, server/test/decision-watch.test.cjs, CLAUDE.md
+Problem:    Every Decision Watch reminder, escalation and combined DM went out as Bays. This dashboard holds no Genie token.
+Fix:        postAsGenie moved from rssReports.ts to genieSlack.ts (re-exported, BHA RSS unchanged). decisionWatch.post and the
+            combined DM ask Genie first, through its post-card route marked guarded (the destination is the watch's own thread
+            or owner, chosen in code). Where Genie cannot post, Bays posts it and the reason is kept on the history line, the
+            reminder event (`posted_as`) and one `decision_watch_genie_fallback` event a day per watch, so nothing is lost and
+            nothing is silent. Bays still reads the threads; Genie's posts carry a bot_id, so they are never movement.
+            The loop reminders are n8n's `Bays — Post Loop Digest` (LG7iIPSIAkah6mKN), switched to the Genie Slack credential
+            in the same pass (restore point 76f02b67-52a4-4813-8ef4-80e59c3c0c52).
+Decision:   fall back to Bays rather than fail: a reminder nobody gets is worse than one from the other bot, and the fallback
+            is recorded. npm could not reach the registry from this session, so typecheck and build are proven by CI on push.

@@ -46,6 +46,7 @@ import { addedField, fieldLimit, tooLongMessage } from './watchText';
 import { query } from './pg';
 import * as quota from './quota';
 import * as slack from './slack';
+import * as genieSlack from './genieSlack';
 import * as timers from './timers';
 import { isFormerBuilder } from './sources';
 
@@ -704,12 +705,34 @@ export function escalationText(w: WatchRow): string {
   ].join('\n');
 }
 
-type Posted = { ok: true; ts: string; channel: string } | { ok: false; error: string };
+type Posted = { ok: true; ts: string; channel: string; as: 'Genie' | 'Bays'; genie_error?: string } | { ok: false; error: string };
 
-async function post(channel: string, text: string, threadTs: string | null): Promise<Posted> {
+/**
+ * Every reminder, escalation and combined DM is posted as Genie (23 Nov 2026, Destiny: "let's use Genie's
+ * Slack id for sending the reminders"). Genie posts through its own post-card route, marked guarded: the
+ * destination is the watch's own thread or its owner's DM, chosen here in code. Where Genie cannot post
+ * (unreachable, refused, not in the channel), Bays posts it instead and the reason is kept, so a reminder is
+ * never lost and the fallback is never silent: one `decision_watch_genie_fallback` event a day per watch, and
+ * the history line says who posted it. Bays still reads the threads and handles snoozes and closes.
+ */
+async function postAsBays(channel: string, text: string, threadTs: string | null): Promise<Posted> {
   if (!slack.slackConfigured()) return { ok: false, error: `${slack.SLACK_TOKEN_VAR} is not set` };
   const r = await slack.botCall('chat.postMessage', { channel, text, thread_ts: threadTs ?? undefined, unfurl_links: false, unfurl_media: false });
-  return r.ok && typeof r.ts === 'string' ? { ok: true, ts: r.ts, channel: typeof r.channel === 'string' ? r.channel : channel } : { ok: false, error: `chat.postMessage: ${String(r.error ?? 'unknown error')}` };
+  return r.ok && typeof r.ts === 'string' ? { ok: true, ts: r.ts, channel: typeof r.channel === 'string' ? r.channel : channel, as: 'Bays' } : { ok: false, error: `chat.postMessage: ${String(r.error ?? 'unknown error')}` };
+}
+
+async function post(channel: string, text: string, threadTs: string | null): Promise<Posted> {
+  const g = await genieSlack.postAsGenie(channel, text, [], undefined, { ...(threadTs ? { thread_ts: threadTs } : {}), guarded: true });
+  if (g.ok) return { ok: true, ts: g.ts, channel: g.channel ?? channel, as: 'Genie' };
+  const b = await postAsBays(channel, text, threadTs);
+  if (!b.ok) return { ok: false, error: `as Genie: ${g.error}; as Bays: ${b.error}` };
+  console.error(`[decision-watch] Genie could not post in ${channel}, Bays posted it instead: ${g.error}`);
+  return { ...b, genie_error: g.error };
+}
+
+async function fallbackEvent(w: WatchRow, what: string, p: Posted, now: Date): Promise<void> {
+  if (!p.ok || p.as !== 'Bays' || !p.genie_error) return;
+  await event('decision_watch_genie_fallback', w, `dw:${w.watch_id}:genie-fallback:${now.toISOString().slice(0, 10)}`, { what, channel: p.channel, genie_error: clip(p.genie_error, 300) });
 }
 
 /** The newest reminder any other real watch on this person posted, open or closed. */
@@ -891,18 +914,23 @@ export async function digestSweep(now = new Date(), opts: { dry?: boolean; only?
       dedupe_key: `dw-digest:${owner}:${window}${opts.force ? `:forced:${now.getTime()}` : ''}`,
     });
     if (!claim.recorded) continue;
-    const r = await slack.dm(owner, text);
+    // As Genie (23 Nov 2026); Bays only where Genie cannot, and the reason rides on the event.
+    const g = await genieSlack.postAsGenie(owner, text, [], undefined, { guarded: true });
+    const r: { ok: boolean; detail: string; ts?: string; as?: 'Genie' | 'Bays'; genie_error?: string } = g.ok
+      ? { ok: true, detail: `sent to ${owner} as Genie`, ts: g.ts, as: 'Genie' }
+      : { ...(await slack.dm(owner, text)), as: 'Bays', genie_error: g.error };
+    if (r.ok && r.genie_error) console.error(`[decision-watch] Genie could not DM ${owner}, Bays sent the summary instead: ${r.genie_error}`);
     if (!r.ok) {
       // Nothing went out, so the claim is given back and the next pass tries again; the failure is kept.
       await query(`DELETE FROM engine_events WHERE id = $1`, [claim.id]);
-      out.failed.push({ owner, error: r.detail });
+      out.failed.push({ owner, error: r.genie_error ? `as Genie: ${r.genie_error}; as Bays: ${r.detail}` : r.detail });
       await engineEvents
         .record({ event_type: 'decision_watch_digest_failed', subject_id: owner, lane: 'BAYS', actor: 'decision-watch', detail: { error: r.detail }, dedupe_key: `dw-digest-failed:${owner}:${now.toISOString().slice(0, 10)}` })
         .catch(() => undefined);
       console.error(`[decision-watch] combined DM to ${owner} not sent: ${r.detail}`);
       continue;
     }
-    if (r.ts) await query(`UPDATE engine_events SET source_ref = $2 WHERE id = $1`, [claim.id, r.ts]);
+    if (r.ts) await query(`UPDATE engine_events SET source_ref = $2, detail = detail || $3::jsonb WHERE id = $1`, [claim.id, r.ts, JSON.stringify({ posted_as: r.as, ...(r.genie_error ? { genie_error: r.genie_error.slice(0, 300) } : {}) })]);
     out.sent.push({ owner, open: items.length, overdue, ts: r.ts });
   }
   return out;
@@ -1135,7 +1163,8 @@ export async function sweep(now = new Date(), opts: { dry?: boolean; only?: stri
         const p = await post(target.channel, escalationText(live), target.thread);
         await query(`UPDATE engine_decision_watches SET status = 'watching' WHERE watch_id = $1 AND status = 'escalating'`, [w.watch_id]);
         if (!p.ok) { out.failed.push(w.watch_id); await note(w, { last_error: `escalation not posted: ${p.error}` }); continue; }
-        await query(`UPDATE engine_decision_watches SET history = history || $2::jsonb WHERE watch_id = $1`, [w.watch_id, JSON.stringify([{ at: now.toISOString(), what: 'escalation posted', post: 'true' }])]);
+        await query(`UPDATE engine_decision_watches SET history = history || $2::jsonb WHERE watch_id = $1`, [w.watch_id, JSON.stringify([{ at: now.toISOString(), what: `escalation posted as ${p.as}${p.genie_error ? ` (Genie could not: ${clip(p.genie_error, 200)})` : ''}`, post: 'true' }])]);
+        await fallbackEvent(w, 'escalation', p, now);
         await settle(w, 'escalated', `${w.max_reminders} reminders and no movement; escalated to Jason and Destiny (${permalink(p.channel, p.ts)})`, null, now);
         posted++;
         out.escalated.push(w.watch_id);
@@ -1165,9 +1194,10 @@ export async function sweep(now = new Date(), opts: { dry?: boolean; only?: stri
         `UPDATE engine_decision_watches
             SET last_reminder_ts = $2, last_error = NULL, channel_id = COALESCE(channel_id, $3), history = history || $4::jsonb
           WHERE watch_id = $1`,
-        [w.watch_id, p.ts, p.channel, JSON.stringify([{ at: now.toISOString(), what: `reminder ${n} of ${w.max_reminders} posted (${permalink(p.channel, p.ts)})`, post: 'true' }])],
+        [w.watch_id, p.ts, p.channel, JSON.stringify([{ at: now.toISOString(), what: `reminder ${n} of ${w.max_reminders} posted as ${p.as} (${permalink(p.channel, p.ts)})${p.genie_error ? `; Genie could not: ${clip(p.genie_error, 200)}` : ''}`, post: 'true' }])],
       );
-      await event('decision_watch_reminded', w, `dw:${w.watch_id}:reminder:${n}`, { reminder: n, of: w.max_reminders, link: permalink(p.channel, p.ts) });
+      await fallbackEvent(w, `reminder ${n}`, p, now);
+      await event('decision_watch_reminded', w, `dw:${w.watch_id}:reminder:${n}`, { reminder: n, of: w.max_reminders, link: permalink(p.channel, p.ts), posted_as: p.as });
       remindedOwners.set(w.owner_user_id, { watch_id: w.watch_id, at: now });
       posted++;
       out.reminded.push(w.watch_id);
