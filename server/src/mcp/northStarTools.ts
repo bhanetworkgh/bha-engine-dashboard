@@ -173,7 +173,11 @@ function cleanSlackText(t: unknown): string {
     .replace(/<#C[A-Z0-9]+\|([^>]+)>/g, '#$1')
     .replace(/<(https?:[^|>]+)\|([^>]+)>/g, '$2 ($1)')
     .replace(/<(https?:[^>]+)>/g, '$1')
-    .replace(/<!(channel|here|everyone)>/g, '@$1');
+    .replace(/<!(channel|here|everyone)>/g, '@$1')
+    // Slack escapes these three in message text (23 Nov 2026: "R&amp;D" would be copied into a record as written).
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
 }
 
 interface SlackMsg {

@@ -12,7 +12,7 @@ const path = require('node:path');
 const ROOT = '1795434107.741089';
 const long = 'Decision: ' + 'word '.repeat(700) + 'END'; // ~3,500 chars, past the 1,200 search cut
 const msgs = [
-  { ts: ROOT, user: 'U0A9V97949F', text: 'Locking two decisions <@U0ADAEB9JTH>', thread_ts: ROOT, reply_count: 3 },
+  { ts: ROOT, user: 'U0A9V97949F', text: 'Locking two decisions <@U0ADAEB9JTH> R&amp;D &lt;x&gt;', thread_ts: ROOT, reply_count: 3 },
   { ts: '1795434200.000100', user: 'U0A9V97949F', text: long, thread_ts: ROOT },
   { ts: '1795434300.000100', bot_id: 'B1', bot_profile: { name: 'Genie' }, text: 'b'.repeat(6_000), thread_ts: ROOT },
   { ts: '1795434400.000100', subtype: 'channel_join', user: 'U1', text: 'joined', thread_ts: ROOT },
@@ -51,7 +51,7 @@ const server = http.createServer((req, res) => {
   assert.equal(r.messages_in_thread, 3, 'channel_join is skipped');
   assert.equal(r.messages[1].text, long, 'a person\'s long message comes back whole');
   assert.ok(r.messages[1].text.endsWith('END'));
-  assert.equal(r.messages[0].text, 'Locking two decisions @U0ADAEB9JTH', 'mentions are cleaned');
+  assert.equal(r.messages[0].text, 'Locking two decisions @U0ADAEB9JTH R&D <x>', 'mentions cleaned and Slack escapes undone');
   assert.equal(r.messages[2].text.length, 4_000, 'bot posts are held to 4,000');
   assert.equal(r.truncated, false);
   ok('a thread is read root first, each person\'s message whole');
@@ -67,7 +67,7 @@ const server = http.createServer((req, res) => {
   assert.equal(tight.truncated, true);
   assert.ok(tight.result_chars <= 5_000 || tight.messages.length === 2);
   assert.ok(tight.messages.every((m) => !m.is_bot || m.text.length <= 301), 'bots cut to 300 first');
-  assert.ok(tight.messages.filter((m) => !m.is_bot).every((m) => m.text === long || m.text === 'Locking two decisions @U0ADAEB9JTH'), 'a person\'s message shown is never cut');
+  assert.ok(tight.messages.filter((m) => !m.is_bot).every((m) => m.text === long || m.text === 'Locking two decisions @U0ADAEB9JTH R&D <x>'), 'a person\'s message shown is never cut');
   assert.match(tight.note, /whole/);
   ok('over budget: bots cut first, then oldest replies left out, people never cut, and it says so');
 
