@@ -601,7 +601,7 @@ export function startSweeping(): void {
       .catch((e) => console.error(`[change-announce] move failed: ${e instanceof Error ? e.message : String(e)}`))
       .then(() => pass())
       .then((r) => {
-        if (r.posted || r.failed) console.log(`[change-announce] ${r.pending} changes, ${r.posted} posted${r.batched ? ' in one combined post' : ''}${r.failed ? `, refused: ${r.failed}` : ''}`);
+        if (r.posted || r.failed) console.log(`[change-announce] ${r.pending} changes, ${r.posted} posted${r.batched ? ` in combined posts of up to ${RULE.batch_size}` : ''}${r.failed ? `, refused: ${r.failed}` : ''}`);
       })
       .catch((e) => console.error(`[change-announce] pass failed: ${e instanceof Error ? e.message : String(e)}`))
       .finally(() => (busy = false));

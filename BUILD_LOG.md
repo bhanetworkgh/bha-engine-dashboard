@@ -16127,3 +16127,8 @@ Files:      server/src/mcp/sopTools.ts, server/test/sop-source-link.test.cjs, pa
 Problem:    engine_mcp_writes 7916 "bad_source: source_link must be the Slack thread the SOP came from." sent slack://channel?id=C0ASMPYQLG3&thread_ts=1795439220.538429; 7917 sent https://slack.com/archives/C0ASMPYQLG3/p1795439220538429. Both named the right thread; the check wanted https://<workspace>.slack.com/ and the refusal never said so.
 Fix:        slackSourceLink rewrites a no-workspace link, a slack:// app link or "<channel id> <ts>" to https://bayshorizonnetwork.slack.com/archives/<channel>/p<ts> (?thread_ts= for a reply); a workspace link is kept. A refusal now names the shape with an example and echoes what was sent. edit_sop the same.
 Decision:   normalise rather than refuse: every form Genie sent carried the channel and ts, so the link is rebuilt from them, never invented.
+
+## 2026-11-23 14:00 — The announcer's log line and CLAUDE.md say combined posts of 20
+Intent:     Finish the split: the server log still said "posted in one combined post" after the 13:25 pass posted 80 changes as 4 posts.
+Files:      server/src/changeAnnounce.ts, CLAUDE.md
+Fix:        The log line names posts of up to RULE.batch_size; CLAUDE.md's announcer paragraph states the 20-change limit and why.
