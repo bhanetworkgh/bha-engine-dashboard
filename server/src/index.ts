@@ -1779,6 +1779,25 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       return send(res, 200, { ok: true, decision: heldOk ? 'held' : 'held_failed', raise: !heldOk, destination: dest, why: verdict.why, approval_id: a.approval_id ?? null, card_link: a.card_link ?? null, message: heldOk ? `Nothing was posted. ${dest} is ${verdict.why}, so the message is waiting on an Approve / Deny card (${String(a.card_link)}). Only Destiny or Jason can decide; it is posted from the dashboard once approved. Do not post it again.` : `Nothing was posted, and nobody could be asked to approve: ${String(a.message ?? a.reason)}.` });
     }
     /**
+     * A tag on Bays goes to Genie (23 Nov 2026, Destiny: "let's have bays redirect whatever is asked to genie").
+     * Bays — Front Door posts here when someone tags Bays in a channel, and the ask is handed over through
+     * ask_genie's own handler, so the checks (a known person, a known channel), the audit line and the
+     * genie_handoff_requested event are the tool's. Genie answers in the thread as if it had been tagged.
+     * handed_over false means nothing reached Genie: n8n posts the old pointer and raises.
+     */
+    if (p === '/api/engine/genie-handoff') {
+      if (method !== 'POST') throw new HttpError(405, 'POST { question, channel_id, thread_ts, asked_by, dry_run? }.');
+      const b = decodeBodyB64(await readJson(req, 256 * 1024));
+      const tool = mcpToolByName('ask_genie', 'write');
+      if (!tool) throw new HttpError(500, 'ask_genie is not registered.');
+      const question = String(b.question ?? '').replace(/<@U0BD5EA1F71(\|[^>]*)?>/g, '').trim();
+      const args: Record<string, unknown> = { question, channel_id: b.channel_id, thread_ts: b.thread_ts, asked_by: b.asked_by, ...(b.dry_run === true ? { dry_run: true } : {}) };
+      const a = (await callerStore.run({ agent: 'bays' }, () => tool.handler(args, { access: 'write', startedAt: STARTED_AT, dispatch: async () => ({ status: 404, body: null }), agent: 'bays' }))) as Record<string, unknown>;
+      const handed = a.handed_over === true || (a.ok === true && a.dry_run === true);
+      await mirror.logWrite({ endpoint, kind: 'genie', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: `${String(b.channel_id ?? '')}/${String(b.thread_ts ?? '')}`, outcome: handed ? (b.dry_run === true ? 'read' : 'inserted') : 'rejected', detail: handed ? `handed to Genie${b.dry_run === true ? ' (dry run)' : ''}` : `not handed over: ${String(a.reason ?? '')} ${String(a.message ?? '')}`.slice(0, 400), ms: Date.now() - t0 });
+      return send(res, 200, { ...a, handed_over: a.handed_over === true, raise: !handed });
+    }
+    /**
      * Void a parked log from n8n (2026-10-25, layer0Void.ts): the Void this log
      * button on the builder's parked-log form opens a pop-up asking why, and its
      * submit lands here with the Slack id of whoever clicked. The rules are

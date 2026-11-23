@@ -16052,3 +16052,9 @@ Files:      server/src/changeAnnounce.ts, CLAUDE.md, BUILD_LOG.md
 Problem:    The Progress and Completion reports went out as Bays (slack.botCall chat.postMessage).
 Fix:        defaultPost asks Genie first (postAsGenie, guarded:true, so Genie joins the channel if it is not in it); if Genie refuses, Bays posts and the reason is logged. Both refusing gives the claims back as before, with both reasons. The change_announced events now carry ts, posted_as and genie_error, for the combined post too.
 Decision:   The one-off rewrite and move helpers for the 18 Nov posts still use Bays: those posts are Bays' and only Bays can edit them.
+
+## 2026-11-23 10:00 — A tag on Bays is handed to Genie
+Intent:     Destiny: "let's have bays redirect whatever is asked to genie". Slack has no way to stop a bot being tagged, so a tag on Bays is handed over instead of answered with a pointer.
+Files:      server/src/index.ts, CLAUDE.md, BUILD_LOG.md
+Fix:        POST /api/engine/genie-handoff (x-dashboard-key, body_b64 accepted) runs ask_genie's own handler as Bays: the same checks (Builder Profile or approver, a channel the engine knows), audit line and genie_handoff_requested event. The @Bays mention is taken out of the question. Answers ask_genie's result plus raise when nothing reached Genie. Bays — Front Door calls it for a channel tag; a DM, or a hand-off that fails, still gets the "tag @Genie" pointer, and a failed hand-off is raised.
+Decision:   One door for the hand-off (ask_genie's handler), so the audit and the answer-check's hand-off record stay in one place.
