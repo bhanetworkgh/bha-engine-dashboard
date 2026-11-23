@@ -16158,3 +16158,9 @@ Files:      server/src/migrations.ts (migration 152), BUILD_LOG.md
 Problem:    set_knowledge_capture is still not in this session's tool list after a refresh, and the tab's edit needs the admin login.
 Fix:        Migration 152: picked_up_by = Destiny (U0AEW3TBYH1) on the 10 rows Hardik, Ahad and Jegan hold (SEED01 to SEED10); a note on Destiny's 7 rows (SEED11 to SEED17) that they need no pickup, his decision. Each change writes its knowledge_capture_changed event first, keyed kc152:*, so the history matches what setItem would have written.
 Decision:   Only rows still with no pickup are touched, so a pickup set by hand before the deploy is kept. Handover dates stay empty: none was named.
+
+## 2026-11-23 16:05 — Knowledge capture: no handover dates, and why
+Intent:     Destiny: "no handoff dates because they're standing, only hardik is under discussion, ahad reply with option a of staying this morning".
+Files:      server/src/migrations.ts (migration 153), BUILD_LOG.md
+Fix:        Notes on the 7 rows Ahad and Jegan hold: no handover date, the holder is staying, Destiny is the named backup. Notes on Hardik's 3: no date, whether he stays is under discussion. One knowledge_capture_changed event per row first (kc153:*). handover_date stays null on all 17.
+Decision:   The pickup on Ahad's and Jegan's rows stays Destiny, as a backup rather than a handover.
