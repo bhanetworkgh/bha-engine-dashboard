@@ -123,6 +123,13 @@ ok('only the added text is quoted, and the date stamp is dropped');
   assert.equal(bb[0].text.text, '*Engine updates* <!channel>');
   assert.ok(bb.filter((x) => x.type === 'rich_text').length === 2);
   ok('the post is Block Kit with lists, a quote and a button');
+  const eighty = Array.from({ length: 80 }, (_, k) => ({ ...bi, id: `LOOP-${k}` }));
+  const chunk = eighty.slice(0, ca.RULE.batch_size);
+  const cb = ca.batchBlocks(chunk, 1, 4);
+  assert.ok(cb.length <= 50, `a combined post is ${cb.length} blocks, over Slack's 50`);
+  assert.ok(ca.batchBlocks(chunk, 2, 4)[0].text.text === '*Engine updates*');
+  assert.ok(ca.renderBatch(chunk, 2, 4).includes('part 2 of 4') && !ca.renderBatch(chunk, 2, 4).includes('<!channel>'));
+  ok('80 changes go out as posts Slack accepts, @channel on the first only');
 }
 
 console.log(`\n${n} checks passed`);

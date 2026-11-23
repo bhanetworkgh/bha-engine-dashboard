@@ -38,6 +38,7 @@ export const RULE = {
   settle_seconds: 60,
   lookback_hours: 6,
   batch_over: 4,
+  batch_size: 20, // changes per combined post: 2 blocks each plus 3, under Slack's 50 (23 Nov 2026: 80 at once was invalid_blocks)
   why_chars: 500,
 } as const;
 
@@ -260,9 +261,9 @@ export function render(i: Item): string {
 }
 
 /** Several changes in one pass, as one post. */
-export function renderBatch(items: Item[]): string {
+export function renderBatch(items: Item[], part = 1, parts = 1): string {
   const done = items.filter((i) => i.kind === 'completion').length;
-  const head = `*Engine updates* <!channel>: ${items.length} changes (${done} closed, ${items.length - done} moved)`;
+  const head = `*Engine updates*${part === 1 ? ' <!channel>' : ''}: ${items.length} changes (${done} closed, ${items.length - done} moved)${parts > 1 ? `, part ${part} of ${parts}` : ''}`;
   const body = items.map((i) => {
     const tag = i.kind === 'completion' ? 'Closed' : 'Progress';
     const tail = i.kind === 'progress' && i.next ? ` Next: ${clip(i.next, 160)}` : '';
@@ -307,13 +308,13 @@ export function blocks(i: Item): Block[] {
 }
 
 /** Several changes as one Block Kit post: a header, then each change as its own list item. */
-export function batchBlocks(items: Item[]): Block[] {
+export function batchBlocks(items: Item[], part = 1, parts = 1): Block[] {
   const done = items.filter((i) => i.kind === 'completion').length;
   const out: Block[] = [
-    { type: 'section', text: { type: 'mrkdwn', text: '*Engine updates* <!channel>' } },
-    { type: 'context', elements: [{ type: 'mrkdwn', text: `${items.length} changes: ${done} closed, ${items.length - done} moved` }] },
+    { type: 'section', text: { type: 'mrkdwn', text: `*Engine updates*${part === 1 ? ' <!channel>' : ''}` } },
+    { type: 'context', elements: [{ type: 'mrkdwn', text: `${items.length} changes: ${done} closed, ${items.length - done} moved${parts > 1 ? ` · part ${part} of ${parts}` : ''}` }] },
   ];
-  for (const i of items.slice(0, 40)) {
+  for (const i of items.slice(0, RULE.batch_size)) {
     out.push({ type: 'section', text: { type: 'mrkdwn', text: `*${i.kind === 'completion' ? 'Closed' : 'Progress'}* <${i.link}|${i.id}> ${clip(i.title, 140)}\nOwner: ${i.owner_id ? `<@${i.owner_id}>` : i.owner}${i.changed_by ? ` · changed by ${i.changed_by}` : ''} · ${i.stands}` } });
     const lines = [...i.changes.map((c) => clip(c, 200)), `Why: ${clip(i.why, 260)}`];
     if (i.kind === 'progress' && i.next) lines.push(`Next: ${clip(i.next, 200)}`);
@@ -472,20 +473,31 @@ export async function pass(opts: { now?: Date; dry_run?: boolean; post?: Post } 
   if (!items.length) return { pending: 0, posted: 0, batched: false, failed: null };
 
   if (batched) {
-    const claimed: Array<{ i: Item; ids: number[] }> = [];
-    for (const i of items) {
-      const ids = await claim(i);
-      if (ids) claimed.push({ i, ids });
+    // Closes first, so a completion is never stuck behind a long run of progress lines.
+    const ordered = [...items].sort((a, b) => (a.kind === b.kind ? 0 : a.kind === 'completion' ? -1 : 1));
+    const chunks: Item[][] = [];
+    for (let k = 0; k < ordered.length; k += RULE.batch_size) chunks.push(ordered.slice(k, k + RULE.batch_size));
+    let posted = 0;
+    let failed: string | null = null;
+    for (let n = 0; n < chunks.length; n += 1) {
+      const claimed: Array<{ i: Item; ids: number[] }> = [];
+      for (const i of chunks[n]) {
+        const ids = await claim(i);
+        if (ids) claimed.push({ i, ids });
+      }
+      if (!claimed.length) continue;
+      const list = claimed.map((c) => c.i);
+      const r = await post(RULE.channel, renderBatch(list, n + 1, chunks.length), batchBlocks(list, n + 1, chunks.length));
+      if (!r.ok) {
+        await query(`DELETE FROM engine_events WHERE id = ANY($1::bigint[])`, [claimed.flatMap((c) => c.ids)]);
+        failed = r.error ?? 'refused';
+        console.error(`[change-announce] combined post ${n + 1} of ${chunks.length} (${claimed.length} changes) was refused, will retry: ${failed}`);
+        continue;
+      }
+      await query(`UPDATE engine_events SET detail = detail || $2::jsonb WHERE id = ANY($1::bigint[])`, [claimed.flatMap((c) => c.ids), JSON.stringify({ ts: r.ts ?? null, posted_as: r.as ?? null, genie_error: r.genie_error ?? null })]).catch(() => undefined);
+      posted += claimed.length;
     }
-    if (!claimed.length) return { pending: items.length, posted: 0, batched, failed: null };
-    const r = await post(RULE.channel, renderBatch(claimed.map((c) => c.i)), batchBlocks(claimed.map((c) => c.i)));
-    if (!r.ok) {
-      await query(`DELETE FROM engine_events WHERE id = ANY($1::bigint[])`, [claimed.flatMap((c) => c.ids)]);
-      console.error(`[change-announce] the combined post of ${claimed.length} changes was refused, will retry: ${r.error}`);
-      return { pending: items.length, posted: 0, batched, failed: r.error ?? 'refused' };
-    }
-    await query(`UPDATE engine_events SET detail = detail || $2::jsonb WHERE id = ANY($1::bigint[])`, [claimed.flatMap((c) => c.ids), JSON.stringify({ ts: r.ts ?? null, posted_as: r.as ?? null, genie_error: r.genie_error ?? null })]).catch(() => undefined);
-    return { pending: items.length, posted: claimed.length, batched, failed: null };
+    return { pending: items.length, posted, batched, failed };
   }
 
   let posted = 0;
