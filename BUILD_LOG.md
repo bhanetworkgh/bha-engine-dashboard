@@ -16178,3 +16178,8 @@ Files:      server/src/watchPenalty.ts (new), server/src/mcp/watchPenaltyTools.t
 Problem:    Nothing tied an ignored watch to pay; Jason was chasing every quiet watch by hand.
 Fix:        A sweep judges each escalation after the switch: lane in scope, the owner's thread messages read for a clean response (evidence, or a blocker with a new date not passed), logs submitted in the silent stretch. A penalty row is written and announced in the thread; payNote.set takes it off the next log's first decision, credited first then held, unless an override reason is given. The review card names it; reminders, escalations and the combined DM warn while it is on.
 Decision:   Clean-response reading is mechanical: a link or record id is evidence; blocker words plus a readable date are a blocker; a blocker whose date cannot be read counts as clean (the doubt goes to the builder, and Jason can still look). The penalty is a share of a day, taken from credited then held, so 50% means half the day's pay as Jason wrote. Off until switched on after the announcement, so nothing applies backwards. Watches with no lane stay out of scope and are counted, so they can be given one.
+
+## 2026-11-23 17:05 — The Decision Watch pay penalty switched on
+Intent:     Switch the rule on now the announcement is posted in #bha-coordination and Jason has the confirmation, as he asked (announcement before it goes live).
+Files:      server/src/migrations.ts (156)
+Decision:   Done by migration because switch_watch_penalty does not load in this session's tool list. The migration stamps meta watch_penalty.enabled_at with the moment it runs (never overwriting a later manual switch) and writes the watch_penalty_switched_on event; only escalations after that moment are judged.

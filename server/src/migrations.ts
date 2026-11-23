@@ -5249,6 +5249,19 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `ALTER TABLE engine_pay_notes ADD CONSTRAINT engine_pay_notes_reason_tag_check CHECK (reason_tag IS NULL OR reason_tag IN ('LOCAL_ONLY', 'RELOG_OLD_WORK', 'PARTIAL_SCOPE', 'TEST_ONLY', 'OTHER', 'INSUFFICIENT_PROOF', 'AWAITING_REVIEW', 'BLOCKED_EXTERNAL', 'NEEDS_LIVE_EVENT', 'WAITING_ON_CUSTOMER', 'EXTRA_LOG', 'WATCH_PENALTY'))`,
     ],
   },
+  {
+    id: 156,
+    name: "The Decision Watch pay penalty switched on, after the announcement in #bha-coordination (23 Nov 2026, Destiny); only escalations from now count",
+    statements: [
+      `INSERT INTO meta (key, value) VALUES ('watch_penalty.enabled_at', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) ON CONFLICT (key) DO NOTHING`,
+      `INSERT INTO engine_events (event_type, subject_id, lane, actor, detail, dedupe_key)
+         SELECT 'watch_penalty_switched_on', 'watch_penalty', 'BAYS', 'U0AEW3TBYH1',
+                jsonb_build_object('reason', 'Announcement posted in #bha-coordination; Jason''s approved rule (DM D0AF0DG8ZPY 1795018876.890439)', 'via', 'migration 156', 'at', value),
+                'wp:switch:migration156'
+           FROM meta WHERE key = 'watch_penalty.enabled_at'
+         ON CONFLICT (dedupe_key) DO NOTHING`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
