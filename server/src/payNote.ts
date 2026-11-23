@@ -205,6 +205,12 @@ export async function set(b: Obj, opts: { dry_run?: boolean } = {}): Promise<{ w
   if (tag === 'OTHER' && (!note || note.length < 3)) throw new PayNoteError('missing_reason_note', 'reason_tag OTHER needs a reason_note.');
 
   const run = async (db: Queryable) => {
+    let recommendation = rec0;
+    let credited = credited0;
+    let held = held0;
+    let tag = tag0;
+    let note = note0;
+    let penalty: Obj | null = null;
     const log = await findLog(db, { submission_id: s(b.submission_id, 200), codex_entry_id: s(b.codex_entry_id, 200) });
     if (log.status !== 'Approved' && log.status !== 'Input Added') {
       throw new PayNoteError('not_approved', `${log.codex_entry_id ?? log.submission_id} is "${log.status || 'not reviewed'}", not approved: a pay note belongs to an approval.`);
@@ -226,12 +232,6 @@ export async function set(b: Obj, opts: { dry_run?: boolean } = {}): Promise<{ w
     // The Decision Watch pay penalty (23 Nov 2026, Jason's approved rule): on the first decision of a log, the
     // oldest pending penalty its builder carries from before the log was submitted is taken off, by the engine,
     // from the credited share first, then the held share. Only an override with a written reason stops it.
-    let recommendation = rec0;
-    let credited = credited0;
-    let held = held0;
-    let tag = tag0;
-    let note = note0;
-    let penalty: Obj | null = null;
     if (!prior && !extra) {
       const sub = (await db.query<{ at: string | null }>(`SELECT created_time::text AS at FROM engine_codex_submissions WHERE natural_id = $1 ORDER BY created_time LIMIT 1`, [log.submission_id])).rows[0]?.at;
       const p = await watchPenalty.pendingFor(log.builder_slack_id, sub ? new Date(sub) : null, db, true);
