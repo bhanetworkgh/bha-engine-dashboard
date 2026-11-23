@@ -16120,3 +16120,10 @@ Files:      server/src/changeAnnounce.ts, server/test/change-announce.test.cjs
 Problem:    The morning's blocker tagging made ~80 loop changes in the window. Every pass since 13:11 built one combined post of 80 to 100 changes, 2 blocks each plus 3 (83 blocks, and the code cut the list at 40 while claiming all of them). Slack refused it as Genie and as Bays: "Slack refused the post: invalid_blocks; as Bays: invalid_blocks". The claims were given back each time, so the watch close waited behind them.
 Fix:        RULE.batch_size 20: a combined post holds at most 20 changes (43 blocks); a larger pass goes out as several posts, each claimed and posted on its own, closes first, @channel on the first only, "part n of m" on each. A refused part gives back only its own claims.
 Decision:   Split rather than drop: every change still gets announced, as the rule says.
+
+## 2026-11-23 14:45 — log_sop takes every shape of Slack link an agent sends
+Intent:     Jason's Claude Team SOP (C0ASMPYQLG3 1795439220.538429) was refused twice and he asked what format source_link wants.
+Files:      server/src/mcp/sopTools.ts, server/test/sop-source-link.test.cjs, package.json, .github/workflows/ci.yml, CLAUDE.md, BUILD_LOG.md
+Problem:    engine_mcp_writes 7916 "bad_source: source_link must be the Slack thread the SOP came from." sent slack://channel?id=C0ASMPYQLG3&thread_ts=1795439220.538429; 7917 sent https://slack.com/archives/C0ASMPYQLG3/p1795439220538429. Both named the right thread; the check wanted https://<workspace>.slack.com/ and the refusal never said so.
+Fix:        slackSourceLink rewrites a no-workspace link, a slack:// app link or "<channel id> <ts>" to https://bayshorizonnetwork.slack.com/archives/<channel>/p<ts> (?thread_ts= for a reply); a workspace link is kept. A refusal now names the shape with an example and echoes what was sent. edit_sop the same.
+Decision:   normalise rather than refuse: every form Genie sent carried the channel and ts, so the link is rebuilt from them, never invented.

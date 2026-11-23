@@ -44,17 +44,46 @@ const READ_BACK = {
 
 const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
 
+/**
+ * The Slack link an SOP came from, in the one shape it is stored in (23 Nov 2026, Destiny: Genie's
+ * Claude Team SOP was refused twice, sent as slack://channel?id=…&thread_ts=… and as
+ * https://slack.com/archives/… with no workspace, both naming the right thread).
+ * Accepts a workspace link as it is, a link without the workspace, the desktop app's slack:// link,
+ * or "<channel id> <ts>", and answers https://bayshorizonnetwork.slack.com/archives/<channel>/p<ts>
+ * (with ?thread_ts= when it names a reply). Anything else is null.
+ */
+export const SLACK_ARCHIVES = 'https://bayshorizonnetwork.slack.com/archives/';
+export function slackSourceLink(raw: string): string | null {
+  const s = raw.trim();
+  if (/^https:\/\/(?!app\.)[a-z0-9-]+\.slack\.com\//i.test(s)) return s;
+  const build = (channel: string, ts: string, thread?: string | null) =>
+    `${SLACK_ARCHIVES}${channel}/p${ts.replace('.', '')}${thread && thread !== ts ? `?thread_ts=${thread}` : ''}`;
+  const bare = /^https:\/\/(?:app\.)?slack\.com\/archives\/([CGD][A-Z0-9]+)\/p(\d{10})(\d{6})(?:\?(?:.*&)?thread_ts=(\d+\.\d+))?/i.exec(s);
+  if (bare) return build(bare[1], `${bare[2]}.${bare[3]}`, bare[4]);
+  const app = /^slack:\/\/channel\?(.+)$/i.exec(s);
+  if (app) {
+    const q = new URLSearchParams(app[1]);
+    const ch = q.get('id') ?? '';
+    const ts = q.get('message') ?? q.get('thread_ts') ?? '';
+    if (/^[CGD][A-Z0-9]+$/.test(ch) && /^\d+\.\d+$/.test(ts)) return build(ch, ts, q.get('thread_ts'));
+    return null;
+  }
+  const pair = /^([CG][A-Z0-9]+)[\s:/,]+(\d+\.\d+)$/.exec(s);
+  return pair ? build(pair[1], pair[2]) : null;
+}
+const SOURCE_LINK_RULE = 'source_link must be the Slack thread the SOP came from: its link from Copy link, e.g. https://bayshorizonnetwork.slack.com/archives/C0ASMPYQLG3/p1795439220538429, or "<channel id> <ts>" such as "C0ASMPYQLG3 1795439220.538429".';
+
 export const logSopTool: ToolDefinition = {
   name: 'log_sop',
   description:
-    'Write one SOP or spec into BHARAG, in the workspace Bays writes and reads SOPs in (BHARAG_SOPS_KEY), through the write guard. title must start "SOP -- ", or "Spec -- " for a spec (e.g. "Spec -- spec/vfarm-land-rover v0.1"). tags: labels such as VFARM_P1, stored on the document and searchable. content is stored as sent. source_link: the Slack thread the SOP came from (required). supersedes: BHARAG ids of SOPs this one replaces, recorded on it (they are not removed; use delete_sop). requester_user_id: Destiny or Jason. Refused when an SOP with the same title is already held. After the ingest the SOP is read back and its stored text compared with what was sent: verified true only when every word and punctuation mark matches; whitespace BHARAG normalises, such as sub-bullet indentation, is ignored and reported. dry_run checks everything and writes nothing. Returns {ok, id, verified}. Audited on engine_mcp_writes.',
+    'Write one SOP or spec into BHARAG, in the workspace Bays writes and reads SOPs in (BHARAG_SOPS_KEY), through the write guard. title must start "SOP -- ", or "Spec -- " for a spec (e.g. "Spec -- spec/vfarm-land-rover v0.1"). tags: labels such as VFARM_P1, stored on the document and searchable. content is stored as sent. source_link: the Slack thread the SOP came from (required): its Copy link URL, or "<channel id> <ts>"; stored as https://bayshorizonnetwork.slack.com/archives/<channel>/p<ts>. supersedes: BHARAG ids of SOPs this one replaces, recorded on it (they are not removed; use delete_sop). requester_user_id: Destiny or Jason. Refused when an SOP with the same title is already held. After the ingest the SOP is read back and its stored text compared with what was sent: verified true only when every word and punctuation mark matches; whitespace BHARAG normalises, such as sub-bullet indentation, is ignored and reported. dry_run checks everything and writes nothing. Returns {ok, id, verified}. Audited on engine_mcp_writes.',
   inputSchema: {
     type: 'object',
     properties: {
       title: { type: 'string', description: 'Starts "SOP -- ", or "Spec -- " for a spec.' },
       tags: { type: 'array', items: { type: 'string' }, description: 'Labels for the document, e.g. ["VFARM_P1", "PILOT_1"]: upper case, digits and underscores.' },
       content: { type: 'string', description: 'The SOP text, stored as sent.' },
-      source_link: { type: 'string', description: 'The Slack thread it came from.' },
+      source_link: { type: 'string', description: 'The Slack thread it came from: its Copy link URL (https://bayshorizonnetwork.slack.com/archives/C…/p…), or "<channel id> <ts>". A slack:// app link or a slack.com link without the workspace is rewritten to the workspace link.' },
       supersedes: { type: 'array', items: { type: 'string' }, description: 'BHARAG ids of SOPs this replaces.' },
       requester_user_id: { type: 'string', description: 'Slack id of the person asking: Destiny or Jason.' },
       dry_run: { type: 'boolean' },
@@ -66,7 +95,8 @@ export const logSopTool: ToolDefinition = {
   handler: async (args, deps) => {
     const title = str(args.title);
     const content = typeof args.content === 'string' ? args.content : '';
-    const link = str(args.source_link);
+    const linkRaw = str(args.source_link);
+    const link = slackSourceLink(linkRaw) ?? linkRaw;
     const requester = str(args.requester_user_id) || null;
     const supersedes = Array.isArray(args.supersedes) ? args.supersedes.map(str).filter(Boolean) : [];
     const tags = Array.isArray(args.tags) ? [...new Set(args.tags.map((t) => str(t).toUpperCase()).filter(Boolean))] : [];
@@ -82,7 +112,7 @@ export const logSopTool: ToolDefinition = {
     const badTag = tags.find((t) => !/^[A-Z0-9_]{2,40}$/.test(t));
     if (badTag) return refuse('bad_tag', `A tag is upper case letters, digits and underscores, 2 to 40 characters: "${badTag}" is not.`);
     if (!content.trim()) return refuse('empty', 'content is empty.');
-    if (!/^https:\/\/[a-z0-9-]+\.slack\.com\//i.test(link)) return refuse('bad_source', 'source_link must be the Slack thread the SOP came from.');
+    if (!slackSourceLink(linkRaw)) return refuse('bad_source', SOURCE_LINK_RULE, { sent: linkRaw.slice(0, 200) });
     const now = await sops.read({ fresh: true });
     if (!now.ok || !now.complete) return refuse('cannot_check_duplicates', `The SOP list could not be read whole (${now.error ?? now.note ?? 'incomplete'}), so a duplicate cannot be ruled out.`);
     const same = now.sops.find((s) => s.title.toLowerCase() === title.toLowerCase());
@@ -235,7 +265,8 @@ export const editSopTool: ToolDefinition = {
       : [];
     const newContent = typeof args.content === 'string' ? args.content : null;
     const newTitle = typeof args.title === 'string' ? args.title.trim() : null;
-    const newLink = typeof args.source_link === 'string' ? args.source_link.trim() : null;
+    const newLinkRaw = typeof args.source_link === 'string' ? args.source_link.trim() : null;
+    const newLink = newLinkRaw === null ? null : (slackSourceLink(newLinkRaw) ?? newLinkRaw);
     const audit = await auditOpen({ tool: 'edit_sop', args: { ...args, ...(newContent !== null ? { content: `${newContent.length} characters` } : {}) }, access: deps.access, kind: 'bharag_sop', requester, dry_run: dry });
     const refuse = async (why: string, message: string) => {
       await auditClose(audit, { outcome: 'refused', detail: `${why}: ${message}`, natural_id: id || null, guard_result: { reason: why } });
@@ -248,7 +279,7 @@ export const editSopTool: ToolDefinition = {
     if (newContent === null && !reps.length && newTitle === null && newLink === null) return refuse('nothing_to_change', 'Send replacements, content, title or source_link.');
     if (newContent !== null && !newContent.trim()) return refuse('empty', 'content is empty.');
     if (newTitle !== null && !/^SOP\s+--\s+\S/.test(newTitle)) return refuse('bad_title', 'title must start "SOP -- " followed by the rule\'s name.');
-    if (newLink !== null && !/^https:\/\/[a-z0-9-]+\.slack\.com\//i.test(newLink)) return refuse('bad_source', 'source_link must be the Slack message the SOP came from.');
+    if (newLinkRaw !== null && !slackSourceLink(newLinkRaw)) return refuse('bad_source', SOURCE_LINK_RULE, { sent: newLinkRaw.slice(0, 200) });
     const d = await sops.doc(id);
     if (!d.ok) return refuse('not_an_sop', d.reason);
     const oldText = d.sop.content ?? '';
