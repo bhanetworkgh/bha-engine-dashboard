@@ -16146,3 +16146,8 @@ Files:      server/src/migrations.ts (migration 151, KNOWLEDGE_SEED), CLAUDE.md,
 Problem:    set_knowledge_capture is registered on the write connection (a8f82d2, migration 150 live) but this session's tool list did not pick it up after a refresh, and the page route needs the admin login.
 Fix:        Seeded the rows as a forward-only migration, ON CONFLICT DO NOTHING, ids KC-<AREA>-SEED01 to 17. 17 rows: Hardik 3 (CAD, Golden Lane, subscription backend), Ahad 3 (CST, vFarm identity, database), Jegan 4 (rack hardware, vFarm backend and edge, BHARAG, AWS), Destiny 7 (dashboard, n8n engine, Genie, repair bridge, bha-rss, site, keys). Each names its loops, repos or services.
 Decision:   Drafted from the open loops and repos only. Every row is "to confirm with <holder>"; who picks it up and the handover date are left empty because nothing on record names them. 11 marked BLOCKS_PILOT_1, 6 KNOWLEDGE_CAPTURE_REQUIRED. Destiny or Jason edits them from the tab or set_knowledge_capture from here on.
+
+## 2026-11-23 15:25 — Knowledge capture seed read back
+Intent:     Check the seed on production.
+Problem:    The 15:15 entry says 11 rows are BLOCKS_PILOT_1; the rows hold 12 (Hardik 3, Ahad 2, Jegan 3, Destiny 4).
+Fix:        None needed in code; this line corrects the count. Migration 151 live, 17 rows; read_income_board 68 KB (was about 229 KB), knowledge_capture total 17, to_confirm 17, captured 0.
