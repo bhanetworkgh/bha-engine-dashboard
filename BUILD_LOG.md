@@ -16045,3 +16045,10 @@ Fix:        postAsGenie moved from rssReports.ts to genieSlack.ts (re-exported, 
             in the same pass (restore point 76f02b67-52a4-4813-8ef4-80e59c3c0c52).
 Decision:   fall back to Bays rather than fail: a reminder nobody gets is worse than one from the other bot, and the fallback
             is recorded. npm could not reach the registry from this session, so typecheck and build are proven by CI on push.
+
+## 2026-11-23 09:55 — Loop updates in #bha-loop-updates post as Genie
+Intent:     Destiny: "let genie also post the loop updates in the loop updates channel".
+Files:      server/src/changeAnnounce.ts, CLAUDE.md, BUILD_LOG.md
+Problem:    The Progress and Completion reports went out as Bays (slack.botCall chat.postMessage).
+Fix:        defaultPost asks Genie first (postAsGenie, guarded:true, so Genie joins the channel if it is not in it); if Genie refuses, Bays posts and the reason is logged. Both refusing gives the claims back as before, with both reasons. The change_announced events now carry ts, posted_as and genie_error, for the combined post too.
+Decision:   The one-off rewrite and move helpers for the 18 Nov posts still use Bays: those posts are Bays' and only Bays can edit them.

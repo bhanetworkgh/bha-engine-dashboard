@@ -29,6 +29,7 @@ import { query } from './pg';
 import { getMeta, setMetaIfAbsent } from './db';
 import { record } from './engineEvents';
 import * as slack from './slack';
+import { postAsGenie } from './genieSlack';
 import * as timers from './timers';
 
 export const RULE = {
@@ -425,11 +426,19 @@ export interface PassResult {
   previews?: string[];
 }
 
-type Post = (channel: string, text: string, blocks?: Block[]) => Promise<{ ok: boolean; error?: string; ts?: string }>;
+type Post = (channel: string, text: string, blocks?: Block[]) => Promise<{ ok: boolean; error?: string; ts?: string; as?: 'Genie' | 'Bays'; genie_error?: string }>;
 
+/**
+ * Posts as Genie (23 Nov 2026, Destiny: "let genie also post the loop updates in the loop updates channel");
+ * where Genie cannot post, Bays posts it and the answer says so, so a loop update is never lost.
+ */
 const defaultPost: Post = async (channel, text, blocks) => {
+  const g = await postAsGenie(channel, text, blocks ?? [], undefined, { guarded: true });
+  if (g.ok) return { ok: true, ts: g.ts, as: 'Genie' };
   const r = await slack.botCall('chat.postMessage', { channel, text, ...(blocks ? { blocks } : {}), unfurl_links: false, unfurl_media: false });
-  return { ok: r.ok, error: r.error, ts: typeof r.ts === 'string' ? r.ts : undefined };
+  if (!r.ok) return { ok: false, error: `as Genie: ${g.error}; as Bays: ${r.error ?? 'refused'}` };
+  console.error(`[change-announce] Genie could not post, so Bays did: ${g.error}`);
+  return { ok: true, ts: typeof r.ts === 'string' ? r.ts : undefined, as: 'Bays', genie_error: g.error };
 };
 
 /** Claims every key of the item; false if another pass got there first. */
@@ -475,6 +484,7 @@ export async function pass(opts: { now?: Date; dry_run?: boolean; post?: Post } 
       console.error(`[change-announce] the combined post of ${claimed.length} changes was refused, will retry: ${r.error}`);
       return { pending: items.length, posted: 0, batched, failed: r.error ?? 'refused' };
     }
+    await query(`UPDATE engine_events SET detail = detail || $2::jsonb WHERE id = ANY($1::bigint[])`, [claimed.flatMap((c) => c.ids), JSON.stringify({ ts: r.ts ?? null, posted_as: r.as ?? null, genie_error: r.genie_error ?? null })]).catch(() => undefined);
     return { pending: items.length, posted: claimed.length, batched, failed: null };
   }
 
@@ -490,7 +500,7 @@ export async function pass(opts: { now?: Date; dry_run?: boolean; post?: Post } 
       console.error(`[change-announce] the post for ${i.id} was refused, will retry: ${failed}`);
       continue;
     }
-    if (r.ts) await query(`UPDATE engine_events SET detail = detail || $2::jsonb WHERE id = ANY($1::bigint[])`, [ids, JSON.stringify({ ts: r.ts })]).catch(() => undefined);
+    if (r.ts) await query(`UPDATE engine_events SET detail = detail || $2::jsonb WHERE id = ANY($1::bigint[])`, [ids, JSON.stringify({ ts: r.ts, posted_as: r.as ?? null, genie_error: r.genie_error ?? null })]).catch(() => undefined);
     posted += 1;
   }
   return { pending: items.length, posted, batched: false, failed };
