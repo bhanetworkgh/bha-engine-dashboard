@@ -133,6 +133,7 @@
     "test:find-records-builder": "npm run build:server --silent && node server/test/find-records-builder.test.cjs",
     "test:layer0-notice": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/layer0-notice.test.cjs",
     "test:intent-check": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/intent-check.test.cjs",
+    "test:decision-watch-search": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/decision-watch-search.test.cjs",
     "test:watch-penalty": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/watch-penalty.test.cjs",
     "test:income-board-v2": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/income-board-v2.test.cjs",
     "test:knowledge-capture": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/knowledge-capture.test.cjs",

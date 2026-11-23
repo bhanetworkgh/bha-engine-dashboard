@@ -219,10 +219,24 @@ function compactWatch(w: ReturnType<typeof dw.show>) {
   };
 }
 
+const SEARCH_STOP = new Set(['the', 'and', 'for', 'with', 'from', 'that', 'this', 'watch', 'decision']);
+
+/** Word search over a watch's own text: share of the search's words each watch contains, best first, none dropped silently. */
+export function searchWatches<W extends { watch_id: string; decision?: string | null; next_step?: string | null; sop_refs?: string | null; ns_refs?: string | null }>(rows: W[], search: string): W[] {
+  const words = [...new Set(search.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 2 && !SEARCH_STOP.has(t)))];
+  if (!words.length) return rows;
+  const scored = rows.map((w) => {
+    const text = [w.watch_id, w.decision, w.next_step, w.sop_refs, w.ns_refs].filter(Boolean).join(' ').toLowerCase();
+    const hit = words.filter((t) => text.includes(t)).length;
+    return { w, score: hit / words.length };
+  });
+  return scored.filter((x) => x.score > 0).sort((a, b) => b.score - a.score).map((x) => x.w);
+}
+
 export const listDecisionWatches: ToolDefinition = {
   name: 'list_decision_watches',
   description:
-    'List the decisions being watched: open ones first (soonest reminder first), then the closed ones. status is watching, answered (the owner replied), moved (the linked loop or task was closed), escalated (the reminders ran out and Jason and Destiny were told) or cancelled. "problem" is why a watch could not be checked or posted, e.g. a thread no bot can read. Filter with owner_user_id or open_only. Each watch comes back short (the decision and its latest next step clipped, no history, no how_it_moves) to keep the answer small; pass watch_id to get one watch whole, with how_it_moves and its history. Use it to answer "what is Bays watching" or "what am I being waited on for". Each watch carries how_it_moves: where a reply counts, what it does, and when the next reminder goes. Before telling anyone what a watch will do (whether a message resets it, closes it, or when it will nudge), read that line and say it as written; never work it out from the thread you are in, because the watch may be on a different thread.',
+    'List the decisions being watched: open ones first (soonest reminder first), then the closed ones. status is watching, answered (the owner replied), moved (the linked loop or task was closed), escalated (the reminders ran out and Jason and Destiny were told) or cancelled. "problem" is why a watch could not be checked or posted, e.g. a thread no bot can read. Filter with owner_user_id or open_only, or find a watch by what it is about with search (words, e.g. "monitoring twin checklist"): each word is looked for in the decision, the next step, the SOP and North Star references and the watch id, watches matching none are left out, and the best match comes first. Each watch comes back short (the decision and its latest next step clipped, no history, no how_it_moves) to keep the answer small; pass watch_id to get one watch whole, with how_it_moves and its history. Use it to answer "what is Bays watching" or "what am I being waited on for". Each watch carries how_it_moves: where a reply counts, what it does, and when the next reminder goes. Before telling anyone what a watch will do (whether a message resets it, closes it, or when it will nudge), read that line and say it as written; never work it out from the thread you are in, because the watch may be on a different thread.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -231,6 +245,7 @@ export const listDecisionWatches: ToolDefinition = {
       limit: { type: 'number', description: 'Watches to return. Default 15, at most 40.' },
       owner_user_id: { type: 'string', description: 'Only watches waiting on this person.' },
       include_fixtures: { type: 'boolean', description: 'Include marked test watches.' },
+      search: { type: 'string', description: 'Words to find a watch by, e.g. "monitoring twin gating checklist". Best match first; watches matching no word are left out.' },
     },
     additionalProperties: false,
   },
@@ -241,6 +256,8 @@ export const listDecisionWatches: ToolDefinition = {
     let rows = all.watches;
     if (args.open_only === true) rows = rows.filter((w) => w.status === 'watching');
     if (who) rows = rows.filter((w) => w.owner_user_id === who);
+    const search = str(args, 'search');
+    if (search) rows = searchWatches(rows, search);
     const one = str(args, 'watch_id');
     if (one) {
       const w = rows.find((x) => x.watch_id === one);

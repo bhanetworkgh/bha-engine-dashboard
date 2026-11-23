@@ -16183,3 +16183,10 @@ Decision:   Clean-response reading is mechanical: a link or record id is evidenc
 Intent:     Switch the rule on now the announcement is posted in #bha-coordination and Jason has the confirmation, as he asked (announcement before it goes live).
 Files:      server/src/migrations.ts (156)
 Decision:   Done by migration because switch_watch_penalty does not load in this session's tool list. The migration stamps meta watch_penalty.enabled_at with the moment it runs (never overwriting a later manual switch) and writes the watch_penalty_switched_on event; only escalations after that moment are judged.
+
+## 2026-11-23 17:20 — Genie can find a Decision Watch by topic
+Intent:     Destiny: "give it to genie" (LOOP-1795129089361-Q9GO, Jason in #bha-media-twin 1795356606.586909: Genie should maintain the Monitoring Twin watch).
+Files:      server/src/mcp/decisionWatchTools.ts, server/src/mcp/agentDescriptions.ts, server/test/decision-watch-search.test.cjs, package.json, .github/workflows/ci.yml
+Problem:    Genie already held list_decision_watches (it came with Bays' scope on 20 Nov), but the tool returns at most 40 of 109 open watches with no way to ask by topic, so Genie never reached DW-1794181771227-53O8 and told Jason it could not surface it.
+Fix:        list_decision_watches takes `search`: each word (over two letters, stopwords out) is looked for in the decision, next step, SOP and North Star refs and the watch id; no match is left out, best match first. Agent description says so.
+Decision:   No scope change: Genie keeps update_decision_watch and snooze from Bays' scope, so it can keep the watch current once it finds it. Local node_modules is broken and the session has no network, so the typecheck and test run in CI.
