@@ -50,6 +50,7 @@
  */
 import { query, type Queryable } from './pg';
 import * as sameDay from './sameDay';
+import * as watchPenalty from './watchPenalty';
 
 type Obj = Record<string, unknown>;
 const str = (v: unknown, max = 600): string => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, max) : v == null ? '' : String(v).slice(0, max));
@@ -673,8 +674,18 @@ export async function annotate(fields: Obj, db: Queryable = { query } as Queryab
     releasesUnread = e instanceof Error ? e.message : String(e);
   }
   const base = sug ?? { none: true, line: 'No suggestion: the review listed no work parts.', flags: relog?.unread ? [`The earlier-work check could not run (${relog.unread}).`] : [], computed_at: new Date().toISOString() };
-  const flags = releasesUnread ? [...((base as { flags?: string[] }).flags ?? []), `The held-pay check could not run (${releasesUnread}), so earlier held pay was not looked at.`] : (base as { flags?: string[] }).flags;
-  return { ...fields, 'Pay Suggestion': JSON.stringify({ ...base, flags, releases }) };
+  const flags0 = releasesUnread ? [...((base as { flags?: string[] }).flags ?? []), `The held-pay check could not run (${releasesUnread}), so earlier held pay was not looked at.`] : (base as { flags?: string[] }).flags;
+  // A Decision Watch pay penalty this log will take (23 Nov 2026): named first on the card, by watch id.
+  let watch_penalty: Obj | null = null;
+  try {
+    const sub = (await db.query<{ at: string | null }>(`SELECT created_time::text AS at FROM engine_codex_submissions WHERE natural_id = $1 ORDER BY created_time LIMIT 1`, [String(fields['Submission ID'] ?? '')])).rows[0]?.at;
+    const p = await watchPenalty.pendingFor(String(fields['Builder User ID'] ?? '') || null, sub ? new Date(sub) : new Date(), db);
+    if (p) watch_penalty = { penalty_id: p.penalty_id, watch_id: p.watch_id, share: Number(p.share), level: p.level, flag: watchPenalty.cardFlag(p) };
+  } catch {
+    watch_penalty = null;
+  }
+  const flags = watch_penalty ? [String(watch_penalty.flag), ...(flags0 ?? [])] : flags0;
+  return { ...fields, 'Pay Suggestion': JSON.stringify({ ...base, flags, releases, ...(watch_penalty ? { watch_penalty } : {}) }) };
 }
 
 /** The suggestion a Codex row carries, or null. */

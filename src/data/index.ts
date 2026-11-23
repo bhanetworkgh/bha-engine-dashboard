@@ -751,6 +751,10 @@ export interface IncomeBoard {
   read_errors: string[]; rule: string; read_at: string;
 }
 export const getIncomeBoard = () => api<IncomeBoard>('/api/income-board');
+/** The Decision Watch pay penalty (23 Nov 2026). */
+export interface WatchPenaltyRow { penalty_id: string; watch_id: string; owner_user_id: string; lane: string; escalated_at: string; level: number; share: number | string; status: 'pending' | 'applied' | 'overridden'; applied_submission_id: string | null; override_reason: string | null; finding: string }
+export interface WatchPenaltyData { on: boolean; enabled_at: string | null; rule: string; in_penalty: WatchPenaltyRow[]; overridden: WatchPenaltyRow[]; in_scope: { groups: { group: string; watches: { watch_id: string; lane: string; owner_user_id: string; decision: string; link: string | null }[] }[]; total: number; no_lane: number; other_lane: number } }
+export const getWatchPenalties = () => api<WatchPenaltyData>('/api/watch-penalties');
 /** The blockers page (23 Nov 2026): every open loop with "Blocked By" set. */
 export interface BlockedLoop { loop_id: string; title: string; status: string; blocked_by: string; unblock_date: string | null; late: boolean; days_late: number | null; lane: string | null; tag: string | null; why: string | null; owner: string | null; link: string }
 export interface BlockersData { rows: BlockedLoop[]; late: number; no_date: number; read_at: string; rule: string }

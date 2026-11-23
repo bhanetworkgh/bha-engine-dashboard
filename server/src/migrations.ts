@@ -5217,6 +5217,38 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
             AND NOT EXISTS (SELECT 1 FROM engine_income_board_items WHERE board_key = 'BOARD_PROD_INCOME_VFARM_CST' AND record_id = 'DW-1794181771227-53O8' AND removed_at IS NULL)`,
     ],
   },
+  {
+    id: 155,
+    name: "The Decision Watch pay penalty (23 Nov 2026, Destiny; Jason's approved rule, DM D0AF0DG8ZPY 1795018876.890439; watchPenalty.ts)",
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_watch_penalties (
+        penalty_id text PRIMARY KEY,
+        watch_id text NOT NULL,
+        owner_user_id text NOT NULL,
+        lane text NOT NULL,
+        escalated_at timestamptz NOT NULL,
+        silence_from timestamptz NOT NULL,
+        logs_in_silence jsonb NOT NULL DEFAULT '[]'::jsonb,
+        level int NOT NULL CHECK (level >= 1),
+        share numeric NOT NULL CHECK (share IN (0.1, 0.25, 0.5)),
+        finding text NOT NULL,
+        status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','applied','overridden')),
+        applied_submission_id text,
+        applied_share numeric,
+        applied_at timestamptz,
+        override_reason text,
+        override_by text CHECK (override_by IS NULL OR override_by IN ('U0AEW3TBYH1','U0A9V97949F')),
+        override_at timestamptz,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        CHECK (status <> 'overridden' OR (override_reason IS NOT NULL AND length(override_reason) >= 8 AND override_by IS NOT NULL)),
+        UNIQUE (watch_id, escalated_at)
+      )`,
+      `CREATE INDEX IF NOT EXISTS engine_watch_penalties_owner ON engine_watch_penalties (owner_user_id, status, escalated_at)`,
+      `ALTER TABLE engine_pay_notes ADD COLUMN IF NOT EXISTS watch_penalty jsonb`,
+      `ALTER TABLE engine_pay_notes DROP CONSTRAINT IF EXISTS engine_pay_notes_reason_tag_check`,
+      `ALTER TABLE engine_pay_notes ADD CONSTRAINT engine_pay_notes_reason_tag_check CHECK (reason_tag IS NULL OR reason_tag IN ('LOCAL_ONLY', 'RELOG_OLD_WORK', 'PARTIAL_SCOPE', 'TEST_ONLY', 'OTHER', 'INSUFFICIENT_PROOF', 'AWAITING_REVIEW', 'BLOCKED_EXTERNAL', 'NEEDS_LIVE_EVENT', 'WAITING_ON_CUSTOMER', 'EXTRA_LOG', 'WATCH_PENALTY'))`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

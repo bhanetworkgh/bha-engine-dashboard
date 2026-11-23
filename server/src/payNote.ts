@@ -38,10 +38,11 @@ import { FeedError } from './systemFeeds';
 import * as paySuggest from './paySuggest';
 import * as sameDay from './sameDay';
 import * as slack from './slack';
+import * as watchPenalty from './watchPenalty';
 const pct = paySuggest.pct;
 
 export const RECOMMENDATIONS = ['full', 'half', 'none', 'custom_fraction'] as const;
-export const REASON_TAGS = ['LOCAL_ONLY', 'RELOG_OLD_WORK', 'PARTIAL_SCOPE', 'TEST_ONLY', 'OTHER', 'INSUFFICIENT_PROOF', 'AWAITING_REVIEW', 'BLOCKED_EXTERNAL', 'NEEDS_LIVE_EVENT', 'WAITING_ON_CUSTOMER', 'EXTRA_LOG'] as const;
+export const REASON_TAGS = ['LOCAL_ONLY', 'RELOG_OLD_WORK', 'PARTIAL_SCOPE', 'TEST_ONLY', 'OTHER', 'INSUFFICIENT_PROOF', 'AWAITING_REVIEW', 'BLOCKED_EXTERNAL', 'NEEDS_LIVE_EVENT', 'WAITING_ON_CUSTOMER', 'EXTRA_LOG', 'WATCH_PENALTY'] as const;
 export const DECIDERS: Record<string, string> = { U0AEW3TBYH1: 'Destiny Arupi', U0A9V97949F: 'Jason Bays' };
 export type Recommendation = (typeof RECOMMENDATIONS)[number];
 
@@ -187,9 +188,14 @@ export async function set(b: Obj, opts: { dry_run?: boolean } = {}): Promise<{ w
     b = { ...b, pay_recommendation: 'none', rest: 'dock', credited_share: 0, held_share: 0, reason_tag: 'EXTRA_LOG', release_condition: null,
       reason_note: `Extra log of ${extra.day_date} (UTC), log ${extra.log_number}. The day is paid once, on ${extra.entry_codex_id || extra.entry_submission_id || 'its first log'}.` };
   }
-  const { recommendation, credited, held } = resolve(b);
-  const tag = s(b.reason_tag, 40).toUpperCase() || null;
-  const note = s(b.reason_note, 600) || null;
+  const { recommendation: rec0, credited: credited0, held: held0 } = resolve(b);
+  const recommendation = rec0;
+  const credited = credited0;
+  const held = held0;
+  const tag0 = s(b.reason_tag, 40).toUpperCase() || null;
+  const tag = tag0;
+  const note0 = s(b.reason_note, 600) || null;
+  const note = note0;
   const condition = s(b.release_condition, 600) || null;
   const docked = round3(1 - credited - held);
   if (tag && !(REASON_TAGS as readonly string[]).includes(tag)) throw new PayNoteError('bad_reason_tag', `reason_tag must be one of ${REASON_TAGS.join(', ')}.`);
@@ -217,6 +223,37 @@ export async function set(b: Obj, opts: { dry_run?: boolean } = {}): Promise<{ w
     const suggested = paySuggest.fromRow(log.fields);
     const before = (await db.query<Obj>(`SELECT ${COLS} FROM engine_pay_notes WHERE submission_id = $1 FOR UPDATE`, [log.submission_id])).rows[0];
     const prior = before ? shape(before) : null;
+    // The Decision Watch pay penalty (23 Nov 2026, Jason's approved rule): on the first decision of a log, the
+    // oldest pending penalty its builder carries from before the log was submitted is taken off, by the engine,
+    // from the credited share first, then the held share. Only an override with a written reason stops it.
+    let recommendation = rec0;
+    let credited = credited0;
+    let held = held0;
+    let tag = tag0;
+    let note = note0;
+    let penalty: Obj | null = null;
+    if (!prior && !extra) {
+      const sub = (await db.query<{ at: string | null }>(`SELECT created_time::text AS at FROM engine_codex_submissions WHERE natural_id = $1 ORDER BY created_time LIMIT 1`, [log.submission_id])).rows[0]?.at;
+      const p = await watchPenalty.pendingFor(log.builder_slack_id, sub ? new Date(sub) : null, db, true);
+      if (p) {
+        const why = s(b.penalty_override_reason, 600);
+        if (why) {
+          const o = await watchPenalty.override(p.penalty_id, by, why, db);
+          if (!o.ok) throw new PayNoteError(String(o.reason), String(o.message));
+          penalty = { penalty_id: p.penalty_id, watch_id: p.watch_id, share: Number(p.share), overridden: true, override_reason: why };
+        } else {
+          const t = watchPenalty.takeOff(credited, held, Number(p.share));
+          credited = t.credited;
+          held = t.held;
+          if (recommendation === 'full' || recommendation === 'half' || recommendation === 'none') recommendation = 'custom_fraction';
+          const line = `Watch penalty: ${p.watch_id} ${pct(Number(p.share))} (escalation ${p.level}, ${p.penalty_id}), taken by the engine under the Decision Watch pay rule.`;
+          tag = tag ?? 'WATCH_PENALTY';
+          note = (note ? `${note} ${line}` : line).slice(0, 600);
+          await watchPenalty.markApplied(db, p, log.submission_id, t.taken);
+          penalty = { penalty_id: p.penalty_id, watch_id: p.watch_id, share: Number(p.share), taken: t.taken, level: p.level };
+        }
+      }
+    }
     const correction = s(b.correction_note, 600) || null;
     if (prior) {
       const same = prior.pay_recommendation === recommendation && prior.credited_share === credited && prior.held_share === held && prior.reason_tag === tag && prior.reason_note === note && prior.release_condition === condition;
@@ -229,14 +266,15 @@ export async function set(b: Obj, opts: { dry_run?: boolean } = {}): Promise<{ w
     }
     await db.query(
       `INSERT INTO engine_pay_notes (submission_id, codex_entry_id, builder_slack_id, builder, session_month, pay_recommendation, credited_share, held_share,
-                                     reason_tag, reason_note, release_condition, decided_by, decided_at, updated_at, suggested, log_class, relog_of)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, now(), now(), $13, $14, $15)
+                                     reason_tag, reason_note, release_condition, decided_by, decided_at, updated_at, suggested, log_class, relog_of, watch_penalty)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, now(), now(), $13, $14, $15, $16)
        ON CONFLICT (submission_id) DO UPDATE SET codex_entry_id = EXCLUDED.codex_entry_id, builder_slack_id = EXCLUDED.builder_slack_id, builder = EXCLUDED.builder,
          session_month = EXCLUDED.session_month, pay_recommendation = EXCLUDED.pay_recommendation, credited_share = EXCLUDED.credited_share,
          held_share = EXCLUDED.held_share, reason_tag = EXCLUDED.reason_tag, reason_note = EXCLUDED.reason_note,
          release_condition = EXCLUDED.release_condition, decided_by = EXCLUDED.decided_by, decided_at = now(), updated_at = now(),
-         suggested = coalesce(engine_pay_notes.suggested, EXCLUDED.suggested), log_class = EXCLUDED.log_class, relog_of = EXCLUDED.relog_of`,
-      [log.submission_id, log.codex_entry_id, log.builder_slack_id, log.builder, log.month, recommendation, credited, held, tag, note, held > 0 ? condition : null, by, suggested ? JSON.stringify(suggested) : null, logClass, relogOf],
+         suggested = coalesce(engine_pay_notes.suggested, EXCLUDED.suggested), log_class = EXCLUDED.log_class, relog_of = EXCLUDED.relog_of,
+         watch_penalty = coalesce(EXCLUDED.watch_penalty, engine_pay_notes.watch_penalty)`,
+      [log.submission_id, log.codex_entry_id, log.builder_slack_id, log.builder, log.month, recommendation, credited, held, tag, note, held > 0 ? condition : null, by, suggested ? JSON.stringify(suggested) : null, logClass, relogOf, penalty ? JSON.stringify(penalty) : null],
     );
     const after = shape((await db.query<Obj>(`SELECT ${COLS} FROM engine_pay_notes WHERE submission_id = $1`, [log.submission_id])).rows[0]);
     const action = prior ? ('correct' as const) : ('set' as const);
@@ -245,8 +283,8 @@ export async function set(b: Obj, opts: { dry_run?: boolean } = {}): Promise<{ w
       [log.submission_id, log.codex_entry_id, action, prior ? JSON.stringify(prior) : null, JSON.stringify(after), by, via, correction],
     );
     await mirrorToLedger(db, after);
-    await engineEvents.record({ event_type: 'pay_note_set', subject_id: log.codex_entry_id ?? log.submission_id, actor: DECIDERS[by], detail: { action, recommendation, credited, held, docked: after.docked_share, reason_tag: tag, via } }, db);
-    return { action, note: after };
+    await engineEvents.record({ event_type: 'pay_note_set', subject_id: log.codex_entry_id ?? log.submission_id, actor: DECIDERS[by], detail: { action, recommendation, credited, held, docked: after.docked_share, reason_tag: tag, via, ...(penalty ? { watch_penalty: penalty } : {}) } }, db);
+    return { action, note: after, penalty };
   };
 
   const label = (n: PayNote) => `${n.codex_entry_id ?? n.submission_id}: ${n.pay_recommendation}, ${n.credited_share} credited, ${n.held_share} held${n.docked_share > 0 ? `, ${n.docked_share} docked` : ''}`;
@@ -262,7 +300,9 @@ export async function set(b: Obj, opts: { dry_run?: boolean } = {}): Promise<{ w
     }
   }
   const r = await withTransaction(run);
-  const message = r.action === 'unchanged' ? `No change: ${label(r.note)} already.` : `${r.action === 'set' ? 'Set' : 'Corrected'}: ${label(r.note)}.`;
+  const wp = (r as { penalty?: Obj | null }).penalty;
+  const penaltyLine = wp ? (wp.overridden ? ` Watch penalty ${String(wp.penalty_id)} on ${String(wp.watch_id)} overridden: ${String(wp.override_reason)}` : ` Watch penalty ${String(wp.penalty_id)} on ${String(wp.watch_id)}: ${pct(Number(wp.taken))} of a day taken off by the engine.`) : '';
+  const message = (r.action === 'unchanged' ? `No change: ${label(r.note)} already.` : `${r.action === 'set' ? 'Set' : 'Corrected'}: ${label(r.note)}.`) + penaltyLine;
   // Held pay on this builder's earlier logs that this log proved (11 Nov 2026): released on the same
   // approval when the approver leaves the release box ticked. Only on the first decision, so a repeat
   // click or a correction never releases twice; each release is its own act and its own history line.

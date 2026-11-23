@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useData } from '../app/useData';
-import { getLogstream } from '../data';
+import { getLogstream, getWatchPenalties, type WatchPenaltyData } from '../data';
 import type { LogstreamData, LogstreamRow, LogstreamSignature, LogstreamTrigger, ResearchSignal } from '../data/types';
 import { EmptyState, LoadFailed, Loading, PageHeader, Pagination, Pill, Stat, StatCell, StatStrip, TableFrame, Tabs, Th, usePaged } from '../components/ui';
 
@@ -16,9 +16,9 @@ import { EmptyState, LoadFailed, Loading, PageHeader, Pagination, Pill, Stat, St
  * that calls a person. A research job opened is the rule doing its job and is the accent, not green.
  */
 
-const TABS = ['Crossings', 'Faults', 'Rows', 'Patterns', 'Research signals'] as const;
+const TABS = ['Crossings', 'Faults', 'Rows', 'Patterns', 'Research signals', 'Watch penalties'] as const;
 type Tab = (typeof TABS)[number];
-const SLUG: Record<Tab, string> = { Crossings: 'crossings', Faults: 'faults', Rows: 'rows', Patterns: 'patterns', 'Research signals': 'signals' };
+const SLUG: Record<Tab, string> = { Crossings: 'crossings', Faults: 'faults', Rows: 'rows', Patterns: 'patterns', 'Research signals': 'signals', 'Watch penalties': 'watch-penalties' };
 
 const when = (iso: string | null) => (iso ? iso.slice(0, 16).replace('T', ' ') : '—');
 
@@ -348,6 +348,51 @@ function Signals({ data }: { data: LogstreamData }) {
   );
 }
 
+/** The Decision Watch pay penalty (23 Nov 2026, Jason's approved rule): who is in penalty, and what the rule covers. */
+function WatchPenalties() {
+  const { status, data, error } = useData<WatchPenaltyData>(getWatchPenalties, [], { kinds: ['decision_watch', 'codex'] });
+  if (!data) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
+  const pct = (n: number) => `${Math.round(n * 1000) / 10}%`;
+  return (
+    <>
+      <p className="px-6 pb-2 pt-4 text-[13px] md:px-8">
+        <span className={data.on ? 'font-medium text-ink' : 'text-degraded'}>{data.on ? `On since ${when(data.enabled_at)}` : 'Off: no escalation is judged until it is switched on, after the announcement.'}</span>
+      </p>
+      <p className="px-6 pb-3 text-[12px] text-faint md:px-8">{data.rule}</p>
+      <h2 className="px-6 pb-2 pt-2 text-[15px] font-semibold text-ink md:px-8">Watches in penalty</h2>
+      {data.in_penalty.length === 0 ? <EmptyState>No watch is in penalty.</EmptyState> : (
+        <TableFrame grow={false} label="Watches in penalty">
+          <thead><tr><Th>Penalty</Th><Th>Watch</Th><Th>Owner</Th><Th>Escalated</Th><Th>Share</Th><Th>Status</Th><Th>Why</Th></tr></thead>
+          <tbody>
+            {data.in_penalty.map((p) => (
+              <tr key={p.penalty_id} className="border-b border-line align-top">
+                <td className="tabular px-3 py-2 text-ink">{p.penalty_id}</td>
+                <td className="tabular px-3 py-2 text-dim">{p.watch_id}</td>
+                <td className="px-3 py-2 text-dim">{p.owner_user_id}</td>
+                <td className="tabular px-3 py-2 text-dim">{when(p.escalated_at)}</td>
+                <td className="tabular px-3 py-2"><Pill tone="failing">{pct(Number(p.share))} (escalation {p.level})</Pill></td>
+                <td className="px-3 py-2 text-dim">{p.status === 'applied' ? `taken off ${p.applied_submission_id}` : 'waiting for the next log'}</td>
+                <td className="max-w-[48ch] px-3 py-2 text-dim">{p.finding}</td>
+              </tr>
+            ))}
+          </tbody>
+        </TableFrame>
+      )}
+      {data.overridden.length > 0 && <p className="px-6 pt-3 text-[12.5px] text-dim md:px-8">Overridden: {data.overridden.map((p) => `${p.penalty_id} (${p.override_reason})`).join('; ')}</p>}
+      <h2 className="px-6 pb-1 pt-6 text-[15px] font-semibold text-ink md:px-8">Watches the rule covers ({data.in_scope.total})</h2>
+      <p className="px-6 pb-2 text-[12px] text-faint md:px-8">{data.in_scope.no_lane} open watches have no lane and {data.in_scope.other_lane} are on other lanes, so the rule does not cover them.</p>
+      {data.in_scope.groups.map((g) => (
+        <div key={g.group} className="px-6 pb-3 md:px-8">
+          <div className="text-[13px] font-medium text-ink">{g.group} · {g.watches.length}</div>
+          <ul className="mt-1 space-y-0.5 text-[12.5px] text-dim">
+            {g.watches.map((w) => <li key={w.watch_id}><span className="tabular">{w.watch_id}</span> ({w.lane}) {w.link ? <a className="text-accent hover:underline" href={w.link}>{w.decision}</a> : w.decision}</li>)}
+          </ul>
+        </div>
+      ))}
+    </>
+  );
+}
+
 export default function Logstream() {
   const [params, setParams] = useSearchParams();
   const tab = (TABS.find((t) => SLUG[t] === params.get('tab')) ?? 'Crossings') as Tab;
@@ -396,7 +441,7 @@ export default function Logstream() {
               <Stat label="Actions that did not land" value={notLanded} hint="A job, an alert or a guidance request that failed and is being retried" tone={notLanded ? 'failing' : 'default'} />
             </StatCell>
           </StatStrip>
-          {tab === 'Crossings' ? <Crossings data={data} /> : tab === 'Faults' ? <Faults data={data} /> : tab === 'Rows' ? <Rows data={data} short={short} /> : tab === 'Patterns' ? <Patterns data={data} short={short} /> : <Signals data={data} />}
+          {tab === 'Crossings' ? <Crossings data={data} /> : tab === 'Faults' ? <Faults data={data} /> : tab === 'Rows' ? <Rows data={data} short={short} /> : tab === 'Patterns' ? <Patterns data={data} short={short} /> : tab === 'Watch penalties' ? <WatchPenalties /> : <Signals data={data} />}
           <div className="mt-4 space-y-1 px-6 text-[11.5px] leading-relaxed text-faint md:px-8">
             {data.rule.words.map((w) => (
               <p key={w}>{w}</p>

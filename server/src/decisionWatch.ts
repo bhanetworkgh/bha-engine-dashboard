@@ -49,6 +49,7 @@ import * as slack from './slack';
 import * as genieSlack from './genieSlack';
 import * as timers from './timers';
 import { isFormerBuilder } from './sources';
+import * as watchPenalty from './watchPenalty';
 
 export const RULE = {
   wait_hours: 24,
@@ -670,7 +671,7 @@ export async function resolveRoot(channel: string, ts: string): Promise<string> 
 
 const mention = (id: string) => `<@${id}>`;
 
-export function reminderText(w: WatchRow, n: number, now: Date): string {
+export function reminderText(w: WatchRow, n: number, now: Date, penaltyWarning: string | null = null): string {
   const quiet = hoursWords((now.getTime() - new Date(w.quiet_since).getTime()) / 60_000);
   const lines = [
     `${w.fixture ? 'TEST. ' : ''}:eyes: *Decision Watch* ${mention(w.owner_user_id)}, this is still waiting on you:`,
@@ -688,11 +689,12 @@ export function reminderText(w: WatchRow, n: number, now: Date): string {
   const step = RULE.thread_step_hours[Math.min(n - 1, RULE.thread_step_hours.length - 1)];
   const picked = `Posted under the 24-hour / 72-hour / 7-day rule: reminder ${n} of ${w.max_reminders}, after ${n === 1 ? 'the first quiet wait' : `${step === 168 ? '7 days' : `${step} hours`} quiet`}, longest-waiting first. One reminder per person per ${RULE.owner_gap_hours} hours across all their watches; the full list of what you are holding comes by DM.`;
   lines.push(`_Reminder ${n} of ${w.max_reminders}. No movement for ${quiet}. ${closes} (\`${w.watch_id}\`)_`);
+  if (penaltyWarning) lines.push(`:warning: *Pay penalty:* ${penaltyWarning} Post evidence, or a blocker with what it waits on, who, and a new date, here before it escalates.`);
   lines.push(`_${picked}_`);
   return lines.join('\n');
 }
 
-export function escalationText(w: WatchRow): string {
+export function escalationText(w: WatchRow, penaltyWarning: string | null = null): string {
   const where = w.thread_link ? '' : w.record_id ? ` (${w.record_kind === 'loops' ? 'loop' : 'backlog task'} \`${w.record_id}\`)` : '';
   return [
     `${w.fixture ? 'TEST. ' : ''}:rotating_light: *Decision Watch, escalated* ${APPROVERS.map(mention).join(' ')}`,
@@ -701,6 +703,7 @@ export function escalationText(w: WatchRow): string {
     ...(w.sop_refs ? [`*SOP:* ${w.sop_refs}`] : []),
     ...(w.ns_refs ? [`*North Star:* ${w.ns_refs}`] : []),
     `*Lane owner:* ${mention(w.owner_user_id)}${w.lane ? ` (${w.lane})` : ''}. *Next logged step:* ${w.next_step || 'a decision, or a named blocker.'}`,
+    ...(penaltyWarning ? ['_This watch is under the Decision Watch pay rule: within 10 minutes the engine checks whether a clean response was posted and whether work was logged meanwhile, and says here if a penalty applies._'] : []),
     `_This watch (\`${w.watch_id}\`) has stopped. Nothing more will be posted about it._`,
   ].join('\n');
 }
@@ -817,6 +820,8 @@ export interface DigestItem {
   waiting_minutes: number;
   overdue: boolean;
   snoozed_until: string | null;
+  /** Under the Decision Watch pay rule (23 Nov 2026): set by the sweep, never by digestItems. */
+  pay_penalty?: boolean;
 }
 
 /** The one line of what is owed: the newest line of the next step, else the ask itself. */
@@ -852,7 +857,7 @@ export function digestText(ownerId: string, items: DigestItem[], opts: { test?: 
     // Days from two days up, so a reader sees "4 days", not "100 hours".
     const age = i.waiting_minutes >= 48 * 60 ? `${Math.round(i.waiting_minutes / 1440)} days` : hoursWords(i.waiting_minutes);
     const state = i.snoozed_until ? `snoozed until ${i.snoozed_until}` : `${i.overdue ? 'waiting' : 'quiet'} ${age}`;
-    return `${k}. \`${i.watch_id}\` · ${where} · ${state}\n      ${i.owed}`;
+    return `${k}. \`${i.watch_id}\` · ${where} · ${state}${i.pay_penalty ? ' · :warning: pay penalty if it escalates' : ''}\n      ${i.owed}`;
   };
   const out = [
     `${opts.test ? 'TEST. ' : ''}:eyes: *Decision Watch* ${mention(ownerId)}, you have *${items.length} open ${items.length === 1 ? 'ask' : 'asks'}*, ${overdue} past ${overdue === 1 ? 'its' : 'their'} first wait.`,
@@ -909,6 +914,10 @@ export async function digestSweep(now = new Date(), opts: { dry?: boolean; only?
       out.held_gap.push({ owner, last_sent_at: last.toISOString() });
       out.would?.push({ owner, open: items.length, overdue, action: `held: last summary ${last.toISOString()}` });
       continue;
+    }
+    for (const it of items) {
+      const w = ws.find((x) => x.watch_id === it.watch_id);
+      if (w && (await watchPenalty.warningFor(w))) it.pay_penalty = true;
     }
     const text = digestText(owner, items);
     if (opts.dry) {
@@ -1173,7 +1182,7 @@ export async function sweep(now = new Date(), opts: { dry?: boolean; only?: stri
         // The claim comes first: whoever moves the row out of 'watching' is the one that posts.
         const claim = await query(`UPDATE engine_decision_watches SET status = 'escalating' WHERE watch_id = $1 AND status = 'watching' AND reminders_sent = $2`, [w.watch_id, w.reminders_sent]);
         if (!claim.rowCount) continue;
-        const p = await post(target.channel, escalationText(live), target.thread, w.owner_user_id);
+        const p = await post(target.channel, escalationText(live, await watchPenalty.warningFor(live)), target.thread, w.owner_user_id);
         await query(`UPDATE engine_decision_watches SET status = 'watching' WHERE watch_id = $1 AND status = 'escalating'`, [w.watch_id]);
         if (!p.ok) { out.failed.push(w.watch_id); await note(w, { last_error: `escalation not posted: ${p.error}` }); continue; }
         await query(`UPDATE engine_decision_watches SET history = history || $2::jsonb WHERE watch_id = $1`, [w.watch_id, JSON.stringify([{ at: now.toISOString(), what: `escalation posted as ${p.as}${p.genie_error ? ` (Genie could not: ${clip(p.genie_error, 200)})` : ''}`, post: 'true' }])]);
@@ -1193,7 +1202,8 @@ export async function sweep(now = new Date(), opts: { dry?: boolean; only?: stri
         [w.watch_id, n, now.toISOString(), w.reminders_sent],
       );
       if (!claim.rowCount) continue;
-      const p = w.thread_ts ? await post(w.channel_id as string, reminderText(live, n, now), w.thread_ts, w.owner_user_id) : await post(w.owner_user_id, reminderText(live, n, now), null);
+      const warn = await watchPenalty.warningFor(live);
+      const p = w.thread_ts ? await post(w.channel_id as string, reminderText(live, n, now, warn), w.thread_ts, w.owner_user_id) : await post(w.owner_user_id, reminderText(live, n, now, warn), null);
       if (!p.ok) {
         // Nothing went out, so the claim is given back and the next pass tries again.
         await query(

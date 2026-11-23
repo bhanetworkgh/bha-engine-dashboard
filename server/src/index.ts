@@ -71,6 +71,7 @@ import * as adminAuth from './adminAuth';
 import * as agreements from './agreements';
 import * as compSnapshot from './compSnapshot';
 import * as incomeBoard from './incomeBoard';
+import * as watchPenalty from './watchPenalty';
 import * as knowledgeCapture from './knowledgeCapture';
 import { extractFileText } from './mcp/docTools';
 import * as earlyAccess from './earlyAccess';
@@ -2352,6 +2353,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
   }
   if (p === '/api/comp-snapshot' && method === 'GET') return send(res, 200, await compSnapshot.read());
   // The Production-Income Board (20 Nov 2026, Destiny; Jason 1795202126.334919).
+  if (p === '/api/watch-penalties' && method === 'GET') return send(res, 200, await watchPenalty.read());
   if (p === '/api/income-board' && method === 'GET') return send(res, 200, await shared('income-board', () => incomeBoard.read()));
   if (p === '/api/income-board/blockers' && method === 'GET') return send(res, 200, await shared('income-board-blockers', () => incomeBoard.blockers()));
   const blockedSet = p.match(/^\/api\/income-board\/blockers\/(LOOP-[^/]+)$/);
@@ -3907,6 +3909,7 @@ async function boot(): Promise<void> {
     decisionWatch.startSweeping();
     patternCapture.startSweeping();
     codexGap.startSweeping();
+    watchPenalty.startSweeping();
     changeAnnounce.startSweeping();
   heldPayWatch.startSweeping();
     intentHeal.startSweeping();
