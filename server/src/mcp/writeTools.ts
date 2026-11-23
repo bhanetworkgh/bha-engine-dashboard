@@ -154,7 +154,15 @@ export function appendTo(existing: unknown, entries: string[]): { ok: true; valu
 }
 
 function appendOf(args: Record<string, unknown>): Record<string, string[]> | null {
-  const a = args.append;
+  let a = args.append;
+  // A client that knows only "object" may send it as JSON text (23 Nov 2026: Claude's connector did); read it.
+  if (typeof a === 'string' && a.trim().startsWith('{')) {
+    try {
+      a = JSON.parse(a);
+    } catch {
+      throw new McpError('bad_argument', '"append" is text that is not valid JSON: send an object, { "<field>": "<entry>" }.');
+    }
+  }
   if (a === undefined || a === null) return null;
   if (typeof a !== 'object' || Array.isArray(a)) throw new McpError('bad_argument', '"append" must be an object: { "<field>": "<entry>" } or { "<field>": ["<entry>", …] }.');
   const out: Record<string, string[]> = {};
@@ -708,6 +716,7 @@ const updateRecord: ToolDefinition = {
       fields: { type: 'object', description: 'Only the keys to change, e.g. { "Status": "In Progress" }.' },
       append: {
         type: 'object',
+        additionalProperties: { anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
         description:
           'Add to a log without replacing it, e.g. { "decision_log": "2026-11-24 (Jason): Decision – …" }. A field not there yet becomes a list of the new entries; a list gets them added at the end; text already there becomes the first item. Nothing already in the field is lost. Use this, not fields, to add a note or a decision to a record.',
       },
