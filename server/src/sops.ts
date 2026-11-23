@@ -35,9 +35,13 @@ export function keyVar(): string {
   return process.env[SOPS_KEY_VAR]?.trim() ? SOPS_KEY_VAR : bharag.INGEST_KEY_VARS[WORKSPACE];
 }
 
-/** A title that starts with "SOP" is an SOP. Exported for the test. */
+/**
+ * A title that starts with "SOP" is an SOP. A spec ("Spec -- spec/<name> v<version>", 23 Nov 2026, Jason's
+ * spec/vfarm-land-rover v0.1) is held the same way, in the same workspace, and read by the same tools, so an
+ * agent finds a spec where it finds the rules. Exported for the test.
+ */
 export function isSopTitle(title: unknown): boolean {
-  return typeof title === 'string' && /^\s*SOP\b/i.test(title);
+  return typeof title === 'string' && /^\s*(SOP|Spec)\b/i.test(title);
 }
 
 function text(v: unknown): string | null {

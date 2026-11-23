@@ -371,6 +371,10 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-11-20 (Destiny, step 13): what Bays did through n8n nodes Genie had no tool for: read and change a
         // Google Doc, and post into another channel (as Genie; unknown destinations wait on an approval card).
         'read_doc', 'edit_doc', 'post_channel_message',
+        // 2026-11-23 (Destiny; Jason in C0ASMPYQLG3 1795434107.741089): Genie records what Jason rules, so an SOP
+        // or a spec it is asked for is written, not handed back to a person. log_sop holds Destiny or Jason as the
+        // only requesters, and the intent check reads the ask first.
+        'log_sop',
         // 2026-11-22 (Destiny; Jason 1795291672.614769): every build Genie does, or a builder does without it, is
         // recorded with its reuse check, and Genie reads past builds before planning a new one.
         'read_genie_builder', 'record_genie_build',

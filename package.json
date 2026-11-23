@@ -132,6 +132,7 @@
     "test:layer0-notice": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/layer0-notice.test.cjs",
     "test:intent-check": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/intent-check.test.cjs",
     "test:single-flight": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/single-flight.test.cjs",
+    "test:update-append": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/update-append.test.cjs",
     "test:stored-text": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/stored-text.test.cjs",
     "test:media-weekly": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/media-weekly.test.cjs",
     "test:genie-builder": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/genie-builder.test.cjs",

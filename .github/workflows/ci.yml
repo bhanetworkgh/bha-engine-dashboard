@@ -53,6 +53,8 @@ jobs:
       - run: npm run test:acceptance-evidence
       - run: npm run test:acceptance-check
       - run: npm run test:event-ingress
+      - run: npm run test:single-flight
+      - run: npm run test:update-append
       # The M1 decision core (PR #26) is not on main. Its tests run on any branch that defines the
       # script, and this step says so, by name, where it does not.
       - name: test:acceptance-decision (M1, where the branch has it)

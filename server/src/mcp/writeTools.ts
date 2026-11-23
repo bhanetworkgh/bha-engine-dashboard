@@ -139,6 +139,34 @@ function fieldsOf(args: Record<string, unknown>): Record<string, unknown> {
   return f as Record<string, unknown>;
 }
 
+/**
+ * The appendable log (23 Nov 2026, Jason in C0ASMPYQLG3 1795434107.741089: "do not overwrite the existing notes;
+ * use a field like decision_log"). update_record's `append` adds dated entries to a field and never replaces what
+ * it holds: no field yet becomes a list of the new entries; a list gets them added at the end; a single text value
+ * becomes the first item of a list, then the new ones follow. Anything else (a number, an object) is refused rather
+ * than guessed at. The entry is stored exactly as sent. Exported for the test.
+ */
+export function appendTo(existing: unknown, entries: string[]): { ok: true; value: string[] } | { ok: false; message: string } {
+  if (existing === undefined || existing === null || existing === '') return { ok: true, value: [...entries] };
+  if (Array.isArray(existing)) return { ok: true, value: [...existing.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))), ...entries] };
+  if (typeof existing === 'string') return { ok: true, value: [existing, ...entries] };
+  return { ok: false, message: `it holds a ${typeof existing}, not text or a list, so nothing can be added to it` };
+}
+
+function appendOf(args: Record<string, unknown>): Record<string, string[]> | null {
+  const a = args.append;
+  if (a === undefined || a === null) return null;
+  if (typeof a !== 'object' || Array.isArray(a)) throw new McpError('bad_argument', '"append" must be an object: { "<field>": "<entry>" } or { "<field>": ["<entry>", …] }.');
+  const out: Record<string, string[]> = {};
+  for (const [k, v] of Object.entries(a as Record<string, unknown>)) {
+    const list = (Array.isArray(v) ? v : [v]).map((x) => (typeof x === 'string' ? x.trim() : '')).filter(Boolean);
+    if (!list.length) throw new McpError('bad_argument', `"append.${k}" has no text to add.`);
+    out[k] = list;
+  }
+  if (!Object.keys(out).length) throw new McpError('bad_argument', '"append" names no field.');
+  return out;
+}
+
 /** The one row an `id` or `natural_id` names, or a refusal naming the problem. */
 async function target(kind: mirror.MirrorKind, args: Record<string, unknown>, ctx: engineWrite.WriteCtx): Promise<mirror.LookupRow> {
   const id = s(args, 'id');
@@ -670,7 +698,7 @@ const createRecord: ToolDefinition = {
 const updateRecord: ToolDefinition = {
   name: 'update_record',
   description:
-    'Change part of one record: only the fields sent change, and a field sent as null is removed. Name the row by id or natural_id. The same merge PATCH /api/engine/:kind/:id does. Loops need requester_user_id and follow the Tools Router’s permission rule (an admin, the assignee, or an unassigned loop); a lane must be one of the locked set. A pattern candidate cannot be set to Registered here (refused as use_register_path): register_pattern_candidate is the only way, because it also saves, announces and hands off the pattern. Returns the row before and after.',
+    'Change part of one record: only the fields sent change, and a field sent as null is removed. To add a note or decision without touching what a field holds, use append (e.g. { "decision_log": "2026-11-24 (Jason): …" }), never fields. A call without dry_run writes; use dry_run only to preview. Name the row by id or natural_id. The same merge PATCH /api/engine/:kind/:id does. Loops need requester_user_id and follow the Tools Router’s permission rule (an admin, the assignee, or an unassigned loop); a lane must be one of the locked set. A pattern candidate cannot be set to Registered here (refused as use_register_path): register_pattern_candidate is the only way, because it also saves, announces and hands off the pattern. Returns the row before and after.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -678,15 +706,25 @@ const updateRecord: ToolDefinition = {
       id: { type: 'string', description: 'The row id the lookup returns.' },
       natural_id: { type: 'string', description: 'The row’s own key (loop_id, pattern_id, CAND-…, Job ID, …).' },
       fields: { type: 'object', description: 'Only the keys to change, e.g. { "Status": "In Progress" }.' },
+      append: {
+        type: 'object',
+        description:
+          'Add to a log without replacing it, e.g. { "decision_log": "2026-11-24 (Jason): Decision – …" }. A field not there yet becomes a list of the new entries; a list gets them added at the end; text already there becomes the first item. Nothing already in the field is lost. Use this, not fields, to add a note or a decision to a record.',
+      },
       ...GUARD_ARGS,
     },
-    required: ['kind', 'fields'],
+    required: ['kind'],
     additionalProperties: false,
   },
   annotations: { ...WRITE_ANNOTATIONS, title: 'Change part of a record' },
   handler: async (args, deps) => {
     const spec = kindOf(args);
-    const fields = fieldsOf(args);
+    const append = appendOf(args);
+    const fields = append && args.fields === undefined ? {} : { ...fieldsOf(args) };
+    if (append) {
+      const both = Object.keys(append).filter((k) => k in fields);
+      if (both.length) throw new McpError('bad_argument', `${both.join(', ')} is in both "fields" and "append": send a field one way or the other.`);
+    }
     const dry = b(args, 'dry_run');
     const requester = s(args, 'requester_user_id');
     const ctx = ctxFor('update_record', deps);
@@ -697,6 +735,19 @@ const updateRecord: ToolDefinition = {
     } catch (e) {
       await auditClose(audit, { outcome: 'refused', detail: e instanceof Error ? e.message : String(e), natural_id: s(args, 'natural_id') });
       throw e;
+    }
+    const appended: string[] = [];
+    if (append) {
+      for (const [k, entries] of Object.entries(append)) {
+        const r = appendTo(row.fields?.[k], entries);
+        if (!r.ok) {
+          const message = `"${k}" cannot be appended to: ${r.message}. Nothing was written.`;
+          await auditClose(audit, { outcome: 'refused', detail: `not_appendable: ${message}`, record_id: row.id, natural_id: row.natural_id, before: row });
+          return { ok: false, written: false, reason: 'not_appendable', message, id: row.id, natural_id: row.natural_id, audit_id: audit };
+        }
+        fields[k] = r.value;
+        appended.push(k);
+      }
     }
     const plan = await guards.planUpdate(spec.kind, row, fields, requester, { registerPath: deps.internal === 'register_path' });
     if (!plan.ok) {
@@ -710,7 +761,20 @@ const updateRecord: ToolDefinition = {
         else preview[k] = v;
       }
       await auditClose(audit, { outcome: 'dry_run', record_id: row.id, natural_id: row.natural_id, before: row, after: { ...row, fields: preview }, guard_result: plan.checks });
-      return { ok: true, dry_run: true, written: false, id: row.id, natural_id: row.natural_id, would_merge: plan.fields, fields_after: preview, checks: plan.checks, audit_id: audit };
+      return {
+        ok: true,
+        dry_run: true,
+        written: false,
+        id: row.id,
+        natural_id: row.natural_id,
+        would_merge: plan.fields,
+        fields_after: preview,
+        ...(appended.length ? { appended } : {}),
+        untouched: 'Only the fields in would_merge change; every other field on the record stays exactly as it is.',
+        checks: plan.checks,
+        message: 'Dry run: nothing was written. Send the same call without dry_run to write it.',
+        audit_id: audit,
+      };
     }
     try {
       const r = await engineWrite.patchRecord(spec.kind, String(row.id), plan.fields, ctx, s(args, 'natural_id'));
@@ -736,6 +800,7 @@ const updateRecord: ToolDefinition = {
         natural_id: row.natural_id,
         before: row.fields,
         row: after,
+        ...(appended.length ? { appended } : {}),
         checks: plan.checks,
         ...(reingest ? { reingested_to_bharag: reingest.ok, bharag: reingest } : {}),
         audit_id: audit,

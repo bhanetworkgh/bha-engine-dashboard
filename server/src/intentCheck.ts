@@ -175,7 +175,13 @@ export async function describe(tool: string, args: Args): Promise<string | null>
       const l = await loopRow(args);
       const f = (args.fields && typeof args.fields === 'object' ? args.fields : {}) as Args;
       const verb = /^closed$/i.test(str(f.Status)) ? 'Close' : 'Change';
-      return `${verb} ${loopLine(l, str(args.natural_id) || str(args.id))}. Fields set: ${clip(fieldChanges(l ? l.fields : null, f), 2400)}.`;
+      // 23 Nov 2026: append adds an entry below what a field holds and never replaces it.
+      const ap = args.append && typeof args.append === 'object' ? (args.append as Args) : null;
+      const adds = ap
+        ? Object.entries(ap).map(([k, v]) => `${k} gains, below everything it holds now (which stays word for word): ${shown(v, 3000)}`).join('; ')
+        : '';
+      const set = Object.keys(f).length ? `Fields set: ${clip(fieldChanges(l ? l.fields : null, f), 2400)}.` : '';
+      return `${verb} ${loopLine(l, str(args.natural_id) || str(args.id))}. ${[set, adds ? `Adds: ${adds}.` : ''].filter(Boolean).join(' ')}`;
     }
     case 'create_record': {
       if (args.kind !== 'loops') return null;
@@ -227,6 +233,8 @@ export async function describe(tool: string, args: Args): Promise<string | null>
       return `Change the Google Doc ${str(args.document_id)}: ${Array.isArray(args.replacements) && args.replacements.length ? `replace ${clip(args.replacements, 1500)}` : 'no replacements'}${typeof args.append === 'string' && args.append ? `; add at the end: "${clip(args.append, 1500)}"` : ''}.`;
     case 'set_income_board_item':
       return `${str(args.action) === 'remove' ? 'Take' : 'Put'} ${str(args.record_id)} ${str(args.action) === 'remove' ? 'off' : 'on'} the Production-Income Board${str(args.target_date) ? `, target date ${str(args.target_date)}` : ''}. Reason given: "${clip(args.reason, 400)}".`;
+    case 'log_sop':
+      return `Log a new ${/^Spec\s+--/i.test(str(args.title)) ? 'spec' : 'SOP'} in BHARAG titled "${clip(args.title, 300)}"${Array.isArray(args.tags) && args.tags.length ? `, tagged ${args.tags.join(', ')}` : ''}. Its text: "${shown(args.content, 6000)}".`;
     case 'edit_sop':
       return `Edit SOP ${str(args.id) || str(args.title) || '(not named)'}. ${args.content !== undefined ? `Its text becomes: "${shown(args.content, 6000)}"` : `Replacements: ${clip(args.replacements, 1200)}`}. Reason given: "${clip(args.reason, 400)}".`;
     default:
@@ -238,6 +246,8 @@ export const CHECKED: ReadonlyArray<string> = [
   'update_record', 'create_record', 'archive_record', 'move_loop',
   'open_decision_watch', 'update_decision_watch', 'close_decision_watch', 'snooze_decision_watch',
   'send_nudge', 'post_file', 'edit_sop',
+  // 23 Nov 2026: Genie logs SOPs and specs when Destiny or Jason asks.
+  'log_sop',
   // 20 Nov 2026 (Genie rebuild step 13): Genie's two new ways to act for a person.
   'post_channel_message', 'edit_doc',
   // 20 Nov 2026: the Production-Income Board.

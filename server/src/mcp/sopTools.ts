@@ -47,11 +47,12 @@ const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
 export const logSopTool: ToolDefinition = {
   name: 'log_sop',
   description:
-    'Write one SOP into BHARAG, in the workspace Bays writes and reads SOPs in (BHARAG_SOPS_KEY), through the write guard. title must start "SOP -- ". content is stored as sent. source_link: the Slack thread the SOP came from (required). supersedes: BHARAG ids of SOPs this one replaces, recorded on it (they are not removed; use delete_sop). requester_user_id: Destiny or Jason. Refused when an SOP with the same title is already held. After the ingest the SOP is read back and its stored text compared with what was sent: verified true only when every word and punctuation mark matches; whitespace BHARAG normalises, such as sub-bullet indentation, is ignored and reported. dry_run checks everything and writes nothing. Returns {ok, id, verified}. Audited on engine_mcp_writes.',
+    'Write one SOP or spec into BHARAG, in the workspace Bays writes and reads SOPs in (BHARAG_SOPS_KEY), through the write guard. title must start "SOP -- ", or "Spec -- " for a spec (e.g. "Spec -- spec/vfarm-land-rover v0.1"). tags: labels such as VFARM_P1, stored on the document and searchable. content is stored as sent. source_link: the Slack thread the SOP came from (required). supersedes: BHARAG ids of SOPs this one replaces, recorded on it (they are not removed; use delete_sop). requester_user_id: Destiny or Jason. Refused when an SOP with the same title is already held. After the ingest the SOP is read back and its stored text compared with what was sent: verified true only when every word and punctuation mark matches; whitespace BHARAG normalises, such as sub-bullet indentation, is ignored and reported. dry_run checks everything and writes nothing. Returns {ok, id, verified}. Audited on engine_mcp_writes.',
   inputSchema: {
     type: 'object',
     properties: {
-      title: { type: 'string', description: 'Starts "SOP -- ".' },
+      title: { type: 'string', description: 'Starts "SOP -- ", or "Spec -- " for a spec.' },
+      tags: { type: 'array', items: { type: 'string' }, description: 'Labels for the document, e.g. ["VFARM_P1", "PILOT_1"]: upper case, digits and underscores.' },
       content: { type: 'string', description: 'The SOP text, stored as sent.' },
       source_link: { type: 'string', description: 'The Slack thread it came from.' },
       supersedes: { type: 'array', items: { type: 'string' }, description: 'BHARAG ids of SOPs this replaces.' },
@@ -68,6 +69,8 @@ export const logSopTool: ToolDefinition = {
     const link = str(args.source_link);
     const requester = str(args.requester_user_id) || null;
     const supersedes = Array.isArray(args.supersedes) ? args.supersedes.map(str).filter(Boolean) : [];
+    const tags = Array.isArray(args.tags) ? [...new Set(args.tags.map((t) => str(t).toUpperCase()).filter(Boolean))] : [];
+    const isSpec = /^Spec\s+--\s+/i.test(title);
     const dry = args.dry_run === true;
     const audit = await auditOpen({ tool: 'log_sop', args: { ...args, content: `${content.length} characters` }, access: deps.access, kind: 'bharag_sop', requester, dry_run: dry });
     const refuse = async (why: string, message: string, extra: Record<string, unknown> = {}) => {
@@ -75,7 +78,9 @@ export const logSopTool: ToolDefinition = {
       return { ok: false, logged: false, reason: why, message: `${message} Nothing was written.`, ...extra, audit_id: audit };
     };
     if (!requester || !ADMIN_IDS.includes(requester)) return refuse('not_permitted', 'Only Destiny or Jason can log an SOP with this tool. Send requester_user_id.');
-    if (!/^SOP\s+--\s+\S/.test(title)) return refuse('bad_title', 'title must start "SOP -- " followed by the rule\'s name.');
+    if (!/^(SOP|Spec)\s+--\s+\S/.test(title)) return refuse('bad_title', 'title must start "SOP -- " followed by the rule\'s name, or "Spec -- " followed by the spec\'s path and version.');
+    const badTag = tags.find((t) => !/^[A-Z0-9_]{2,40}$/.test(t));
+    if (badTag) return refuse('bad_tag', `A tag is upper case letters, digits and underscores, 2 to 40 characters: "${badTag}" is not.`);
     if (!content.trim()) return refuse('empty', 'content is empty.');
     if (!/^https:\/\/[a-z0-9-]+\.slack\.com\//i.test(link)) return refuse('bad_source', 'source_link must be the Slack thread the SOP came from.');
     const now = await sops.read({ fresh: true });
@@ -89,12 +94,12 @@ export const logSopTool: ToolDefinition = {
       content,
       source_type: 'manual',
       content_type: 'doc',
-      project_tags: ['sop'],
-      metadata: { doc_type: 'sop', source_link: link, requested_by: requester, supersedes, logged_via: 'mcp:log_sop' },
+      project_tags: [isSpec ? 'spec' : 'sop', ...tags.map((t) => t.toLowerCase())],
+      metadata: { doc_type: isSpec ? 'spec' : 'sop', tags, source_link: link, requested_by: requester, supersedes, logged_via: 'mcp:log_sop' },
     };
     if (dry) {
       await auditClose(audit, { outcome: 'dry_run', detail: `would log "${title}" (${content.length} characters)`, guard_result: { key_variable: sops.keyVar(), supersedes } });
-      return { ok: true, logged: false, dry_run: true, title, characters: content.length, key_variable: sops.keyVar(), supersedes, message: 'Dry run: nothing was written.', audit_id: audit };
+      return { ok: true, logged: false, dry_run: true, title, doc_type: isSpec ? 'spec' : 'sop', tags, characters: content.length, key_variable: sops.keyVar(), supersedes, message: 'Dry run: nothing was written.', audit_id: audit };
     }
     const r = await bharag.ingestWithKey(sops.keyVar(), doc, 'mcp:log_sop');
     if (!r.ok || !r.id) {
@@ -113,7 +118,7 @@ export const logSopTool: ToolDefinition = {
       readBack = `read-back failed: ${e instanceof Error ? e.message : String(e)}`;
     }
     await auditClose(audit, { outcome: 'created', detail: `logged ${r.id}; ${readBack}`, natural_id: r.id, after: { id: r.id, title, verified } });
-    return { ok: true, logged: true, id: r.id, title, verified, read_back: readBack, key_variable: sops.keyVar(), supersedes, audit_id: audit };
+    return { ok: true, logged: true, id: r.id, title, doc_type: isSpec ? 'spec' : 'sop', tags, verified, read_back: readBack, key_variable: sops.keyVar(), supersedes, audit_id: audit };
   },
 };
 
