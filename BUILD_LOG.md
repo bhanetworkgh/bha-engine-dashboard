@@ -16082,3 +16082,8 @@ Decision:   a ranking, not an exact cost per job, because GC makes single sample
 Intent:     one page listing every blocked loop, with what blocks it, when it unblocks, lane, tag, why and owner (Destiny, from Jason's Income Board v2 ask in DM 1795035372.309459; LOOP-1795365197978-N3E5).
 Files:      server/src/incomeBoard.ts (blockers, lateness), server/src/index.ts (GET /api/income-board/blockers), server/src/mcp/incomeBoardTools.ts (read_income_board carries blocked_loops), src/screens/IncomeBoard.tsx (Board | Blockers tabs, ?tab=blockers), src/data/index.ts
 Decision:   four new loop fields set with update_record, nothing renamed: "Blocked By", "Unblock Date" (YYYY-MM-DD), "Blocked Tag", "Blocked Why". A loop is on the page while Open or In Progress with "Blocked By" set; late once the unblock date has passed. Lane is the loop's lane_tag, owner its assignee. No yes/no answers on this page (Destiny); the board's Ready row stays on the Board tab.
+
+## 2026-11-23 13:05 — Blockers page: search, builder filter, sort, and an edit window
+Intent:     Destiny: sort by builder, search, and click a row to edit and update it.
+Files:      server/src/incomeBoard.ts (setBlocked), server/src/index.ts (POST /api/income-board/blockers/:loop_id, behind the cookie), src/screens/IncomeBoard.tsx, src/data/index.ts
+Decision:   the edit writes the four blocked fields into the loop's latest row through engineWrite.patchRecord, so nothing else on the loop changes; Unblock takes all four off. Only an open loop can be marked blocked; the date is YYYY-MM-DD or empty. "Mark a loop blocked" adds one by its loop id.

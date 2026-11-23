@@ -333,3 +333,42 @@ export async function blockers(now = new Date()): Promise<{ rows: BlockedLoop[];
     rule: 'A loop is here while it is open and has "Blocked By" set. Late means its unblock date has passed and it is still blocked.',
   };
 }
+
+/**
+ * Set or clear a loop's blocked fields from the page (23 Nov 2026, Destiny). Writes into the loop's latest row
+ * through engineWrite.patchRecord, the same merge every loop update uses, so nothing else on the loop changes.
+ * `clear` removes all four fields, which takes the loop off the page.
+ */
+export class BlockedError extends Error {
+  constructor(public status: number, public reason: string, message: string) {
+    super(message);
+  }
+}
+
+export async function setBlocked(
+  loopId: string,
+  body: { blocked_by?: unknown; unblock_date?: unknown; tag?: unknown; why?: unknown; clear?: unknown },
+): Promise<{ ok: true; loop_id: string; cleared: boolean }> {
+  const { patchRecord } = await import('./engineWrite');
+  const id = loopId.trim();
+  if (!/^LOOP-\d+-[A-Z0-9]{4}$/.test(id)) throw new BlockedError(422, 'bad_loop_id', `"${id}" is not a loop id (LOOP-<ms>-<4>).`);
+  const row = (await query<{ id: string; status: string | null }>(
+    `SELECT id::text AS id, fields->>'Status' AS status FROM engine_loops WHERE natural_id = $1 ORDER BY id DESC LIMIT 1`,
+    [id],
+  )).rows[0];
+  if (!row) throw new BlockedError(404, 'not_found', `No loop ${id} is held.`);
+  const text = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
+  let fields: Record<string, unknown>;
+  if (body.clear === true) {
+    fields = { 'Blocked By': null, 'Unblock Date': null, 'Blocked Tag': null, 'Blocked Why': null };
+  } else {
+    const by = text(body.blocked_by, 600);
+    if (!by) throw new BlockedError(422, 'blocked_by_required', 'Say what is blocking it. To take a loop off the page, clear it instead.');
+    const date = text(body.unblock_date, 10);
+    if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new BlockedError(422, 'bad_date', 'The unblock date must be YYYY-MM-DD, or left empty.');
+    if (!OPEN_LOOP.has(row.status ?? '')) throw new BlockedError(409, 'not_open', `${id} is ${row.status ?? 'not open'}; only an open loop can be marked blocked.`);
+    fields = { 'Blocked By': by, 'Unblock Date': date, 'Blocked Tag': text(body.tag, 80), 'Blocked Why': text(body.why, 600) };
+  }
+  await patchRecord('loops', row.id, fields, { endpoint: '/api/income-board/blockers', method: 'POST', key_label: 'session cookie', t0: Date.now() }, id);
+  return { ok: true, loop_id: id, cleared: body.clear === true };
+}

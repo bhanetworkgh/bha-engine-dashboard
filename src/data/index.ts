@@ -744,6 +744,8 @@ export const getIncomeBoard = () => api<IncomeBoard>('/api/income-board');
 export interface BlockedLoop { loop_id: string; title: string; status: string; blocked_by: string; unblock_date: string | null; late: boolean; days_late: number | null; lane: string | null; tag: string | null; why: string | null; owner: string | null; link: string }
 export interface BlockersData { rows: BlockedLoop[]; late: number; no_date: number; read_at: string; rule: string }
 export const getBlockers = () => api<BlockersData>('/api/income-board/blockers');
+export const setBlocked = (loopId: string, body: { blocked_by?: string; unblock_date?: string; tag?: string; why?: string; clear?: boolean }) =>
+  api<{ ok: boolean; loop_id: string; cleared: boolean }>(`/api/income-board/blockers/${encodeURIComponent(loopId)}`, { method: 'POST', body });
 export const getModelSpend = () => api<import('./types').ModelSpendData>('/api/model-spend');
 /** Logstream v0: repeating faults, what crossed a threshold and what was done (2026-10-10). */
 export const getLogstream = () => api<LogstreamData>('/api/logstream');

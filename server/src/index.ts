@@ -2352,6 +2352,15 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
   // The Production-Income Board (20 Nov 2026, Destiny; Jason 1795202126.334919).
   if (p === '/api/income-board' && method === 'GET') return send(res, 200, await incomeBoard.read());
   if (p === '/api/income-board/blockers' && method === 'GET') return send(res, 200, await incomeBoard.blockers());
+  const blockedSet = p.match(/^\/api\/income-board\/blockers\/(LOOP-[^/]+)$/);
+  if (blockedSet && method === 'POST') {
+    try {
+      return send(res, 200, await incomeBoard.setBlocked(decodeURIComponent(blockedSet[1]), await readJson(req)));
+    } catch (e) {
+      if (e instanceof incomeBoard.BlockedError) return send(res, e.status, { ok: false, reason: e.reason, message: e.message });
+      throw e;
+    }
+  }
   if (p === '/api/agreements' && method === 'GET') return send(res, 200, await agreements.list());
   if (p === '/api/agreements' && method === 'POST') {
     const body = await readJson(req, 22 * 1024 * 1024);

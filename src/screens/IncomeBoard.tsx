@@ -1,16 +1,41 @@
-import type { ReactNode } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { useData } from '../app/useData';
-import { getBlockers, getIncomeBoard, type IncomeBlocker } from '../data';
-import { EmptyState, LoadFailed, Loading, PageHeader, Pill, Stat, StatCell, StatStrip, TableFrame, Tabs, Th, relativeTime } from '../components/ui';
+import { getBlockers, getIncomeBoard, setBlocked, type BlockedLoop, type IncomeBlocker } from '../data';
+import { Button, EmptyState, LoadFailed, Loading, PageHeader, Pill, SearchBox, Stat, StatCell, StatStrip, TableFrame, Tabs, Th, Toast, relativeTime, useToast } from '../components/ui';
 
 const VIEWS = ['Board', 'Blockers'] as const;
 type View = (typeof VIEWS)[number];
 
 /** Every blocked loop: what blocks it, when it unblocks, lane, tag, why and owner (23 Nov 2026, Destiny). */
 function Blockers() {
-  const { status, data, error } = useData(getBlockers, [], { kinds: ['loops'] });
+  const [bump, setBump] = useState(0);
+  const { status, data, error } = useData(getBlockers, [bump], { kinds: ['loops'] });
+  const [owner, setOwner] = useState('all');
+  const [sort, setSort] = useState<'late' | 'builder' | 'date'>('late');
+  const [q, setQ] = useState('');
+  const [editing, setEditing] = useState<BlockedLoop | 'new' | null>(null);
+  const { toast, setToast } = useToast();
+  const owners = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of data?.rows ?? []) m.set(r.owner ?? 'none', (m.get(r.owner ?? 'none') ?? 0) + 1);
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [data]);
+  const rows = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const list = (data?.rows ?? []).filter((r) => (owner === 'all' || (r.owner ?? 'none') === owner) && (!needle || [r.loop_id, r.title, r.blocked_by, r.lane, r.tag, r.why, r.owner].some((v) => (v ?? '').toLowerCase().includes(needle))));
+    const byDate = (a: BlockedLoop, b: BlockedLoop) => (a.unblock_date ?? '9999').localeCompare(b.unblock_date ?? '9999');
+    if (sort === 'builder') return [...list].sort((a, b) => (a.owner ?? '~').localeCompare(b.owner ?? '~') || byDate(a, b));
+    if (sort === 'date') return [...list].sort(byDate);
+    return list;
+  }, [data, owner, sort, q]);
   if (!data) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
+  const done = (text: string) => {
+    setEditing(null);
+    setToast({ text, tone: 'ok' });
+    setBump((n) => n + 1);
+  };
   return (
     <>
       <p className="px-6 pb-3 pt-4 text-[13px] text-dim md:px-8">
@@ -18,18 +43,37 @@ function Blockers() {
         {data.late > 0 && <>, <span className="text-failing">{data.late} late</span></>}
         {data.no_date > 0 && <>, {data.no_date} with no unblock date</>}. {data.rule}
       </p>
-      {data.rows.length === 0 ? (
-        <EmptyState>No loop is marked blocked yet.</EmptyState>
+      <div className="flex flex-wrap items-center gap-3 px-6 pb-3 md:px-8">
+        <SearchBox value={q} onChange={setQ} placeholder="Search loops, blockers, tags" />
+        <label className="text-[12.5px] text-dim">
+          Builder{' '}
+          <select className="input ml-1 inline-block w-auto py-1 text-[12.5px]" value={owner} onChange={(e) => setOwner(e.target.value)}>
+            <option value="all">Everyone ({data.rows.length})</option>
+            {owners.map(([o, n]) => <option key={o} value={o}>{o === 'none' ? 'No owner' : o} ({n})</option>)}
+          </select>
+        </label>
+        <label className="text-[12.5px] text-dim">
+          Sort{' '}
+          <select className="input ml-1 inline-block w-auto py-1 text-[12.5px]" value={sort} onChange={(e) => setSort(e.target.value as typeof sort)}>
+            <option value="late">Late first</option>
+            <option value="builder">By builder</option>
+            <option value="date">By unblock date</option>
+          </select>
+        </label>
+        <Button size="sm" onClick={() => setEditing('new')}>Mark a loop blocked</Button>
+      </div>
+      {rows.length === 0 ? (
+        <EmptyState>{data.rows.length === 0 ? 'No loop is marked blocked yet.' : 'No blocked loop matches.'}</EmptyState>
       ) : (
         <TableFrame grow={false} label="Blocked loops">
           <thead>
             <tr><Th>Loop</Th><Th>Blocked by</Th><Th>Unblocks on</Th><Th>Lane</Th><Th>Tag</Th><Th>Why</Th><Th>Owner</Th></tr>
           </thead>
           <tbody>
-            {data.rows.map((b) => (
-              <tr key={b.loop_id} className="border-b border-line align-top">
+            {rows.map((b) => (
+              <tr key={b.loop_id} className="cursor-pointer border-b border-line align-top hover:bg-hover" onClick={() => setEditing(b)}>
                 <td className="max-w-[40ch] px-3 py-2">
-                  <a className="tabular text-accent hover:underline" href={b.link}>{b.loop_id.slice(-4)}</a>
+                  <span className="tabular text-accent">{b.loop_id.slice(-4)}</span>
                   <div className="text-ink">{b.title.length > 140 ? `${b.title.slice(0, 140)}…` : b.title}</div>
                 </td>
                 <td className="max-w-[36ch] px-3 py-2 text-ink">{b.blocked_by}</td>
@@ -45,8 +89,64 @@ function Blockers() {
           </tbody>
         </TableFrame>
       )}
+      {editing && <BlockedDialog row={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onDone={done} onError={(text) => setToast({ text, tone: 'failing' })} />}
+      <Toast toast={toast} />
       <div className="h-8" />
     </>
+  );
+}
+
+/** Edit a blocked loop, mark a new one blocked, or take one off the page. */
+function BlockedDialog({ row, onClose, onDone, onError }: { row: BlockedLoop | null; onClose: () => void; onDone: (text: string) => void; onError: (text: string) => void }) {
+  const [loopId, setLoopId] = useState(row?.loop_id ?? '');
+  const [by, setBy] = useState(row?.blocked_by ?? '');
+  const [date, setDate] = useState(row?.unblock_date ?? '');
+  const [tag, setTag] = useState(row?.tag ?? '');
+  const [why, setWhy] = useState(row?.why ?? '');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  }, [onClose]);
+  const run = async (clear: boolean) => {
+    setBusy(true);
+    try {
+      const id = loopId.trim();
+      await setBlocked(id, clear ? { clear: true } : { blocked_by: by, unblock_date: date, tag, why });
+      onDone(clear ? `${id} taken off the blockers page.` : `${id} saved.`);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : 'It could not be saved.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const field = 'input mt-1 w-full py-1.5 text-[13px]';
+  return createPortal(
+    <div className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/30 p-4 md:p-10" onClick={onClose}>
+      <div className="card fade-up w-full max-w-[640px] px-6 py-5" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Blocked loop">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="kicker tabular">{row ? row.loop_id : 'Mark a loop blocked'}</div>
+            {row && <div className="mt-1 text-[14px] text-ink">{row.title.length > 300 ? `${row.title.slice(0, 300)}…` : row.title}</div>}
+            {row && <div className="mt-1 text-[12px] text-dim">{row.lane ?? 'no lane'} · {row.owner ?? 'no owner'} · {row.status} · <a className="text-accent hover:underline" href={row.link}>open the loop</a></div>}
+          </div>
+          <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
+        </div>
+        <div className="mt-4 grid gap-3">
+          {!row && <label className="text-[12.5px] text-dim">Loop id<input className={field} value={loopId} onChange={(e) => setLoopId(e.target.value)} placeholder="LOOP-1794856066847-5DX1" /></label>}
+          <label className="text-[12.5px] text-dim">Blocked by<textarea className={field} rows={2} value={by} onChange={(e) => setBy(e.target.value)} placeholder="What is in the way, e.g. LOOP-… (Jegan): the Stage 1 run" /></label>
+          <label className="text-[12.5px] text-dim">Unblocks on<input type="date" className={field} value={date} onChange={(e) => setDate(e.target.value)} /></label>
+          <label className="text-[12.5px] text-dim">Tag<input className={field} value={tag} onChange={(e) => setTag(e.target.value)} placeholder="e.g. rover, Stage 1 gate, monitoring" /></label>
+          <label className="text-[12.5px] text-dim">Why it is blocked<textarea className={field} rows={2} value={why} onChange={(e) => setWhy(e.target.value)} placeholder="Why, and whether it stops the paid pilot" /></label>
+        </div>
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+          {row ? <Button variant="ghost" size="sm" disabled={busy} onClick={() => void run(true)}>Unblock (take it off the page)</Button> : <span />}
+          <Button variant="primary" loading={busy} disabled={!by.trim() || !loopId.trim()} onClick={() => void run(false)}>Save</Button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
