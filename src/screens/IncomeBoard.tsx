@@ -1,6 +1,54 @@
+import type { ReactNode } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useData } from '../app/useData';
-import { getIncomeBoard, type IncomeBlocker } from '../data';
-import { EmptyState, LoadFailed, Loading, PageHeader, Pill, Stat, StatCell, StatStrip, TableFrame, Th, relativeTime } from '../components/ui';
+import { getBlockers, getIncomeBoard, type IncomeBlocker } from '../data';
+import { EmptyState, LoadFailed, Loading, PageHeader, Pill, Stat, StatCell, StatStrip, TableFrame, Tabs, Th, relativeTime } from '../components/ui';
+
+const VIEWS = ['Board', 'Blockers'] as const;
+type View = (typeof VIEWS)[number];
+
+/** Every blocked loop: what blocks it, when it unblocks, lane, tag, why and owner (23 Nov 2026, Destiny). */
+function Blockers() {
+  const { status, data, error } = useData(getBlockers, [], { kinds: ['loops'] });
+  if (!data) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
+  return (
+    <>
+      <p className="px-6 pb-3 pt-4 text-[13px] text-dim md:px-8">
+        {data.rows.length} blocked loop{data.rows.length === 1 ? '' : 's'}
+        {data.late > 0 && <>, <span className="text-failing">{data.late} late</span></>}
+        {data.no_date > 0 && <>, {data.no_date} with no unblock date</>}. {data.rule}
+      </p>
+      {data.rows.length === 0 ? (
+        <EmptyState>No loop is marked blocked yet.</EmptyState>
+      ) : (
+        <TableFrame grow={false} label="Blocked loops">
+          <thead>
+            <tr><Th>Loop</Th><Th>Blocked by</Th><Th>Unblocks on</Th><Th>Lane</Th><Th>Tag</Th><Th>Why</Th><Th>Owner</Th></tr>
+          </thead>
+          <tbody>
+            {data.rows.map((b) => (
+              <tr key={b.loop_id} className="border-b border-line align-top">
+                <td className="max-w-[40ch] px-3 py-2">
+                  <a className="tabular text-accent hover:underline" href={b.link}>{b.loop_id.slice(-4)}</a>
+                  <div className="text-ink">{b.title.length > 140 ? `${b.title.slice(0, 140)}…` : b.title}</div>
+                </td>
+                <td className="max-w-[36ch] px-3 py-2 text-ink">{b.blocked_by}</td>
+                <td className="tabular whitespace-nowrap px-3 py-2">
+                  {b.unblock_date ? (b.late ? <Pill tone="failing">{b.unblock_date} · {b.days_late}d late</Pill> : <span className="text-dim">{b.unblock_date}</span>) : <span className="text-faint">not set</span>}
+                </td>
+                <td className="px-3 py-2 text-dim">{b.lane ?? <span className="text-faint">none</span>}</td>
+                <td className="px-3 py-2 text-dim">{b.tag ?? <span className="text-faint">none</span>}</td>
+                <td className="max-w-[36ch] px-3 py-2 text-dim">{b.why ?? <span className="text-faint">not given</span>}</td>
+                <td className="px-3 py-2 text-dim">{b.owner ?? <span className="text-faint">none</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </TableFrame>
+      )}
+      <div className="h-8" />
+    </>
+  );
+}
 
 /**
  * The Production-Income Board, BOARD_PROD_INCOME_VFARM_CST (2026-11-20, Destiny; Jason in #bha-coordination
@@ -40,12 +88,30 @@ function Rows({ rows, label }: { rows: IncomeBlocker[]; label: string }) {
 }
 
 export default function IncomeBoard() {
+  const [params, setParams] = useSearchParams();
+  const view: View = params.get('tab') === 'blockers' ? 'Blockers' : 'Board';
+  const setView = (v: View) => setParams(v === 'Blockers' ? { tab: 'blockers' } : {}, { replace: true });
+  const tabs = <div className="px-6 md:px-8"><Tabs tabs={VIEWS} value={view} onChange={setView} /></div>;
+  if (view === 'Blockers') {
+    return (
+      <div className="relative flex h-full min-h-0 flex-col">
+        <PageHeader title="Production-Income Board" subtitle="Blocked loops" />
+        {tabs}
+        <Blockers />
+      </div>
+    );
+  }
+  return <BoardView tabs={tabs} />;
+}
+
+function BoardView({ tabs }: { tabs: ReactNode }) {
   const { status, data, error } = useData(getIncomeBoard, [], { kinds: ['loops', 'income_board'] });
   if (!data) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
   const cst = data.cst;
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       <PageHeader title="Production-Income Board" subtitle={`${data.board_key} · read ${relativeTime(data.read_at) ?? 'just now'}`} />
+      {tabs}
       <div className="px-6 pb-4 md:px-8">
         <div className="card p-5">
           <div className="text-[13px] text-dim">{data.question}?</div>

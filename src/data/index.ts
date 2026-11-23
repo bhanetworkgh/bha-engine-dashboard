@@ -740,6 +740,10 @@ export interface IncomeBoard {
   read_errors: string[]; rule: string; read_at: string;
 }
 export const getIncomeBoard = () => api<IncomeBoard>('/api/income-board');
+/** The blockers page (23 Nov 2026): every open loop with "Blocked By" set. */
+export interface BlockedLoop { loop_id: string; title: string; status: string; blocked_by: string; unblock_date: string | null; late: boolean; days_late: number | null; lane: string | null; tag: string | null; why: string | null; owner: string | null; link: string }
+export interface BlockersData { rows: BlockedLoop[]; late: number; no_date: number; read_at: string; rule: string }
+export const getBlockers = () => api<BlockersData>('/api/income-board/blockers');
 export const getModelSpend = () => api<import('./types').ModelSpendData>('/api/model-spend');
 /** Logstream v0: repeating faults, what crossed a threshold and what was done (2026-10-10). */
 export const getLogstream = () => api<LogstreamData>('/api/logstream');

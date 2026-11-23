@@ -13,16 +13,16 @@ import type { ToolDefinition } from './tools';
 
 export const readIncomeBoard: ToolDefinition = {
   name: 'read_income_board',
-  description: `The Production-Income Board (${board.BOARD_KEY}), Jason's reference for what gets worked on and who gets paid. Answers "${board.QUESTION}: Yes or No", and when No, every blocker by its id (LOOP-, DW-, or one of two gates: a real Stage 1 record passed, and real buyers may be charged) with its status, lane, owner and target date, plus a CST lane summary (open loops, moving and stalled, open watches). Each item's state is read from its own loop or watch now. Quote ready and why as given, and link a blocker by its link. Read only.`,
+  description: `The Production-Income Board (${board.BOARD_KEY}), Jason's reference for what gets worked on and who gets paid. Answers "${board.QUESTION}: Yes or No", and when No, every blocker by its id (LOOP-, DW-, or one of two gates: a real Stage 1 record passed, and real buyers may be charged) with its status, lane, owner and target date, plus a CST lane summary (open loops, moving and stalled, open watches), and blocked_loops: every open loop marked blocked, with what blocks it, its unblock date (late when past), lane, tag, why and owner. Each item's state is read from its own loop or watch now. Quote ready and why as given, and link a blocker by its link. Read only.`,
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false, title: 'Read the Production-Income Board' },
   handler: async (_args, deps) => {
     const t0 = Date.now();
-    const r = await board.read();
+    const [r, blocked] = await Promise.all([board.read(), board.blockers()]);
     await mirror
       .logWrite({ endpoint: 'mcp:read_income_board', kind: 'income_board', method: 'MCP', key_label: deps.access === 'write' ? 'MCP_WRITE_TOKEN' : 'MCP_SECRET', outcome: 'read', detail: `${r.ready} ${r.blocking.length} blocking`, ms: Date.now() - t0 })
       .catch(() => undefined);
-    return { ok: true, ...r };
+    return { ok: true, ...r, blocked_loops: blocked };
   },
 };
 

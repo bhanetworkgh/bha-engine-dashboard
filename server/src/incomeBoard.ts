@@ -263,3 +263,73 @@ export async function setItem(i: SetInput, dryRun = false): Promise<Record<strin
   await query(`UPDATE engine_income_board_items SET removed_at = now(), removed_by = $3, removed_reason = $4 WHERE board_key = $1 AND record_id = $2 AND removed_at IS NULL`, [BOARD_KEY, id, i.requester, reason.slice(0, 600)]);
   return { ok: true, removed: id, page: PAGE };
 }
+
+/**
+ * The blockers page (23 Nov 2026, Destiny: "any loop that is blocked: what is blocking it, the date it will be
+ * unblocked, the lane, a tag, why, and who it is assigned to"). A loop is on it while it is Open or In Progress and
+ * carries a "Blocked By" field. Four new fields on the loop, set with update_record (nothing renamed):
+ *   "Blocked By"   what is in the way
+ *   "Unblock Date" YYYY-MM-DD, the date it will be unblocked (late once past and still blocked)
+ *   "Blocked Tag"  the part inside the lane, e.g. rover under VFARM_HARDWARE
+ *   "Blocked Why"  why it is blocked, and whether it stops the paid pilot
+ * The lane is the loop's own lane_tag and the owner its assignee. Clearing "Blocked By" (null) takes it off.
+ */
+export interface BlockedLoop {
+  loop_id: string;
+  title: string;
+  status: string;
+  blocked_by: string;
+  unblock_date: string | null;
+  late: boolean;
+  days_late: number | null;
+  lane: string | null;
+  tag: string | null;
+  why: string | null;
+  owner: string | null;
+  link: string;
+}
+
+/** Late when the unblock date has passed. Pure. */
+export function lateness(unblockDate: string | null, today: string): { late: boolean; days_late: number | null } {
+  if (!unblockDate || !/^\d{4}-\d{2}-\d{2}$/.test(unblockDate)) return { late: false, days_late: null };
+  const d = Math.floor((Date.parse(today) - Date.parse(unblockDate)) / 86_400_000);
+  return d > 0 ? { late: true, days_late: d } : { late: false, days_late: null };
+}
+
+export async function blockers(now = new Date()): Promise<{ rows: BlockedLoop[]; late: number; no_date: number; read_at: string; rule: string }> {
+  const today = now.toISOString().slice(0, 10);
+  const r = await query<{ natural_id: string; fields: Record<string, unknown> }>(
+    `SELECT DISTINCT ON (natural_id) natural_id, fields FROM engine_loops
+      WHERE natural_id IS NOT NULL ORDER BY natural_id, id DESC`,
+  );
+  const s = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+  const rows: BlockedLoop[] = [];
+  for (const row of r.rows) {
+    const f = row.fields || {};
+    const status = s(f.Status) ?? '';
+    const by = s(f['Blocked By']);
+    if (!by || !OPEN_LOOP.has(status)) continue;
+    const date = s(f['Unblock Date']);
+    rows.push({
+      loop_id: row.natural_id,
+      title: s(f.What) ?? '',
+      status,
+      blocked_by: by,
+      unblock_date: date,
+      ...lateness(date, today),
+      lane: s(f.lane_tag),
+      tag: s(f['Blocked Tag']),
+      why: s(f['Blocked Why']),
+      owner: nameOf(s(f['Assignee Slack User ID'])),
+      link: `${LOOP_PAGE}${row.natural_id}`,
+    });
+  }
+  rows.sort((a, b) => Number(b.late) - Number(a.late) || (a.unblock_date ?? '9999').localeCompare(b.unblock_date ?? '9999') || a.loop_id.localeCompare(b.loop_id));
+  return {
+    rows,
+    late: rows.filter((x) => x.late).length,
+    no_date: rows.filter((x) => !x.unblock_date).length,
+    read_at: now.toISOString(),
+    rule: 'A loop is here while it is open and has "Blocked By" set. Late means its unblock date has passed and it is still blocked.',
+  };
+}
