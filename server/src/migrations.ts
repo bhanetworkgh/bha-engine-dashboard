@@ -27,6 +27,67 @@ interface Migration {
   statements: string[];
 }
 
+/** Migration 151's rows. Drafted from records only; `to_confirm` names the holder on every one. */
+interface SeedRow { id: string; holder: string; area: string; piece: string; mark: 'BLOCKS_PILOT_1' | 'KNOWLEDGE_CAPTURE_REQUIRED'; lives_in: { kind: string; ref: string }[]; to_confirm: string }
+const SEED_NOTE = 'Drafted by Destiny from the open loops and repos on 23 Nov 2026. Who picks it up and the handover date are not set: nothing on record names them.';
+const L = (id: string) => ({ kind: 'loop', ref: id });
+const R = (repo: string) => ({ kind: 'repo', ref: `bhanetworkgh/${repo}` });
+const S = (svc: string) => ({ kind: 'service', ref: svc });
+const HARDIK = 'U0BKT6MAW2Y', AHAD = 'U0AC6RFNP3P', JEGAN = 'U0AF011R821', DESTINY = 'U0AEW3TBYH1';
+const KNOWLEDGE_SEED: SeedRow[] = [
+  { id: 'KC-CAD-SEED01', holder: HARDIK, area: 'CAD', mark: 'BLOCKS_PILOT_1', to_confirm: 'to confirm with Hardik',
+    piece: 'The golden CAD and export lane: the one canonical cabinet_config_id and rail_config_id pair, how the Onshape model is parameterised, and how a render or export is produced from it.',
+    lives_in: [L('LOOP-1788523032438-090O'), L('LOOP-1788532657353-CAJY'), L('LOOP-1788568458307-M7HR'), L('LOOP-1789580659381-KQA6'), L('LOOP-1790553255572-CLLJ'), S('Onshape (BHA org workspace)')] },
+  { id: 'KC-GOLDEN-SEED02', holder: HARDIK, area: 'Golden Lane', mark: 'BLOCKS_PILOT_1', to_confirm: 'to confirm with Hardik',
+    piece: 'The 10/31 Golden Lane law and contract maturity registry: which contracts are mature, which renders count as canonical, and how Media Twin renders tie to the physical vFarm.',
+    lives_in: [L('LOOP-1789043937241-ZVS7'), L('LOOP-1790429563657-OWLG'), L('LOOP-1788574605059-GYV5')] },
+  { id: 'KC-SUBSCR-SEED03', holder: HARDIK, area: 'Subscription backend', mark: 'BLOCKS_PILOT_1', to_confirm: 'to confirm with Hardik',
+    piece: 'The subscription backend: the paid v0.1 transition (interest_only_live to paid_v0_1_live), the Stripe to ledger build contract, the offer skeleton and the acceptance-event writer.',
+    lives_in: [L('LOOP-1789867221768-E4P7'), L('LOOP-1789426963985-XKAB'), L('LOOP-1787849561170-GU9Y'), L('LOOP-1794326998164-O7CU'), L('LOOP-1787830350645-ZHHA')] },
+  { id: 'KC-CST-SEED04', holder: AHAD, area: 'CST', mark: 'BLOCKS_PILOT_1', to_confirm: 'to confirm with Ahad',
+    piece: 'How a CST call or text runs end to end: intake, identity, vFarm authorisation, form lookup, the answer and delivery, plus the Twilio outbound path and production monitoring.',
+    lives_in: [R('bha_cst'), L('LOOP-1792681313173-0SNO'), L('LOOP-1789824812431-IWKX'), L('LOOP-1795144684659-FUR7'), L('LOOP-1795278584425-ZV2O')] },
+  { id: 'KC-VFARMI-SEED05', holder: AHAD, area: 'vFarm identity', mark: 'BLOCKS_PILOT_1', to_confirm: 'to confirm with Ahad',
+    piece: 'The person-to-unit authorisation contract and the CST registry entry: how a caller is matched to their vFarm unit and what they are allowed to see.',
+    lives_in: [R('bha_cst'), L('LOOP-1790985133889-8D7U'), L('LOOP-1789573914064-KZE7'), L('LOOP-1790682740121-9YQU')] },
+  { id: 'KC-DATABA-SEED06', holder: AHAD, area: 'Database', mark: 'KNOWLEDGE_CAPTURE_REQUIRED', to_confirm: 'to confirm with Ahad',
+    piece: 'The CST database: where it runs, its schema, its keys, and the plan to move it onto one platform with the vFarm database.',
+    lives_in: [R('bha_cst'), L('LOOP-1794514233658-GIPB'), L('LOOP-1793719950845-OPR0'), L('LOOP-1793031575927-LSJY')] },
+  { id: 'KC-RACKHA-SEED07', holder: JEGAN, area: 'Rack hardware', mark: 'BLOCKS_PILOT_1', to_confirm: 'to confirm with Jegan',
+    piece: 'The P1.0 rack as built: the BOM and costs, cabinet load and envelope spec, wiring and drivers, the pollination approach, closed-loop actuation, and the safety sweep a paid cabinet needs.',
+    lives_in: [L('LOOP-1788356740115-Y6ZJ'), L('LOOP-1789147474698-G2Y4'), L('LOOP-1790078725223-2Z2I'), L('LOOP-1790541544543-8E8D'), L('LOOP-1790009338934-KN2Y'), L('LOOP-1791728475444-RDHJ')] },
+  { id: 'KC-VFARMB-SEED08', holder: JEGAN, area: 'vFarm backend and edge', mark: 'BLOCKS_PILOT_1', to_confirm: 'to confirm with Jegan',
+    piece: 'The vFarm backend and the edge: how the Pi reads devices and pushes to the backend, the canonical architecture contract, the hostnames, and the backup and restore path.',
+    lives_in: [R('bhavfarm'), R('vfarm-edge'), R('vfarm-device-sdk'), L('LOOP-1788533527380-EC3A'), L('LOOP-1790439081943-YWVQ'), L('LOOP-1790945994859-735J')] },
+  { id: 'KC-BHARAG-SEED09', holder: JEGAN, area: 'BHARAG', mark: 'BLOCKS_PILOT_1', to_confirm: 'to confirm with Jegan',
+    piece: 'How BHARAG is run: its workspaces and keys, the CST help-only cluster, health signals, and the login and key rotation.',
+    lives_in: [R('bharag'), L('LOOP-1793038481046-ZZ6U'), L('LOOP-1789397100979-9D77'), L('LOOP-1793645861019-56BO'), L('LOOP-1794294426186-JAEK')] },
+  { id: 'KC-AWS-SEED10', holder: JEGAN, area: 'AWS', mark: 'KNOWLEDGE_CAPTURE_REQUIRED', to_confirm: 'to confirm with Jegan',
+    piece: 'The BHA AWS account: what runs there, who can sign in, and the root-email move to aws-bha@bhanetwork.org.',
+    lives_in: [R('bha_infra'), L('LOOP-1791014712203-99FC')] },
+  { id: 'KC-DASHBO-SEED11', holder: DESTINY, area: 'Dashboard', mark: 'BLOCKS_PILOT_1', to_confirm: 'to confirm with Destiny',
+    piece: 'The engine dashboard: its server and Postgres, the engine write routes n8n uses, the MCP connections and agent tokens, and how a change is deployed. CLAUDE.md in the repo is the spec.',
+    lives_in: [R('bha-engine-dashboard'), { kind: 'file', ref: 'bhanetworkgh/bha-engine-dashboard/CLAUDE.md' }, S('Render: bha-engine-dashboard and bha-engine-db')] },
+  { id: 'KC-N8NENG-SEED12', holder: DESTINY, area: 'n8n engine', mark: 'BLOCKS_PILOT_1', to_confirm: 'to confirm with Destiny',
+    piece: 'The n8n engine: the front doors and agent deliveries, Submit Actions, the error handlers and self healer, the agents and their backups, and the change checklist.',
+    lives_in: [S('n8n: bayshorizonnetwork.app.n8n.cloud')] },
+  { id: 'KC-GENIE-SEED13', holder: DESTINY, area: 'Genie', mark: 'KNOWLEDGE_CAPTURE_REQUIRED', to_confirm: 'to confirm with Destiny',
+    piece: 'Genie after the rebuild: its service, its direct tools and approvals, the chat app, and how it reads the dashboard.',
+    lives_in: [R('genie'), S('Render: Genie service')] },
+  { id: 'KC-REPAIR-SEED14', holder: DESTINY, area: 'Repair bridge', mark: 'KNOWLEDGE_CAPTURE_REQUIRED', to_confirm: 'to confirm with Destiny',
+    piece: 'The repair bridge: how a failed workflow becomes a repair, what it may and may not touch, and how a fix is proved and reverted.',
+    lives_in: [R('bha-repair-bridge'), S('heal.bhanetwork.org')] },
+  { id: 'KC-BHARSS-SEED15', holder: DESTINY, area: 'bha-rss', mark: 'KNOWLEDGE_CAPTURE_REQUIRED', to_confirm: 'to confirm with Destiny',
+    piece: 'BHA RSS: its sources, the daily digest, the Apify plan, and how it tunes its own sources.',
+    lives_in: [R('bha-rss')] },
+  { id: 'KC-SITE-SEED16', holder: DESTINY, area: 'Site', mark: 'BLOCKS_PILOT_1', to_confirm: 'to confirm with Destiny',
+    piece: 'bhanetwork.org: the site, the /vfarm signup and its attribution, DNS, and where the buyer flow starts.',
+    lives_in: [R('bhanetwork-site')] },
+  { id: 'KC-KEYS-SEED17', holder: DESTINY, area: 'Keys', mark: 'BLOCKS_PILOT_1', to_confirm: 'to confirm with Destiny',
+    piece: 'Where every key and secret sits and who may touch it: Bitwarden holds the values, the Key registry says where each one is used.',
+    lives_in: [S('Bitwarden'), { kind: 'other', ref: 'System Registry, Keys tab' }] },
+];
+
 const MIGRATIONS: Migration[] = [
   {
     id: 1,
@@ -5059,6 +5120,17 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       )`,
       `CREATE INDEX IF NOT EXISTS engine_knowledge_capture_holder ON engine_knowledge_capture (holder) WHERE removed_at IS NULL`,
     ],
+  },
+  {
+    id: 151,
+    name: 'Knowledge capture seed: the first rows for Hardik, Ahad, Jegan and Destiny, drafted from their open loops and repos, each to confirm with its holder (23 Nov 2026, Destiny)',
+    statements: KNOWLEDGE_SEED.map((r) => {
+      const q = (v: string) => `'${v.replace(/'/g, "''")}'`;
+      const lives = JSON.stringify(r.lives_in).replace(/'/g, "''");
+      return `INSERT INTO engine_knowledge_capture (item_id, holder, area, piece, lives_in, mark, to_confirm, notes, added_by, updated_by)
+              VALUES (${q(r.id)}, ${q(r.holder)}, ${q(r.area)}, ${q(r.piece)}, '${lives}'::jsonb, ${q(r.mark)}, ${q(r.to_confirm)}, ${q(SEED_NOTE)}, 'U0AEW3TBYH1', 'U0AEW3TBYH1')
+              ON CONFLICT (item_id) DO NOTHING`;
+    }),
   },
 ];
 

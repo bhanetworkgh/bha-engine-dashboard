@@ -16139,3 +16139,10 @@ Files:      server/src/knowledgeCapture.ts (new), server/src/migrations.ts (150)
 Problem:    read_income_board carried all 97 blocked loops, about 229,000 characters, and Genie's read of it in Jason's thread was cut to 1,000.
 Fix:        engine_knowledge_capture with a captured-needs-proof CHECK; set_knowledge_capture (Destiny or Jason, audited) and an admin-login edit window; the Knowledge capture tab. read_income_board's blocked_loops is the short form by default (counts plus the 25 that matter; full: true for all) and carries knowledge_capture.
 Decision:   Rows drafted from records carry to_confirm naming the holder, never presented as confirmed. The mark is shown in plain text, not red: it is a fact about the row, not a fault.
+
+## 2026-11-23 15:15 — Knowledge capture seeded: Hardik, Ahad, Jegan, Destiny
+Intent:     Fill the Income Board's knowledge capture tab with the first rows (D4), Destiny's own and Jegan's included.
+Files:      server/src/migrations.ts (migration 151, KNOWLEDGE_SEED), CLAUDE.md, BUILD_LOG.md
+Problem:    set_knowledge_capture is registered on the write connection (a8f82d2, migration 150 live) but this session's tool list did not pick it up after a refresh, and the page route needs the admin login.
+Fix:        Seeded the rows as a forward-only migration, ON CONFLICT DO NOTHING, ids KC-<AREA>-SEED01 to 17. 17 rows: Hardik 3 (CAD, Golden Lane, subscription backend), Ahad 3 (CST, vFarm identity, database), Jegan 4 (rack hardware, vFarm backend and edge, BHARAG, AWS), Destiny 7 (dashboard, n8n engine, Genie, repair bridge, bha-rss, site, keys). Each names its loops, repos or services.
+Decision:   Drafted from the open loops and repos only. Every row is "to confirm with <holder>"; who picks it up and the handover date are left empty because nothing on record names them. 11 marked BLOCKS_PILOT_1, 6 KNOWLEDGE_CAPTURE_REQUIRED. Destiny or Jason edits them from the tab or set_knowledge_capture from here on.
