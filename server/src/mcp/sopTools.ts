@@ -279,7 +279,7 @@ export const editSopTool: ToolDefinition = {
     if (newContent === null && !reps.length && newTitle === null && newLink === null) return refuse('nothing_to_change', 'Send replacements, content, title or source_link.');
     if (newContent !== null && !newContent.trim()) return refuse('empty', 'content is empty.');
     if (newTitle !== null && !/^SOP\s+--\s+\S/.test(newTitle)) return refuse('bad_title', 'title must start "SOP -- " followed by the rule\'s name.');
-    if (newLinkRaw !== null && !slackSourceLink(newLinkRaw)) return refuse('bad_source', SOURCE_LINK_RULE, { sent: newLinkRaw.slice(0, 200) });
+    if (newLinkRaw !== null && !slackSourceLink(newLinkRaw)) return refuse('bad_source', `${SOURCE_LINK_RULE} Sent: ${newLinkRaw.slice(0, 200)}`);
     const d = await sops.doc(id);
     if (!d.ok) return refuse('not_an_sop', d.reason);
     const oldText = d.sop.content ?? '';
