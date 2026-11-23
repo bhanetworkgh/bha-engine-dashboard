@@ -167,6 +167,15 @@ async function logRead(tool: string, kind: string, deps: ToolDeps, detail: strin
 
 /* ================================================================ read_slack */
 
+function cleanSlackText(t: unknown): string {
+  return String(t || '')
+    .replace(/<@(U[A-Z0-9]+)(\|[^>]*)?>/g, (_m, id: string) => '@' + (PEOPLE[id] || id))
+    .replace(/<#C[A-Z0-9]+\|([^>]+)>/g, '#$1')
+    .replace(/<(https?:[^|>]+)\|([^>]+)>/g, '$2 ($1)')
+    .replace(/<(https?:[^>]+)>/g, '$1')
+    .replace(/<!(channel|here|everyone)>/g, '@$1');
+}
+
 interface SlackMsg {
   ts: string;
   user?: string;
@@ -185,6 +194,83 @@ export interface ReadSlackArgs {
   slack_channel?: unknown;
   /** How many messages at most; the tool sets 40 when nothing narrows the read. */
   max_messages?: number;
+}
+
+/* ============================================================ read_slack thread */
+
+/**
+ * One thread, whole (23 Nov 2026, Destiny). A search cuts each person's message
+ * at 1,200 characters, so Genie could not copy Jason's decision word for word
+ * and refused to write it from a fragment. Named by its link (or channel and
+ * ts), a thread is read root and every reply, oldest first, each person's
+ * message in full. Over the budget, bot posts are cut to 300 characters first,
+ * then the oldest replies are left out, and the answer says so; a person's
+ * message is never cut.
+ */
+const THREAD_LIMIT = 500;
+const THREAD_BOT_CLIP = 4_000;
+
+export function parseThreadRef(ref: unknown): { channel: string; ts: string } | null {
+  const s = String(ref ?? '').trim();
+  const link = /archives\/([CGD][A-Z0-9]+)\/p(\d{10})(\d{6})(?:[^#]*?[?&]thread_ts=(\d+\.\d+))?/.exec(s);
+  if (link) return { channel: link[1], ts: link[4] ?? `${link[2]}.${link[3]}` };
+  const pair = /^([CG][A-Z0-9]+)[\s:/,]+(\d+\.\d+)$/.exec(s);
+  return pair ? { channel: pair[1], ts: pair[2] } : null;
+}
+
+export async function readSlackThread(ref: unknown, max: number, keywords?: unknown): Promise<Record<string, unknown>> {
+  const tok = slack.northStarToken();
+  if (!tok) return { ok: false, reason: 'not_configured', message: `${slack.NS_TOKEN_VAR} is not set on this server, so North Star cannot read Slack as itself.` };
+  const at = parseThreadRef(ref);
+  if (!at) return { ok: false, reason: 'bad_thread', message: 'thread must be a Slack message link (https://….slack.com/archives/C…/p…) or "<channel id> <ts>".' };
+  if (at.channel.startsWith('D')) return { ok: false, reason: 'dm_not_read', message: 'read_slack never reads DMs.' };
+  let body: Record<string, unknown>;
+  try {
+    body = await slackCall(tok, 'conversations.replies', { channel: at.channel, ts: at.ts, limit: THREAD_LIMIT });
+    // A link to a reply returns only that reply: read from its root.
+    const first = ((body.messages as SlackMsg[] & { thread_ts?: string }[]) || [])[0] as (SlackMsg & { thread_ts?: string }) | undefined;
+    if (body.ok !== false && first?.thread_ts && first.thread_ts !== at.ts) {
+      at.ts = first.thread_ts;
+      body = await slackCall(tok, 'conversations.replies', { channel: at.channel, ts: at.ts, limit: THREAD_LIMIT });
+    }
+  } catch (e) {
+    if (e instanceof slack.SlackRateLimited) return rateLimited(e);
+    return { ok: false, reason: 'slack_error', step: 'conversations.replies', message: e instanceof Error ? e.message : String(e) };
+  }
+  if (body.ok === false) {
+    const err = String(body.error);
+    return { ok: false, reason: err === 'not_in_channel' || err === 'channel_not_found' ? 'not_in_channel' : 'slack_refused', step: 'conversations.replies', message: `Slack refused the thread read: ${err}${err === 'not_in_channel' || err === 'channel_not_found' ? ' (North Star is not in that channel).' : '.'}` };
+  }
+  const link = (ts: string) => LINK_BASE + at.channel + '/p' + ts.replace('.', '') + (ts !== at.ts ? '?thread_ts=' + at.ts : '');
+  let rows = ((body.messages as SlackMsg[]) || [])
+    .filter((m) => !(m.subtype && SKIP.includes(m.subtype)))
+    .map((m) => {
+      const bot = !!m.bot_id;
+      const text = cleanSlackText(m.text);
+      return { author: bot ? ((m.bot_profile && m.bot_profile.name) || m.username || 'bot') + ' (bot)' : PEOPLE[m.user ?? ''] || m.user || 'unknown', at: new Date(parseFloat(m.ts) * 1000).toISOString(), kind: m.ts === at.ts ? 'message' : 'thread reply', is_bot: bot, text: bot ? text.slice(0, THREAD_BOT_CLIP) : text, chars: text.length, link: link(m.ts) };
+    });
+  const total = rows.length;
+  const q = String(keywords ?? '').trim();
+  if (q) {
+    const words = q.toLowerCase().split(/[\s,]+/).filter((w) => w.length > 2);
+    if (words.length) rows = rows.filter((m, i) => i === 0 || words.some((w) => m.text.toLowerCase().includes(w)));
+  }
+  const out: Record<string, unknown> = { ok: true, mode: 'thread', channel: at.channel, thread_ts: at.ts, link: link(at.ts), keywords: q || null, messages_in_thread: total, people_whole: true, messages: rows };
+  const notes: string[] = [];
+  const fits = () => { out.result_chars = 0; out.result_chars = size(out); out.result_chars = size(out); return Number(out.result_chars) <= max; };
+  if (!fits()) {
+    for (const r of rows) if (r.is_bot && r.text.length > BOT_CLIP) r.text = r.text.slice(0, BOT_CLIP) + '…';
+    notes.push(`bot posts cut to ${BOT_CLIP} characters`);
+  }
+  let dropped = 0;
+  while (!fits() && rows.length > 2) { rows.splice(1, 1); dropped += 1; }
+  if (dropped) notes.push(`the ${dropped} oldest replies after the first message left out`);
+  out.messages_returned = rows.length;
+  out.truncated = notes.length > 0;
+  out.max_chars = max;
+  if (notes.length) out.note = `${notes.join('; ')} to stay within ${max.toLocaleString('en-GB')} characters. People's messages that are shown are whole; pass keywords to keep only the messages you need.`;
+  fits();
+  return out;
 }
 
 /**
@@ -300,13 +386,7 @@ async function readSlackUncached(args: ReadSlackArgs): Promise<Record<string, un
   /* RS - Build Digest */
   const who = (u: string | undefined, bot: boolean, bn: string | undefined) => (bot ? (bn || 'bot') + ' (bot)' : PEOPLE[u ?? ''] || u || 'unknown');
   const link = (ch: string, ts: string, thr?: string) => LINK_BASE + ch + '/p' + String(ts).replace('.', '') + (thr && thr !== ts ? '?thread_ts=' + thr : '');
-  const clean = (t: unknown) =>
-    String(t || '')
-      .replace(/<@(U[A-Z0-9]+)(\|[^>]*)?>/g, (_m, id: string) => '@' + (PEOPLE[id] || id))
-      .replace(/<#C[A-Z0-9]+\|([^>]+)>/g, '#$1')
-      .replace(/<(https?:[^|>]+)\|([^>]+)>/g, '$2 ($1)')
-      .replace(/<(https?:[^>]+)>/g, '$1')
-      .replace(/<!(channel|here|everyone)>/g, '@$1');
+  const clean = cleanSlackText;
 
   const all: { channel: string; author: string; is_bot: boolean; ts: string; kind: string; replies?: number; text: string; link: string }[] = [];
   for (const m of parents) all.push({ channel: m.channel, author: who(m.user, m.bot, m.bot_name), is_bot: m.bot, ts: m.ts, kind: 'message', replies: m.reply_count, text: clean(m.text), link: link(m.channel_id, m.ts) });
@@ -361,13 +441,14 @@ async function readSlackUncached(args: ReadSlackArgs): Promise<Record<string, un
 export const readSlackTool: ToolDefinition = {
   name: 'read_slack',
   description:
-    'North Star’s Slack read, as its own bot: every public and private channel it is in (never DMs or group DMs, archived excluded), threads included, newest first. since_hours defaults to 72 and is capped at 168. keywords keeps messages containing any of the words (over two characters). slack_channel narrows to one channel by name or id. Caps, as tuned on the 22 Sep out-of-memory crash: 50 messages a channel, the 25 newest threads with replies in the window expanded, 50 replies a thread, 60,000 characters out; bot posts cut to 300 characters, people’s to 1,200. Each item is {channel, author, at, kind (message | thread reply), text, link}. By default the newest 40 messages across channels come back, unless since_hours or slack_channel narrows the read; the answer is held to max_chars (20,000 by default) and a truncated answer says so in note — do not call again with the same arguments. A Slack 429 is waited out once (up to 30s) and retried; still limited, it is ok:false rate_limited with retry_after, never partial data. The same read within a minute is served from the last one (cached: true). Also returns window_hours, channels_read, channels_failed, threads_expanded, threads_not_expanded, messages_matched, messages_returned, truncated, no_data. A missing scope or no channel is ok:false with the reason.',
+    'North Star’s Slack read, as its own bot: every public and private channel it is in (never DMs or group DMs, archived excluded), threads included, newest first. since_hours defaults to 72 and is capped at 168. keywords keeps messages containing any of the words (over two characters). slack_channel narrows to one channel by name or id. Caps, as tuned on the 22 Sep out-of-memory crash: 50 messages a channel, the 25 newest threads with replies in the window expanded, 50 replies a thread, 60,000 characters out; bot posts cut to 300 characters, people’s to 1,200 (pass thread to read one thread whole, people’s messages in full). Each item is {channel, author, at, kind (message | thread reply), text, link}. By default the newest 40 messages across channels come back, unless since_hours or slack_channel narrows the read; the answer is held to max_chars (20,000 by default) and a truncated answer says so in note — do not call again with the same arguments. A Slack 429 is waited out once (up to 30s) and retried; still limited, it is ok:false rate_limited with retry_after, never partial data. The same read within a minute is served from the last one (cached: true). Also returns window_hours, channels_read, channels_failed, threads_expanded, threads_not_expanded, messages_matched, messages_returned, truncated, no_data. A missing scope or no channel is ok:false with the reason.',
   inputSchema: {
     type: 'object',
     properties: {
       since_hours: { type: 'number', description: 'How far back. Default 72, at most 168.' },
       keywords: { type: 'string', description: 'Optional. Any-word match, e.g. "LOOP-" or "vfarm, pilot".' },
       slack_channel: { type: 'string', description: 'Optional. One channel, by name (with or without #) or id.' },
+      thread: { type: 'string', description: 'Optional. One thread, by its Slack link (or "<channel id> <ts>"): read whole, root and every reply oldest first, each person\'s message in full (no 1,200 cut). Use it to quote or copy a message word for word. since_hours and slack_channel are ignored; keywords keeps only matching messages; max_chars defaults to 40,000 here.' },
       ...MAX_CHARS_ARG,
     },
     additionalProperties: false,
@@ -375,6 +456,12 @@ export const readSlackTool: ToolDefinition = {
   annotations: { ...READS_WORLD, title: 'Read Slack as North Star' },
   handler: async (args, deps) => {
     const t0 = Date.now();
+    if (typeof args.thread === 'string' && args.thread.trim()) {
+      const tmax = args.max_chars === undefined ? MAX_CHARS_CAP : maxCharsOf(args);
+      const th = await readSlackThread(args.thread, tmax, args.keywords);
+      await logRead('read_slack', 'slack', deps, th.ok ? `thread ${String(th.channel)} ${String(th.thread_ts)} → ${String(th.messages_returned)} of ${String(th.messages_in_thread)}, ${String(th.result_chars)} chars${th.truncated ? ' (cut)' : ''}` : `refused: ${String(th.reason)} — ${String(th.message)}`, t0);
+      return th;
+    }
     const max = maxCharsOf(args);
     const narrowed = args.since_hours !== undefined || (typeof args.slack_channel === 'string' && args.slack_channel.trim() !== '');
     const read = await readSlack({ since_hours: args.since_hours, keywords: args.keywords, slack_channel: args.slack_channel, max_messages: narrowed ? undefined : DEFAULT_MESSAGES });

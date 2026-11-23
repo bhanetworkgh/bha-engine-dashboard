@@ -16107,3 +16107,10 @@ Intent:     Destiny: DW-1793467464831-9SQH reminded him as Bays at 12:58 UTC, af
 Files:      server/src/decisionWatch.ts, CLAUDE.md, BUILD_LOG.md
 Problem:    the watch's thread is in Destiny's DM with Bays (D0BDLU2H0TC). Genie's post-card answered "Genie did not post it (HTTP 502): Slack refused the post: channel_not_found" (event 189787), so Bays posted it (event 189790). Every watch opened in a DM with Bays would do the same.
 Fix:        post() takes the owner: for a D… thread, Genie posts to the owner's own DM with a line linking the thread ("Reply there, so the watch sees it"); Bays posts in the thread only if that fails too, recorded as before.
+
+## 2026-11-23 14:30 — read_slack reads one thread whole, so a decision can be copied word for word
+Intent:     Destiny: Genie was cleared to make Jason's three writes and stopped because Jason's decision text came back cut off.
+Files:      server/src/mcp/northStarTools.ts, server/test/slack-thread-read.test.cjs, package.json, .github/workflows/ci.yml, CLAUDE.md, BUILD_LOG.md
+Problem:    Genie's reply in C0ASMPYQLG3 (thread 1795434107.741089): "His 2026-11-24 decision entry stops at "automat" … I won't write it from a fragment." read_slack (engine_writes 335483 to 335490) cuts each person's message at 1,200 characters, and Genie's planner held a read_slack answer to 1,000 characters.
+Fix:        read_slack takes `thread`: the thread from its root, each person's message whole, bots to 4,000, max_chars 40,000 by default; over budget bots go to 300 first, then the oldest replies are left out with a note, and a person's message is never cut. Genie's side (read_slack on its long-read list, the thread argument, the instruction) is in the genie repo.
+Decision:   a new argument rather than raising the 1,200 cut: the search answer was tuned on the 22 Sep out-of-memory crash, and one thread is the case that needs the words whole.

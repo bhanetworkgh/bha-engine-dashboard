@@ -55,6 +55,7 @@ jobs:
       - run: npm run test:event-ingress
       - run: npm run test:single-flight
       - run: npm run test:update-append
+      - run: npm run test:slack-thread
       # The M1 decision core (PR #26) is not on main. Its tests run on any branch that defines the
       # script, and this step says so, by name, where it does not.
       - name: test:acceptance-decision (M1, where the branch has it)
