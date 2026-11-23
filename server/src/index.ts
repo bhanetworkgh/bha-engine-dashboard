@@ -39,6 +39,7 @@ import * as loops from './loops';
 import * as mirror from './mirror';
 import * as engineWrite from './engineWrite';
 import * as events from './events';
+import { shared } from './singleFlight';
 import * as paySync from './paySync';
 import * as sameDay from './sameDay';
 import * as executions from './executions';
@@ -2350,8 +2351,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
   }
   if (p === '/api/comp-snapshot' && method === 'GET') return send(res, 200, await compSnapshot.read());
   // The Production-Income Board (20 Nov 2026, Destiny; Jason 1795202126.334919).
-  if (p === '/api/income-board' && method === 'GET') return send(res, 200, await incomeBoard.read());
-  if (p === '/api/income-board/blockers' && method === 'GET') return send(res, 200, await incomeBoard.blockers());
+  if (p === '/api/income-board' && method === 'GET') return send(res, 200, await shared('income-board', () => incomeBoard.read()));
+  if (p === '/api/income-board/blockers' && method === 'GET') return send(res, 200, await shared('income-board-blockers', () => incomeBoard.blockers()));
   const blockedSet = p.match(/^\/api\/income-board\/blockers\/(LOOP-[^/]+)$/);
   if (blockedSet && method === 'POST') {
     try {
@@ -2479,9 +2480,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         return send(res, 200, status);
       }
       case '/api/overview':
-        return send(res, 200, await engine.getOverview(q));
+        return send(res, 200, await shared(`overview:${url.search}`, () => engine.getOverview(q)));
       case '/api/open-loops':
-        return send(res, 200, await engine.getOpenLoops(q));
+        return send(res, 200, await shared(`open-loops:${url.search}`, () => engine.getOpenLoops(q)));
       case '/api/codex':
         return send(res, 200, await engine.getCodexEntries(q));
       /** The SOPs tab on Codex (2026-10-13): every SOP in BHARAG's codex workspace, read live. A read. */
@@ -2764,7 +2765,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       // The month the page is showing. Omitted is every month, which is what
       // the kinds without a month picker still ask for.
       const mon = url.searchParams.get('month');
-      return send(res, 200, await store.metrics(kind, { builder: b && b !== 'all' ? b : null, month: mon || null }));
+      return send(res, 200, await shared(`metrics:${kind}:${b ?? ''}:${mon ?? ''}`, () => store.metrics(kind, { builder: b && b !== 'all' ? b : null, month: mon || null })));
     }
     if (p === '/api/build-patterns/search') {
       return send(res, 200, { patterns: await store.searchPatterns(url.searchParams.get('q') ?? '') });
@@ -3049,7 +3050,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
     const kind = statsRoute[1];
     if (!isStatKind(kind)) throw new HttpError(404, `${kind} has no statistics tab.`);
     try {
-      return send(res, 200, await stats(kind, url.searchParams.get('month')));
+      return send(res, 200, await shared(`stats:${kind}:${url.searchParams.get('month') ?? ''}`, () => stats(kind, url.searchParams.get('month'))));
     } catch (e) {
       if (e instanceof store.StoreError) throw new HttpError(e.status, e.message);
       throw e;
@@ -3061,7 +3062,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
     const kind = month[1] as RecordKind;
     if (!store.KINDS.includes(kind)) throw new HttpError(404, 'No such record kind.');
     try {
-      return send(res, 200, await monthly(kind));
+      return send(res, 200, await shared(`monthly:${kind}`, () => monthly(kind)));
     } catch (e) {
       if (e instanceof store.StoreError) throw new HttpError(e.status, e.message);
       throw e;

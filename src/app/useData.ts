@@ -78,7 +78,21 @@ export function useData<T>(fn: (q: Query) => Promise<T>, deps: unknown[] = [], o
           });
       });
 
+    /**
+     * One quiet re-read at a time (23 Nov 2026). A burst of changes used to
+     * start a new read every 750 ms while the last was still running, and a
+     * read of the open loops takes 10 to 15 s under load, so dozens piled up
+     * and ran the server out of memory. Now a change that arrives mid-read is
+     * remembered, and exactly one more read runs when this one finishes.
+     */
+    let inFlight = false;
+    let again = false;
     const quiet = () => {
+      if (inFlight) {
+        again = true;
+        return;
+      }
+      inFlight = true;
       const mine = ++seq;
       fnRef
         .current({ lane })
@@ -88,7 +102,14 @@ export function useData<T>(fn: (q: Query) => Promise<T>, deps: unknown[] = [], o
             setState({ status: 'ready', data, error: null });
           }
         })
-        .catch(() => undefined);
+        .catch(() => undefined)
+        .finally(() => {
+          inFlight = false;
+          if (again && live) {
+            again = false;
+            quiet();
+          }
+        });
     };
 
     const timer = refreshMs ? setInterval(quiet, refreshMs) : null;
