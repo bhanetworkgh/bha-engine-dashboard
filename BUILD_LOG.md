@@ -16058,3 +16058,8 @@ Intent:     Destiny: "let's have bays redirect whatever is asked to genie". Slac
 Files:      server/src/index.ts, CLAUDE.md, BUILD_LOG.md
 Fix:        POST /api/engine/genie-handoff (x-dashboard-key, body_b64 accepted) runs ask_genie's own handler as Bays: the same checks (Builder Profile or approver, a channel the engine knows), audit line and genie_handoff_requested event. The @Bays mention is taken out of the question. Answers ask_genie's result plus raise when nothing reached Genie. Bays — Front Door calls it for a channel tag; a DM, or a hand-off that fails, still gets the "tag @Genie" pointer, and a failed hand-off is raised.
 Decision:   One door for the hand-off (ask_genie's handler), so the audit and the answer-check's hand-off record stay in one place.
+
+## 2026-11-23 10:55 — Genie reads the outside-source scores (LOOP-1795129089361-Q9GO)
+Intent:     Destiny's loop review: Genie could list Decision Watches (it has Bays' scope) but not read_outside_sources.
+Files:      server/src/mcp/index.ts, BUILD_LOG.md
+Fix:        read_outside_sources added to READONLY_SECRETS_GENIE's tool set. Genie's connector re-reads the dashboard's tools every 10 minutes, so it appears without a Genie deploy.

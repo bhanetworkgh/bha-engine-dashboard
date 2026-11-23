@@ -374,6 +374,9 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-11-22 (Destiny; Jason 1795291672.614769): every build Genie does, or a builder does without it, is
         // recorded with its reuse check, and Genie reads past builds before planning a new one.
         'read_genie_builder', 'record_genie_build',
+        // 2026-11-23 (Destiny, LOOP-1795129089361-Q9GO): Genie reads the outside-source scores it helped build
+        // (list_decision_watches already comes with Bays' scope).
+        'read_outside_sources',
         // 2026-11-20 (Destiny): Genie answers priority, ranking and lane-health asks itself, the way Bays did,
         // instead of handing almost every ask to North Star. The three reads North Star ranks from.
         'rank_lanes', 'lane_health', 'get_priority_evidence',
