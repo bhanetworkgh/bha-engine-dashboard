@@ -9,7 +9,7 @@
     "build": "npm run build:client && npm run build:server",
     "build:client": "tsc -b && vite build",
     "build:server": "tsc -p tsconfig.server.json && node -e \"require('fs').writeFileSync('server-dist/package.json','{\\\"type\\\":\\\"commonjs\\\"}')\"",
-    "start": "node --no-warnings=ExperimentalWarning server-dist/server/src/index.js",
+    "start": "node --max-old-space-size=400 --no-warnings=ExperimentalWarning server-dist/server/src/index.js",
     "hash-password": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server-dist/server/src/hash.js",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit && tsc -p tsconfig.server.json --noEmit",

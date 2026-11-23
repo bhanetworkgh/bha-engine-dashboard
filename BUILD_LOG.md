@@ -16063,3 +16063,10 @@ Decision:   One door for the hand-off (ask_genie's handler), so the audit and th
 Intent:     Destiny's loop review: Genie could list Decision Watches (it has Bays' scope) but not read_outside_sources.
 Files:      server/src/mcp/index.ts, BUILD_LOG.md
 Fix:        read_outside_sources added to READONLY_SECRETS_GENIE's tool set. Genie's connector re-reads the dashboard's tools every 10 minutes, so it appears without a Genie deploy.
+
+## 2026-11-23 11:15 — Node gets 400 MB of the server's 512 MB
+Intent:     stop the dashboard running out of memory on a burst of work.
+Files:      package.json (start script)
+Problem:    the server crashed at 10:01:55 UTC with "FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory" (exit 134), after 11 Nov (oomKilled) and the 22 Nov crash loop. Node's default heap on this box is about 256 MB while Render gives 512 MB; the daily average climbed from about 135 MB (26 Oct) to about 250 MB (23 Nov) as background jobs were added, so a burst (19 loop closes, a vFarm snapshot and the executions sync together) tipped it over. Bays — Message Capture's channel lookups got 502 for about three minutes (executions 108911, 108912, 108916 and their retries).
+Fix:        start with --max-old-space-size=400, leaving about 110 MB for everything outside the JavaScript heap.
+Decision:   no plan upgrade yet (Destiny, 23 Nov). Measure per-job memory next and decide on an upgrade from real numbers.
