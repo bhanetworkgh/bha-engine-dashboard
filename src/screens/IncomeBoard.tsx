@@ -156,6 +156,12 @@ function BlockedDialog({ row, onClose, onDone, onError }: { row: BlockedLoop | n
  * lane, owner and target date. A read: items are put on the board by Destiny or Jason (set_income_board_item).
  * Colour marks only what blocks: an open item and a gate not passed.
  */
+function DateCell({ b }: { b: IncomeBlocker }) {
+  if (b.date_state === 'slipped') return <Pill tone="failing">{b.target_date} · slipped {b.days_slipped}d</Pill>;
+  if (b.date_state === 'date_to_set') return <span className="text-degraded">date_to_set</span>;
+  return b.target_date ? <span className="text-dim">{b.target_date}</span> : <span className="text-faint">none</span>;
+}
+
 function Rows({ rows, label }: { rows: IncomeBlocker[]; label: string }) {
   return (
     <TableFrame grow={false} label={label}>
@@ -164,21 +170,21 @@ function Rows({ rows, label }: { rows: IncomeBlocker[]; label: string }) {
           <Th>Id</Th>
           <Th>What</Th>
           <Th>Status</Th>
-          <Th>Lane</Th>
           <Th>Owner</Th>
           <Th>Target date</Th>
+          <Th>Impact</Th>
           <Th>Why it is on the board</Th>
         </tr>
       </thead>
       <tbody>
         {rows.map((b) => (
           <tr key={b.id} className="border-b border-line align-top">
-            <td className="tabular whitespace-nowrap px-3 py-2">{b.link ? <a className="text-accent hover:underline" href={b.link}>{b.id}</a> : <span className="text-ink">{b.id}</span>}</td>
+            <td className="tabular whitespace-nowrap px-3 py-2">{b.link ? <a className="text-accent hover:underline" href={b.link}>{b.id.length > 12 ? b.id.slice(-4) : b.id}</a> : <span className="text-ink">{b.id}</span>}</td>
             <td className="max-w-[48ch] px-3 py-2 text-ink">{b.title}</td>
             <td className="px-3 py-2">{b.open ? <Pill tone="failing">{b.status}</Pill> : <span className="text-dim">{b.status}</span>}</td>
-            <td className="px-3 py-2 text-dim">{b.lane ?? <span className="text-faint">none</span>}</td>
             <td className="px-3 py-2 text-dim">{b.owner ?? <span className="text-faint">none</span>}</td>
-            <td className="tabular px-3 py-2 text-dim">{b.target_date ?? <span className="text-faint">not set</span>}</td>
+            <td className="tabular whitespace-nowrap px-3 py-2"><DateCell b={b} /></td>
+            <td className="whitespace-nowrap px-3 py-2">{b.kind === 'gate' ? <span className="text-faint">gate</span> : b.impact === 'BLOCKS_PILOT_1' ? <span className="font-medium text-ink">BLOCKS_PILOT_1</span> : <span className="text-dim">QUALITY_OF_LIFE</span>}</td>
             <td className="max-w-[44ch] px-3 py-2 text-dim">{b.reason}</td>
           </tr>
         ))}
@@ -358,8 +364,25 @@ function KnowledgeDialog({ row, onClose, onDone, onError }: { row: KnowledgeRow;
 
 function BoardView({ tabs }: { tabs: ReactNode }) {
   const { status, data, error } = useData(getIncomeBoard, [], { kinds: ['loops', 'income_board'] });
+  const [params, setParams] = useSearchParams();
+  const ownerKey = params.get('owner') ?? 'everyone';
   if (!data) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
   const cst = data.cst;
+  const byId = new Map(data.items.map((i) => [i.id, i]));
+  const view = data.owner_views.find((v) => v.key === ownerKey) ?? null;
+  const mine = view ? new Set([...view.blocks_pilot_1, ...view.quality_of_life]) : null;
+  const pick = (ids: string[]) => ids.map((id) => byId.get(id)).filter((x): x is IncomeBlocker => !!x && (!mine || mine.has(x.id)));
+  const ownerTabs = [{ key: 'everyone', label: 'Everyone' }, ...data.owner_views.map((v) => ({ key: v.key, label: v.label }))];
+  const openBlocking = data.items.filter((i) => i.open && i.impact === 'BLOCKS_PILOT_1');
+  const Gate = ({ id }: { id: 'STAGE1_PASSED' | 'CHARGE_GATE_OPEN' }) => {
+    const g = data.gates.find((x) => x.id === id);
+    return (
+      <div className="mt-3 border-t border-line pt-3">
+        <div className="text-[13px]"><span className="tabular font-medium text-ink">{id}</span>: <span className={data.fields[id] ? 'text-ink' : 'text-failing'}>{data.fields[id] ? 'true' : 'false'}</span></div>
+        {g && <div className="mt-0.5 text-[12.5px] text-dim">{g.reason}</div>}
+      </div>
+    );
+  };
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       <PageHeader title="Production-Income Board" subtitle={`${data.board_key} · read ${relativeTime(data.read_at) ?? 'just now'}`} />
@@ -369,37 +392,66 @@ function BoardView({ tabs }: { tabs: ReactNode }) {
           <div className="text-[13px] text-dim">{data.question}?</div>
           <div className={`mt-1 text-[30px] font-semibold ${data.ready === 'Yes' ? 'text-ink' : 'text-failing'}`}>{data.ready}</div>
           <div className="mt-1 text-[13px] text-dim">{data.why}</div>
+          <Gate id="STAGE1_PASSED" />
+          <Gate id="CHARGE_GATE_OPEN" />
           <div className="mt-3 text-[12px] text-faint">{data.rule}</div>
           {data.read_errors.length > 0 && <div className="mt-2 text-[12px] text-degraded">Could not read: {data.read_errors.join('; ')}</div>}
         </div>
       </div>
       <StatStrip cols={4}>
-        <StatCell><Stat label="Blocking now" value={data.blocking.length} hint="gates not passed and items still open" size="lg" /></StatCell>
-        <StatCell><Stat label="Items on the board" value={data.items.length} hint={`${data.items_closed} closed`} size="lg" /></StatCell>
-        <StatCell><Stat label="CST loops open" value={cst ? cst.open_loops : '—'} hint={cst ? `${cst.moving} moving, ${cst.stalled} stalled` : 'not read'} size="lg" /></StatCell>
-        <StatCell><Stat label="CST watches open" value={cst ? cst.open_watches : '—'} hint="Decision Watches on the CST lane" size="lg" /></StatCell>
+        <StatCell><Stat label="Blocking Pilot 1" value={openBlocking.length} hint={`open items marked BLOCKS_PILOT_1, of ${data.items.length} on the board`} size="lg" /></StatCell>
+        <StatCell><Stat label="Slipped" value={data.this_week.slipped.length} hint="open and past their target date" size="lg" /></StatCell>
+        <StatCell><Stat label="Date to set" value={data.this_week.date_to_set} hint="open with no target date" size="lg" /></StatCell>
+        <StatCell><Stat label="Moved this week" value={data.this_week.moved.length} hint={cst ? `${cst.stalled} CST loops stalled 7 days or more` : `since ${data.this_week.since}`} size="lg" /></StatCell>
       </StatStrip>
-      <h2 className="px-6 pb-2 pt-4 text-[15px] font-semibold text-ink md:px-8">What is blocking</h2>
-      {data.blocking.length === 0 ? <EmptyState>Nothing is blocking.</EmptyState> : <Rows rows={data.blocking} label="Blocking" />}
-      <h2 className="px-6 pb-2 pt-6 text-[15px] font-semibold text-ink md:px-8">Everything on the board</h2>
-      {data.items.length === 0 ? <EmptyState>No loop or watch has been put on the board yet.</EmptyState> : <Rows rows={[...data.gates, ...data.items]} label="All items" />}
-      <h2 className="px-6 pb-2 pt-6 text-[15px] font-semibold text-ink md:px-8">CST lane: stalled loops</h2>
-      <p className="px-6 pb-3 text-[12px] text-faint md:px-8">{cst?.stalled_rule ?? 'The CST summary could not be read.'}</p>
-      {cst && cst.stalled_loops.length > 0 ? (
-        <TableFrame grow={false} label="Stalled CST loops">
-          <thead><tr><Th>Loop</Th><Th>What</Th><Th>Owner</Th><Th>Days since a change</Th></tr></thead>
-          <tbody>
-            {cst.stalled_loops.map((l) => (
-              <tr key={l.loop_id} className="border-b border-line align-top">
-                <td className="tabular whitespace-nowrap px-3 py-2"><a className="text-accent hover:underline" href={l.link}>{l.loop_id}</a></td>
-                <td className="max-w-[60ch] px-3 py-2 text-ink">{l.what}</td>
-                <td className="px-3 py-2 text-dim">{l.owner ?? <span className="text-faint">none</span>}</td>
-                <td className="tabular px-3 py-2 text-dim">{l.days_since_change}</td>
-              </tr>
-            ))}
-          </tbody>
-        </TableFrame>
-      ) : cst ? <EmptyState>No CST loop is stalled.</EmptyState> : null}
+      <div className="px-6 pt-4 md:px-8">
+        <Tabs tabs={ownerTabs.map((t) => t.label)} value={ownerTabs.find((t) => t.key === (view ? view.key : 'everyone'))?.label ?? 'Everyone'} onChange={(label) => { const k = ownerTabs.find((t) => t.label === label)?.key ?? 'everyone'; const next = new URLSearchParams(params); if (k === 'everyone') next.delete('owner'); else next.set('owner', k); setParams(next, { replace: true }); }} />
+      </div>
+      {view && (
+        <p className="px-6 pt-3 text-[13px] text-dim md:px-8">
+          {view.label} owe{view.label.includes(' and ') ? '' : 's'} {view.blocks_pilot_1.length} item{view.blocks_pilot_1.length === 1 ? '' : 's'} that block Pilot 1{view.quality_of_life.length ? ` and ${view.quality_of_life.length} quality of life` : ''}
+          {view.slipped ? <>, <span className="text-failing">{view.slipped} slipped</span></> : ''}{view.date_to_set ? `, ${view.date_to_set} with no date` : ''}. Soonest first within each section.
+        </p>
+      )}
+      {data.sections.map((sec) => {
+        const rem = pick(sec.remaining);
+        const done = pick(sec.done);
+        if (view && !rem.length && !done.length) return null;
+        return (
+          <section key={sec.key}>
+            <h2 className="px-6 pb-1 pt-6 text-[15px] font-semibold text-ink md:px-8">{sec.label} <span className="text-[12.5px] font-normal text-dim">· {rem.length} remaining, {done.length} done</span></h2>
+            <p className="px-6 pb-2 text-[12px] text-faint md:px-8">{sec.covers}</p>
+            {sec.empty_note ? <EmptyState>{sec.empty_note}</EmptyState> : <Rows rows={[...rem, ...done]} label={sec.label} />}
+          </section>
+        );
+      })}
+      {!view && (
+        <>
+          <h2 className="px-6 pb-2 pt-6 text-[15px] font-semibold text-ink md:px-8">This week</h2>
+          <p className="px-6 pb-2 text-[12px] text-faint md:px-8">Since {data.this_week.since}. {data.this_week.rule}</p>
+          <div className="px-6 text-[13px] text-dim md:px-8">
+            <div><span className="text-ink">Moved:</span> {data.this_week.moved.length ? data.this_week.moved.map((m, k) => <span key={m.id}>{k ? ', ' : ''}{m.link ? <a className="text-accent hover:underline" href={m.link}>{m.id.slice(-4)}</a> : m.id.slice(-4)} ({m.owner ?? 'no owner'})</span>) : 'nothing on the board moved.'}</div>
+            <div className="mt-1"><span className="text-ink">Slipped:</span> {data.this_week.slipped.length ? data.this_week.slipped.map((m, k) => <span key={m.id}>{k ? ', ' : ''}{m.link ? <a className="text-accent hover:underline" href={m.link}>{m.id.slice(-4)}</a> : m.id.slice(-4)} ({m.owner ?? 'no owner'}, {m.days_slipped}d past {m.target_date})</span>) : 'no date has slipped.'}</div>
+          </div>
+          <h2 className="px-6 pb-2 pt-6 text-[15px] font-semibold text-ink md:px-8">CST lane: stalled loops</h2>
+          <p className="px-6 pb-3 text-[12px] text-faint md:px-8">{cst?.stalled_rule ?? 'The CST summary could not be read.'}</p>
+          {cst && cst.stalled_loops.length > 0 ? (
+            <TableFrame grow={false} label="Stalled CST loops">
+              <thead><tr><Th>Loop</Th><Th>What</Th><Th>Owner</Th><Th>Days since a change</Th></tr></thead>
+              <tbody>
+                {cst.stalled_loops.map((l) => (
+                  <tr key={l.loop_id} className="border-b border-line align-top">
+                    <td className="tabular whitespace-nowrap px-3 py-2"><a className="text-accent hover:underline" href={l.link}>{l.loop_id}</a></td>
+                    <td className="max-w-[60ch] px-3 py-2 text-ink">{l.what}</td>
+                    <td className="px-3 py-2 text-dim">{l.owner ?? <span className="text-faint">none</span>}</td>
+                    <td className="tabular px-3 py-2 text-dim">{l.days_since_change}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </TableFrame>
+          ) : cst ? <EmptyState>No CST loop is stalled.</EmptyState> : null}
+        </>
+      )}
       <div className="h-8" />
     </div>
   );

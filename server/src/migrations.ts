@@ -5180,6 +5180,43 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
         WHERE item_id = ANY(ARRAY['KC-CAD-SEED01','KC-GOLDEN-SEED02','KC-SUBSCR-SEED03']) AND removed_at IS NULL AND notes IS DISTINCT FROM 'Handover date not set: whether Hardik stays is under discussion (Destiny, 23 Nov 2026).'`,
     ],
   },
+  {
+    id: 154,
+    name: "Income Board v2: Jason's seven sections, BLOCKS_PILOT_1 or QUALITY_OF_LIFE on every item, and four items for the empty sections (23 Nov 2026, Destiny; Jason in DM D0AF0DG8ZPY 1795035372.309459)",
+    statements: [
+      `ALTER TABLE engine_income_board_items ADD COLUMN IF NOT EXISTS section text`,
+      `ALTER TABLE engine_income_board_items ADD COLUMN IF NOT EXISTS impact text`,
+      `DO $$ BEGIN
+         IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'engine_income_board_items_section') THEN
+           ALTER TABLE engine_income_board_items ADD CONSTRAINT engine_income_board_items_section CHECK (section IS NULL OR section IN ('cst_gate_a','rover','incident_spine','config_cabinet','alerts_monitoring','cst_vfarm_integration','slack_pilot_intake'));
+         END IF;
+         IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'engine_income_board_items_impact') THEN
+           ALTER TABLE engine_income_board_items ADD CONSTRAINT engine_income_board_items_impact CHECK (impact IS NULL OR impact IN ('BLOCKS_PILOT_1','QUALITY_OF_LIFE'));
+         END IF;
+       END $$`,
+      `UPDATE engine_income_board_items SET section = 'cst_gate_a' WHERE board_key = 'BOARD_PROD_INCOME_VFARM_CST' AND removed_at IS NULL AND section IS NULL AND record_id = ANY(ARRAY['LOOP-1792681313173-0SNO','LOOP-1793031575930-X4EI','LOOP-1795035800169-NVLF','LOOP-1791991972916-G718'])`,
+      `UPDATE engine_income_board_items SET section = 'config_cabinet' WHERE board_key = 'BOARD_PROD_INCOME_VFARM_CST' AND removed_at IS NULL AND section IS NULL AND record_id = ANY(ARRAY['LOOP-1794856525804-H9KF','LOOP-1791587880697-L4WA','LOOP-1794856066847-5DX1','LOOP-1791428275782-TU4O'])`,
+      `UPDATE engine_income_board_items SET section = 'alerts_monitoring' WHERE board_key = 'BOARD_PROD_INCOME_VFARM_CST' AND removed_at IS NULL AND section IS NULL AND record_id = ANY(ARRAY['LOOP-1794168643405-SK22','LOOP-1795200165855-6LWH','LOOP-1794902688969-80HM'])`,
+      // G718 is gated by Jason behind KMG9 (do not push deep until it closes), so it does not block Pilot 1.
+      `UPDATE engine_income_board_items SET impact = CASE WHEN record_id = 'LOOP-1791991972916-G718' THEN 'QUALITY_OF_LIFE' ELSE 'BLOCKS_PILOT_1' END WHERE board_key = 'BOARD_PROD_INCOME_VFARM_CST' AND removed_at IS NULL AND impact IS NULL`,
+      `INSERT INTO engine_income_board_items (board_key, kind, record_id, reason, target_date, added_by, section, impact)
+         SELECT 'BOARD_PROD_INCOME_VFARM_CST', 'watch', 'DW-1795033276626-MGKV', 'Rover: the field data path and PR 29 deployed on the land rover (Jegan: Sat 28 Nov)', '2026-11-28'::date, 'U0AEW3TBYH1', 'rover', 'BLOCKS_PILOT_1'
+          WHERE EXISTS (SELECT 1 FROM engine_decision_watches WHERE watch_id = 'DW-1795033276626-MGKV')
+            AND NOT EXISTS (SELECT 1 FROM engine_income_board_items WHERE board_key = 'BOARD_PROD_INCOME_VFARM_CST' AND record_id = 'DW-1795033276626-MGKV' AND removed_at IS NULL)`,
+      `INSERT INTO engine_income_board_items (board_key, kind, record_id, reason, target_date, added_by, section, impact)
+         SELECT 'BOARD_PROD_INCOME_VFARM_CST', 'watch', 'DW-1795143863503-HM0O', 'Incident spine: the Incidents and Auth Contract note, how a vFarm incident reaches CST', NULL, 'U0AEW3TBYH1', 'incident_spine', 'BLOCKS_PILOT_1'
+          WHERE EXISTS (SELECT 1 FROM engine_decision_watches WHERE watch_id = 'DW-1795143863503-HM0O')
+            AND NOT EXISTS (SELECT 1 FROM engine_income_board_items WHERE board_key = 'BOARD_PROD_INCOME_VFARM_CST' AND record_id = 'DW-1795143863503-HM0O' AND removed_at IS NULL)`,
+      `INSERT INTO engine_income_board_items (board_key, kind, record_id, reason, target_date, added_by, section, impact)
+         SELECT 'BOARD_PROD_INCOME_VFARM_CST', 'loop', 'LOOP-1791897276067-U902', 'Slack pilot and intake: Intake-2 wired and Shibu (Client 2) through it, Jason''s December Week 1', NULL, 'U0AEW3TBYH1', 'slack_pilot_intake', 'BLOCKS_PILOT_1'
+          WHERE EXISTS (SELECT 1 FROM engine_loops WHERE natural_id = 'LOOP-1791897276067-U902')
+            AND NOT EXISTS (SELECT 1 FROM engine_income_board_items WHERE board_key = 'BOARD_PROD_INCOME_VFARM_CST' AND record_id = 'LOOP-1791897276067-U902' AND removed_at IS NULL)`,
+      `INSERT INTO engine_income_board_items (board_key, kind, record_id, reason, target_date, added_by, section, impact)
+         SELECT 'BOARD_PROD_INCOME_VFARM_CST', 'watch', 'DW-1794181771227-53O8', 'Alerts and monitoring: the Monitoring Twin stress-test checklist and screen to source spec, Jason''s December Week 2', NULL, 'U0AEW3TBYH1', 'alerts_monitoring', 'BLOCKS_PILOT_1'
+          WHERE EXISTS (SELECT 1 FROM engine_decision_watches WHERE watch_id = 'DW-1794181771227-53O8')
+            AND NOT EXISTS (SELECT 1 FROM engine_income_board_items WHERE board_key = 'BOARD_PROD_INCOME_VFARM_CST' AND record_id = 'DW-1794181771227-53O8' AND removed_at IS NULL)`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

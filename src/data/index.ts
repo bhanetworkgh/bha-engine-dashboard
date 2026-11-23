@@ -733,9 +733,20 @@ export const getDecisionWatches = () => api<DecisionWatchData>('/api/bays/decisi
 /** Every scheduler's runs on one page (2026-10-09, K9B7). */
 export const getScheduledRuns = () => api<ScheduledRunsData>('/api/scheduled-runs');
 /** The Production-Income Board (20 Nov 2026): server/src/incomeBoard.ts. */
-export interface IncomeBlocker { kind: 'gate' | 'loop' | 'watch'; id: string; title: string; status: string; open: boolean; lane: string | null; owner: string | null; target_date: string | null; reason: string; link: string | null }
+export interface IncomeBlocker {
+  kind: 'gate' | 'loop' | 'watch'; id: string; title: string; status: string; open: boolean; lane: string | null; owner: string | null;
+  target_date: string | null; date_state: 'set' | 'date_to_set' | 'slipped' | 'closed'; days_slipped: number | null;
+  section: string | null; section_label: string | null; impact: 'BLOCKS_PILOT_1' | 'QUALITY_OF_LIFE'; last_change: string | null; moved_this_week: boolean;
+  reason: string; link: string | null;
+}
+export interface IncomeSection { key: string; label: string; covers: string; done: string[]; remaining: string[]; blocks_pilot_open: number; empty_note: string | null }
+export interface IncomeOwnerView { key: string; label: string; blocks_pilot_1: string[]; quality_of_life: string[]; slipped: number; date_to_set: number }
 export interface IncomeBoard {
-  board_key: string; question: string; ready: 'Yes' | 'No'; why: string; blocking: IncomeBlocker[]; gates: IncomeBlocker[]; items: IncomeBlocker[]; items_closed: number;
+  board_key: string; question: string; ready: 'Yes' | 'No'; why: string;
+  fields: { Ready_for_first_paid_pilot: 'Yes' | 'No'; STAGE1_PASSED: boolean; CHARGE_GATE_OPEN: boolean };
+  blocking: IncomeBlocker[]; gates: IncomeBlocker[]; items: IncomeBlocker[]; items_closed: number;
+  sections: IncomeSection[]; owner_views: IncomeOwnerView[];
+  this_week: { since: string; moved: { id: string; title: string; owner: string | null; status: string; last_change: string | null; link: string | null }[]; slipped: { id: string; title: string; owner: string | null; target_date: string | null; days_slipped: number | null; link: string | null }[]; date_to_set: number; stalled_cst_loops: number | null; rule: string };
   cst: { open_loops: number; moving: number; stalled: number; stalled_rule: string; open_watches: number; stalled_loops: { loop_id: string; what: string; owner: string | null; days_since_change: number; link: string }[] } | null;
   read_errors: string[]; rule: string; read_at: string;
 }

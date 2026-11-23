@@ -33,12 +33,47 @@ const NAMES: Record<string, string> = {
 };
 const nameOf = (id: string | null | undefined) => (id ? NAMES[id] ?? NAMES[id.toLowerCase()] ?? id : null);
 
+/**
+ * Income Board v2 (23 Nov 2026, Destiny; Jason in DM D0AF0DG8ZPY 1795035372.309459): Jason's seven sections, a
+ * BLOCKS_PILOT_1 or QUALITY_OF_LIFE label on every item, a target date or date_to_set with slips shown, lane-owner
+ * views, and the two gate fields read from the records only.
+ */
+export const SECTIONS = [
+  { key: 'cst_gate_a', label: 'CST Gate A', covers: 'API health (/api/health with api_reachability and farm_health for vFarm), auth and tenant wiring, anything missing to call the gate ready' },
+  { key: 'rover', label: 'Rover', covers: 'the field data path to CST and the Monitoring Twin, and rover hardware and firmware that affects CST' },
+  { key: 'incident_spine', label: 'Incident spine', covers: 'how incidents from vFarm get into CST, and their mapping to incident codes and triage' },
+  { key: 'config_cabinet', label: 'Config + cabinet', covers: 'cabinet and config state as CST sees it, the Stage 1 proof on the racks, and the keys CST depends on' },
+  { key: 'alerts_monitoring', label: 'Alerts + monitoring', covers: 'vFarm alerts into CST and the Monitoring Twin, false-offline noise, what is missing before alerts can be trusted in production' },
+  { key: 'cst_vfarm_integration', label: 'CST + vFarm integration', covers: 'the signals that flow both ways (alerts, incidents, rover and edge data), and what CST knows about a pilot cabinet' },
+  { key: 'slack_pilot_intake', label: 'Slack pilot + intake', covers: 'the Slack pilot channel, and how an Early Access lead or pilot client shows up in CST (Intake-2)' },
+] as const;
+export type SectionKey = (typeof SECTIONS)[number]['key'];
+export const SECTION_KEYS: readonly string[] = SECTIONS.map((x) => x.key);
+export const IMPACTS = ['BLOCKS_PILOT_1', 'QUALITY_OF_LIFE'] as const;
+export type Impact = (typeof IMPACTS)[number];
+/** Jason's owner slices: what each person owns that blocks Pilot 1. Hardik and Destiny share one view. */
+export const OWNER_VIEWS = [
+  { key: 'ahad', label: 'Ahad', owners: ['Ahad'] },
+  { key: 'jegan', label: 'Jegan', owners: ['Jegan'] },
+  { key: 'kavin', label: 'Kavin', owners: ['Kavin'] },
+  { key: 'hardik_destiny', label: 'Hardik and Destiny', owners: ['Hardik', 'Destiny'] },
+  { key: 'jason', label: 'Jason', owners: ['Jason'] },
+] as const;
+/** STAGE1_PASSED needs a real passed Stage 1 record naming each of these loops (Jason, 22 Nov). */
+export const STAGE1_LOOPS = ['LOOP-1794856525804-H9KF', 'LOOP-1791587880697-L4WA'] as const;
+/** CHARGE_GATE_OPEN also needs one live end-to-end payment above the $1 team tests (amount in cents). */
+export const TEAM_TEST_CENTS = 100;
+/** "Moved this week" looks back this far. */
+export const WEEK_DAYS = 7;
+
 export interface ItemRow {
   id: string;
   kind: 'loop' | 'watch';
   record_id: string;
   reason: string;
   target_date: string | null;
+  section: string | null;
+  impact: string | null;
   added_by: string;
   added_at: string;
 }
@@ -52,6 +87,14 @@ export interface Blocker {
   lane: string | null;
   owner: string | null;
   target_date: string | null;
+  /** set: dated and not yet due; date_to_set: open with no date; slipped: open and past its date; closed: done. */
+  date_state: 'set' | 'date_to_set' | 'slipped' | 'closed';
+  days_slipped: number | null;
+  section: string | null;
+  section_label: string | null;
+  impact: Impact;
+  last_change: string | null;
+  moved_this_week: boolean;
   reason: string;
   link: string | null;
 }
@@ -62,79 +105,103 @@ export function stillOpen(kind: 'loop' | 'watch', status: string | null): boolea
   return kind === 'loop' ? OPEN_LOOP.has(status) : OPEN_WATCH.has(status);
 }
 
-/** The answer, from the gates and the items. Pure. */
-export function decide(gates: Blocker[], items: Blocker[]): { ready: boolean; why: string } {
-  const failing = gates.filter((g) => g.open);
-  const open = items.filter((i) => i.open);
-  if (!items.length) return { ready: false, why: 'No blocking loop or watch has been put on the board yet, so it cannot say Yes.' };
-  if (failing.length || open.length) {
-    const parts = [];
-    if (failing.length) parts.push(`${failing.length} gate${failing.length === 1 ? '' : 's'} not passed`);
-    if (open.length) parts.push(`${open.length} of ${items.length} item${items.length === 1 ? '' : 's'} still open`);
-    return { ready: false, why: `${parts.join(' and ')}.` };
-  }
-  return { ready: true, why: `Both gates passed and all ${items.length} items are closed.` };
+/** Where an item's date stands. Pure. today is YYYY-MM-DD. */
+export function dateState(target: string | null, open: boolean, today: string): { date_state: Blocker['date_state']; days_slipped: number | null } {
+  if (!open) return { date_state: 'closed', days_slipped: null };
+  if (!target) return { date_state: 'date_to_set', days_slipped: null };
+  if (target < today) return { date_state: 'slipped', days_slipped: Math.round((Date.parse(today) - Date.parse(target)) / 86_400_000) };
+  return { date_state: 'set', days_slipped: null };
 }
 
-async function gates(): Promise<{ list: Blocker[]; errors: string[] }> {
+/** An item with no label counts as blocking: the safe direction. Pure. */
+export function impactOf(v: string | null | undefined): Impact {
+  return v === 'QUALITY_OF_LIFE' ? 'QUALITY_OF_LIFE' : 'BLOCKS_PILOT_1';
+}
+
+/** The answer, from the gates and the items. Only BLOCKS_PILOT_1 items hold it at No. Pure. */
+export function decide(gates: Blocker[], items: Blocker[]): { ready: boolean; why: string } {
+  const failing = gates.filter((g) => g.open);
+  const blocking = items.filter((i) => i.impact === 'BLOCKS_PILOT_1');
+  const open = blocking.filter((i) => i.open);
+  if (!blocking.length) return { ready: false, why: 'No item that blocks Pilot 1 has been put on the board yet, so it cannot say Yes.' };
+  if (failing.length || open.length) {
+    const parts = [];
+    if (failing.length) parts.push(`${failing.map((g) => g.id).join(' and ')} ${failing.length === 1 ? 'is' : 'are'} false`);
+    if (open.length) parts.push(`${open.length} of ${blocking.length} item${blocking.length === 1 ? '' : 's'} that block Pilot 1 still open`);
+    return { ready: false, why: `${parts.join(', and ')}.` };
+  }
+  return { ready: true, why: `STAGE1_PASSED and CHARGE_GATE_OPEN are both true and all ${blocking.length} items that block Pilot 1 are closed.` };
+}
+
+/** STAGE1_PASSED, from the Stage 1 records alone. Pure. */
+export function stage1Passed(records: { object_id: string; status: string; loop_ref: string | null }[]): { passed: boolean; per_loop: { loop_id: string; record: string | null; state: string }[] } {
+  const per_loop = STAGE1_LOOPS.map((loop) => {
+    const suffix = loop.slice(-4);
+    const mine = records.filter((r) => r.loop_ref && (r.loop_ref === loop || r.loop_ref.endsWith(suffix)));
+    const passed = mine.find((r) => r.status === 'passed');
+    return { loop_id: loop, record: passed?.object_id ?? mine[0]?.object_id ?? null, state: passed ? 'passed' : mine[0] ? mine[0].status : 'no real Stage 1 record names this loop' };
+  });
+  return { passed: per_loop.every((x) => x.state === 'passed'), per_loop };
+}
+
+function gateRow(id: string, title: string, open: boolean, status: string, reason: string, lane: string, link: string | null, today: string): Blocker {
+  return { kind: 'gate', id, title, status, open, lane, owner: null, target_date: null, ...dateState(null, open, today), section: null, section_label: null, impact: 'BLOCKS_PILOT_1', last_change: null, moved_this_week: false, reason, link };
+}
+
+async function gates(today: string): Promise<{ list: Blocker[]; errors: string[] }> {
   const errors: string[] = [];
   const list: Blocker[] = [];
+  const vfarmPage = `${PAGE.replace('/income-board', '')}/vfarm?tab=gates`;
   try {
-    const s1 = (await query<{ object_id: string; status: string; fields: Record<string, unknown> }>(
-      `SELECT object_id, status, fields FROM engine_vfarm_gates WHERE kind = 'stage1' AND is_fixture = false ORDER BY (status = 'passed') DESC, updated_at DESC LIMIT 1`,
-    )).rows[0];
-    list.push({
-      kind: 'gate',
-      id: 'STAGE1_PASSED',
-      title: 'A real Stage 1 validation record has passed (all four checks)',
-      status: s1 ? s1.status : 'no real Stage 1 record',
-      open: !s1 || s1.status !== 'passed',
-      lane: 'VFARM_HARDWARE',
-      owner: null,
-      target_date: s1 && typeof s1.fields.target_date === 'string' ? s1.fields.target_date : null,
-      reason: s1 ? `Newest real Stage 1 record ${s1.object_id} is ${s1.status}.` : 'No real (non-fixture) Stage 1 record is held.',
-      link: `${PAGE.replace('/income-board', '')}/vfarm?tab=gates`,
-    });
+    const recs = (await query<{ object_id: string; status: string; loop_ref: string | null }>(
+      `SELECT object_id, status, fields->>'loop_ref' AS loop_ref FROM engine_vfarm_gates WHERE kind = 'stage1' AND is_fixture = false ORDER BY updated_at DESC`,
+    )).rows;
+    const s = stage1Passed(recs);
+    list.push(gateRow('STAGE1_PASSED', 'A real Stage 1 record has passed for both H9KF (production rack) and L4WA (Kavin\'s rack)', !s.passed, s.passed ? 'true' : 'false',
+      s.per_loop.map((x) => `${x.loop_id.slice(-4)}: ${x.record ? `${x.record} ${x.state}` : x.state}`).join('; ') + '.', 'VFARM_HARDWARE', vfarmPage, today));
   } catch (e) {
-    errors.push(`Stage 1 gate: ${(e as Error).message}`);
-    list.push({ kind: 'gate', id: 'STAGE1_PASSED', title: 'A real Stage 1 validation record has passed', status: 'unread', open: true, lane: 'VFARM_HARDWARE', owner: null, target_date: null, reason: 'Could not be read, so it counts as not passed.', link: null });
+    errors.push(`STAGE1_PASSED: ${(e as Error).message}`);
+    list.push(gateRow('STAGE1_PASSED', 'A real Stage 1 record has passed for both H9KF and L4WA', true, 'unread', 'Could not be read, so it counts as false.', 'VFARM_HARDWARE', null, today));
   }
   try {
     const cg = await chargeGate.status();
-    list.push({
-      kind: 'gate',
-      id: 'CHARGE_GATE',
-      title: "Real buyers may be charged (Hardik's green acceptance pass and Jason's approved offer)",
-      status: cg.can_charge_live ? 'can charge' : 'cannot charge yet',
-      open: !cg.can_charge_live,
-      lane: 'CST',
-      owner: null,
-      target_date: null,
-      reason: cg.answer,
-      link: null,
-    });
+    const pay = (await query<{ n: string; biggest: string | null }>(
+      `SELECT count(*) AS n, max(amount)::text AS biggest FROM engine_stripe_events WHERE type = 'checkout.session.completed' AND livemode = true AND outcome = 'recorded' AND amount > $1`,
+      [TEAM_TEST_CENTS],
+    )).rows[0];
+    const paid = Number(pay?.n ?? 0) > 0;
+    const parts = [
+      cg.can_charge_live ? "Jason's offer approval and Hardik's acceptance pass are recorded." : `Charge gate: ${cg.missing.join('; ')}.`,
+      paid ? `A live end-to-end payment above $1 is recorded (largest $${(Number(pay?.biggest) / 100).toFixed(2)}).` : 'No live end-to-end payment above the $1 team tests is recorded yet.',
+    ];
+    list.push(gateRow('CHARGE_GATE_OPEN', "Real buyers may be charged: Jason's offer_approved recorded, the charge gate open, and one live end-to-end payment beyond the $1 team test",
+      !(cg.can_charge_live && paid), cg.can_charge_live && paid ? 'true' : 'false', parts.join(' '), 'CST', null, today));
   } catch (e) {
-    errors.push(`charge gate: ${(e as Error).message}`);
-    list.push({ kind: 'gate', id: 'CHARGE_GATE', title: 'Real buyers may be charged', status: 'unread', open: true, lane: 'CST', owner: null, target_date: null, reason: 'Could not be read, so it counts as no.', link: null });
+    errors.push(`CHARGE_GATE_OPEN: ${(e as Error).message}`);
+    list.push(gateRow('CHARGE_GATE_OPEN', 'Real buyers may be charged', true, 'unread', 'Could not be read, so it counts as false.', 'CST', null, today));
   }
   return { list, errors };
 }
 
 export async function items(): Promise<ItemRow[]> {
   return (await query<ItemRow>(
-    `SELECT id::text, kind, record_id, reason, target_date::text, added_by, to_char(added_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS added_at
+    `SELECT id::text, kind, record_id, reason, target_date::text, section, impact, added_by, to_char(added_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS added_at
        FROM engine_income_board_items WHERE board_key = $1 AND removed_at IS NULL ORDER BY added_at, id`,
     [BOARD_KEY],
   )).rows;
 }
 
-async function resolve(rows: ItemRow[]): Promise<Blocker[]> {
+const sectionLabel = (k: string | null) => SECTIONS.find((x) => x.key === k)?.label ?? null;
+
+async function resolve(rows: ItemRow[], now: Date): Promise<Blocker[]> {
+  const today = now.toISOString().slice(0, 10);
+  const weekAgo = new Date(now.getTime() - WEEK_DAYS * 86_400_000).toISOString();
   const loopIds = rows.filter((r) => r.kind === 'loop').map((r) => r.record_id);
   const watchIds = rows.filter((r) => r.kind === 'watch').map((r) => r.record_id);
   const loops = new Map(
     (loopIds.length
-      ? (await query<{ natural_id: string; fields: Record<string, unknown>; builder_id: string | null }>(
-          `SELECT DISTINCT ON (natural_id) natural_id, fields, builder_id FROM engine_loops WHERE natural_id = ANY($1) ORDER BY natural_id, updated_at DESC`,
+      ? (await query<{ natural_id: string; fields: Record<string, unknown>; builder_id: string | null; updated_at: string }>(
+          `SELECT DISTINCT ON (natural_id) natural_id, fields, builder_id, updated_at::text FROM engine_loops WHERE natural_id = ANY($1) ORDER BY natural_id, updated_at DESC`,
           [loopIds],
         )).rows
       : []
@@ -142,36 +209,45 @@ async function resolve(rows: ItemRow[]): Promise<Blocker[]> {
   );
   const watches = new Map(
     (watchIds.length
-      ? (await query<{ watch_id: string; decision: string; status: string; owner_user_id: string; lane: string | null; thread_link: string | null }>(
-          `SELECT watch_id, decision, status, owner_user_id, lane, thread_link FROM engine_decision_watches WHERE watch_id = ANY($1)`,
+      ? (await query<{ watch_id: string; decision: string; status: string; owner_user_id: string; lane: string | null; thread_link: string | null; changed: string | null }>(
+          `SELECT watch_id, decision, status, owner_user_id, lane, thread_link,
+                  to_char(GREATEST(created_at, COALESCE(closed_at, created_at)) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS changed
+             FROM engine_decision_watches WHERE watch_id = ANY($1)`,
           [watchIds],
         )).rows
       : []
     ).map((w) => [w.watch_id, w]),
   );
   return rows.map((r) => {
+    const common = { section: r.section, section_label: sectionLabel(r.section), impact: impactOf(r.impact), reason: r.reason };
     if (r.kind === 'loop') {
       const l = loops.get(r.record_id);
       const f = l?.fields ?? {};
       const status = l ? String(f.Status ?? '') : null;
+      const open = stillOpen('loop', status);
       const due = typeof f['Due Date'] === 'string' && f['Due Date'] ? String(f['Due Date']).slice(0, 10) : null;
+      const target = r.target_date ?? due;
+      const changed = l?.updated_at ? new Date(l.updated_at).toISOString() : null;
       return {
         kind: 'loop', id: r.record_id,
         title: l ? String(f.What ?? '').split('\n')[0].slice(0, 220) : 'Not held: no loop with this id',
-        status: status ?? 'not held', open: stillOpen('loop', status),
+        status: status ?? 'not held', open,
         lane: l ? (f.lane_tag ? String(f.lane_tag) : null) : null,
         owner: l ? nameOf(String(f['Assignee Slack User ID'] ?? '') || l.builder_id) : null,
-        target_date: r.target_date ?? due, reason: r.reason, link: `${LOOP_PAGE}${r.record_id}`,
-      };
+        target_date: target, ...dateState(target, open, today), last_change: changed, moved_this_week: !!changed && changed >= weekAgo,
+        ...common, link: `${LOOP_PAGE}${r.record_id}`,
+      } as Blocker;
     }
     const w = watches.get(r.record_id);
+    const open = stillOpen('watch', w ? w.status : null);
     return {
       kind: 'watch', id: r.record_id,
       title: w ? w.decision.split('\n')[0].slice(0, 220) : 'Not held: no watch with this id',
-      status: w ? w.status : 'not held', open: stillOpen('watch', w ? w.status : null),
+      status: w ? w.status : 'not held', open,
       lane: w?.lane ?? null, owner: w ? nameOf(w.owner_user_id) : null,
-      target_date: r.target_date, reason: r.reason, link: w?.thread_link ?? null,
-    };
+      target_date: r.target_date, ...dateState(r.target_date, open, today), last_change: w?.changed ?? null, moved_this_week: !!w?.changed && w.changed >= weekAgo,
+      ...common, link: w?.thread_link ?? null,
+    } as Blocker;
   });
 }
 
@@ -194,9 +270,44 @@ async function cstSummary() {
   };
 }
 
-export async function read() {
-  const [g, rows] = await Promise.all([gates(), items()]);
-  const resolved = await resolve(rows);
+export interface SectionView { key: string; label: string; covers: string; done: string[]; remaining: string[]; blocks_pilot_open: number; empty_note: string | null }
+
+/** The seven sections, each with the ids done and remaining (the rows are in items). Pure. */
+export function bySection(items: Blocker[]): SectionView[] {
+  const views: SectionView[] = SECTIONS.map((sec) => {
+    const mine = items.filter((i) => i.section === sec.key);
+    return {
+      key: sec.key, label: sec.label, covers: sec.covers,
+      done: mine.filter((i) => !i.open).map((i) => i.id),
+      remaining: mine.filter((i) => i.open).map((i) => i.id),
+      blocks_pilot_open: mine.filter((i) => i.open && i.impact === 'BLOCKS_PILOT_1').length,
+      empty_note: mine.length ? null : 'Nothing on the board in this section yet: no loop or watch has been put here.',
+    };
+  });
+  return views.concat(items.some((i) => !i.section || !SECTION_KEYS.includes(i.section))
+    ? [{ key: 'unsectioned', label: 'Not in a section yet', covers: 'items put on the board without a section', done: items.filter((i) => (!i.section || !SECTION_KEYS.includes(i.section)) && !i.open).map((i) => i.id), remaining: items.filter((i) => (!i.section || !SECTION_KEYS.includes(i.section)) && i.open).map((i) => i.id), blocks_pilot_open: 0, empty_note: null }]
+    : []);
+}
+
+/** What each lane owner owes next that blocks Pilot 1, soonest date first, undated last. Pure. */
+export function ownerViews(items: Blocker[]) {
+  const order = (a: Blocker, b: Blocker) => (a.target_date ?? '9999').localeCompare(b.target_date ?? '9999');
+  return OWNER_VIEWS.map((v) => {
+    const mine = items.filter((i) => i.open && i.owner && (v.owners as readonly string[]).includes(i.owner));
+    return {
+      key: v.key, label: v.label,
+      blocks_pilot_1: mine.filter((i) => i.impact === 'BLOCKS_PILOT_1').sort(order).map((i) => i.id),
+      quality_of_life: mine.filter((i) => i.impact === 'QUALITY_OF_LIFE').sort(order).map((i) => i.id),
+      slipped: mine.filter((i) => i.date_state === 'slipped').length,
+      date_to_set: mine.filter((i) => i.date_state === 'date_to_set').length,
+    };
+  });
+}
+
+export async function read(now = new Date()) {
+  const today = now.toISOString().slice(0, 10);
+  const [g, rows] = await Promise.all([gates(today), items()]);
+  const resolved = await resolve(rows, now);
   const verdict = decide(g.list, resolved);
   let cst: Awaited<ReturnType<typeof cstSummary>> | null = null;
   let cstError: string | null = null;
@@ -205,60 +316,107 @@ export async function read() {
   } catch (e) {
     cstError = (e as Error).message;
   }
-  const blocking = [...g.list, ...resolved].filter((b) => b.open);
+  const blocking = [...g.list, ...resolved.filter((i) => i.impact === 'BLOCKS_PILOT_1')].filter((b) => b.open);
+  const gate = (id: string) => !(g.list.find((x) => x.id === id)?.open ?? true);
   return {
     board_key: BOARD_KEY,
     question: QUESTION,
     ready: verdict.ready ? 'Yes' : 'No',
     why: verdict.why,
+    fields: { Ready_for_first_paid_pilot: verdict.ready ? 'Yes' : 'No', STAGE1_PASSED: gate('STAGE1_PASSED'), CHARGE_GATE_OPEN: gate('CHARGE_GATE_OPEN') },
     blocking,
     gates: g.list,
     items: resolved,
     items_closed: resolved.filter((i) => !i.open).length,
+    sections: bySection(resolved),
+    owner_views: ownerViews(resolved),
+    this_week: {
+      since: new Date(now.getTime() - WEEK_DAYS * 86_400_000).toISOString().slice(0, 10),
+      moved: resolved.filter((i) => i.moved_this_week).map((i) => ({ id: i.id, title: i.title, owner: i.owner, status: i.status, last_change: i.last_change, link: i.link })),
+      slipped: resolved.filter((i) => i.date_state === 'slipped').map((i) => ({ id: i.id, title: i.title, owner: i.owner, target_date: i.target_date, days_slipped: i.days_slipped, link: i.link })),
+      date_to_set: resolved.filter((i) => i.date_state === 'date_to_set').length,
+      stalled_cst_loops: cst ? cst.stalled : null,
+      rule: `Moved: the loop was written, or the watch opened or closed, in the last ${WEEK_DAYS} days. Slipped: open past its target date. A loop's date is its board date, else its own Due Date.`,
+    },
     cst,
     read_errors: [...g.errors, ...(cstError ? [`CST summary: ${cstError}`] : [])],
-    rule: 'Ready is Yes only when a real Stage 1 record has passed, real buyers may be charged, and every loop and watch on the board is closed. Items are put on the board by Destiny or Jason. An item that cannot be read counts as open.',
+    rule: 'Ready is Yes only when STAGE1_PASSED (a real passed Stage 1 record for both H9KF and L4WA) and CHARGE_GATE_OPEN (Jason\'s offer_approved and Hardik\'s pass recorded, and one live end-to-end payment above the $1 team tests) are both true, read from the records and never set by hand, and every item marked BLOCKS_PILOT_1 is closed. QUALITY_OF_LIFE items never hold it at No. An item with no label counts as blocking; an item that cannot be read counts as open.',
     page: PAGE,
-    read_at: new Date().toISOString(),
+    read_at: now.toISOString(),
   };
 }
 
 /* ------------------------------------------------------------------ writes */
 
 export interface SetInput {
-  action: 'add' | 'remove';
+  action: 'add' | 'remove' | 'update';
   record_id: string;
   reason?: string | null;
   target_date?: string | null;
+  section?: string | null;
+  impact?: string | null;
   requester: string | null;
 }
 
 const LOOP_RE = /^LOOP-\d{10,}-[A-Z0-9]{4}$/;
 const WATCH_RE = /^DW-\d{10,}-[A-Z0-9]{4}$/;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-/** Adds or removes one item. Only Destiny or Jason. Nothing is deleted: a removal is dated and signed. */
+/** Checks section, impact and target_date as sent; undefined leaves a field alone. Pure. */
+export function checkFields(i: Pick<SetInput, 'section' | 'impact' | 'target_date'>): { ok: true; set: Record<string, string | null> } | { ok: false; reason: string; message: string } {
+  const set: Record<string, string | null> = {};
+  if (i.section !== undefined) {
+    const v = (i.section ?? '').trim() || null;
+    if (v && !SECTION_KEYS.includes(v)) return { ok: false, reason: 'bad_section', message: `section is one of ${SECTION_KEYS.join(', ')}.` };
+    set.section = v;
+  }
+  if (i.impact !== undefined) {
+    const v = (i.impact ?? '').trim() || null;
+    if (v && !(IMPACTS as readonly string[]).includes(v)) return { ok: false, reason: 'bad_impact', message: 'impact is BLOCKS_PILOT_1 or QUALITY_OF_LIFE.' };
+    set.impact = v;
+  }
+  if (i.target_date !== undefined) {
+    const v = (i.target_date ?? '').trim() || null;
+    if (v && !DATE_RE.test(v)) return { ok: false, reason: 'bad_target_date', message: 'target_date is YYYY-MM-DD, or empty for date_to_set.' };
+    set.target_date = v;
+  }
+  return { ok: true, set };
+}
+
+/** Adds, updates or removes one item. Only Destiny or Jason. Nothing is deleted: a removal is dated and signed. */
 export async function setItem(i: SetInput, dryRun = false): Promise<Record<string, unknown>> {
   if (!i.requester || !ADMIN_IDS.includes(i.requester)) return { ok: false, reason: 'not_permitted', message: 'Only Destiny (U0AEW3TBYH1) or Jason (U0A9V97949F) changes what is on the Production-Income Board.' };
   const id = (i.record_id ?? '').trim();
   const kind = LOOP_RE.test(id) ? 'loop' : WATCH_RE.test(id) ? 'watch' : null;
   if (!kind) return { ok: false, reason: 'bad_record_id', message: 'record_id is a full loop id (LOOP-...) or Decision Watch id (DW-...).' };
   const reason = (i.reason ?? '').trim();
-  if (reason.length < 3) return { ok: false, reason: 'reason_required', message: 'Say why, in a few words: what it blocks, or why it comes off.' };
+  if (reason.length < 3) return { ok: false, reason: 'reason_required', message: 'Say why, in a few words: what it blocks, what changed, or why it comes off.' };
+  const f = checkFields(i);
+  if (!f.ok) return f;
+  const held = (await query(`SELECT 1 FROM engine_income_board_items WHERE board_key = $1 AND record_id = $2 AND removed_at IS NULL`, [BOARD_KEY, id])).rowCount;
   if (i.action === 'add') {
-    const td = (i.target_date ?? '').trim() || null;
-    if (td && !/^\d{4}-\d{2}-\d{2}$/.test(td)) return { ok: false, reason: 'bad_target_date', message: 'target_date is YYYY-MM-DD.' };
     const exists = kind === 'loop'
       ? (await query(`SELECT 1 FROM engine_loops WHERE natural_id = $1 LIMIT 1`, [id])).rowCount
       : (await query(`SELECT 1 FROM engine_decision_watches WHERE watch_id = $1 LIMIT 1`, [id])).rowCount;
     if (!exists) return { ok: false, reason: 'not_held', message: `${id} is not held on the dashboard.` };
-    const held = (await query(`SELECT 1 FROM engine_income_board_items WHERE board_key = $1 AND record_id = $2 AND removed_at IS NULL`, [BOARD_KEY, id])).rowCount;
-    if (held) return { ok: false, reason: 'already_on_board', message: `${id} is already on the board.` };
-    if (dryRun) return { ok: true, dry_run: true, would: `add ${kind} ${id}` };
-    await query(`INSERT INTO engine_income_board_items (board_key, kind, record_id, reason, target_date, added_by) VALUES ($1, $2, $3, $4, $5, $6)`, [BOARD_KEY, kind, id, reason.slice(0, 600), td, i.requester]);
-    return { ok: true, added: id, kind, page: PAGE };
+    if (held) return { ok: false, reason: 'already_on_board', message: `${id} is already on the board; use update to change its section, impact or date.` };
+    if (dryRun) return { ok: true, dry_run: true, would: `add ${kind} ${id}`, ...f.set };
+    await query(
+      `INSERT INTO engine_income_board_items (board_key, kind, record_id, reason, target_date, section, impact, added_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [BOARD_KEY, kind, id, reason.slice(0, 600), f.set.target_date ?? null, f.set.section ?? null, f.set.impact ?? null, i.requester],
+    );
+    return { ok: true, added: id, kind, ...f.set, page: PAGE };
   }
-  const held = (await query(`SELECT 1 FROM engine_income_board_items WHERE board_key = $1 AND record_id = $2 AND removed_at IS NULL`, [BOARD_KEY, id])).rowCount;
   if (!held) return { ok: false, reason: 'not_on_board', message: `${id} is not on the board.` };
+  if (i.action === 'update') {
+    const keys = Object.keys(f.set);
+    if (!keys.length) return { ok: false, reason: 'nothing_to_change', message: 'Send section, impact or target_date to change.' };
+    if (dryRun) return { ok: true, dry_run: true, would: `update ${id}`, ...f.set };
+    const before = (await query<Record<string, string | null>>(`SELECT section, impact, target_date::text FROM engine_income_board_items WHERE board_key = $1 AND record_id = $2 AND removed_at IS NULL`, [BOARD_KEY, id])).rows[0];
+    const cols = keys.map((k, n) => `${k} = $${n + 3}${k === 'target_date' ? '::date' : ''}`).join(', ');
+    await query(`UPDATE engine_income_board_items SET ${cols} WHERE board_key = $1 AND record_id = $2 AND removed_at IS NULL`, [BOARD_KEY, id, ...keys.map((k) => f.set[k])]);
+    return { ok: true, updated: id, before, after: f.set, reason, page: PAGE };
+  }
   if (dryRun) return { ok: true, dry_run: true, would: `remove ${id}` };
   await query(`UPDATE engine_income_board_items SET removed_at = now(), removed_by = $3, removed_reason = $4 WHERE board_key = $1 AND record_id = $2 AND removed_at IS NULL`, [BOARD_KEY, id, i.requester, reason.slice(0, 600)]);
   return { ok: true, removed: id, page: PAGE };
