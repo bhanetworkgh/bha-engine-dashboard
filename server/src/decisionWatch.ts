@@ -721,9 +721,22 @@ async function postAsBays(channel: string, text: string, threadTs: string | null
   return r.ok && typeof r.ts === 'string' ? { ok: true, ts: r.ts, channel: typeof r.channel === 'string' ? r.channel : channel, as: 'Bays' } : { ok: false, error: `chat.postMessage: ${String(r.error ?? 'unknown error')}` };
 }
 
-async function post(channel: string, text: string, threadTs: string | null): Promise<Posted> {
-  const g = await genieSlack.postAsGenie(channel, text, [], undefined, { ...(threadTs ? { thread_ts: threadTs } : {}), guarded: true });
-  if (g.ok) return { ok: true, ts: g.ts, channel: g.channel ?? channel, as: 'Genie' };
+/**
+ * A watch opened in someone's DM with Bays (a D… channel) cannot be posted in by Genie: Slack answers
+ * channel_not_found, because that conversation is between the person and Bays (23 Nov 2026,
+ * DW-1793467464831-9SQH). So Genie sends it to the owner's own DM with Genie, with a link to the thread,
+ * and Bays posts in the thread only if that fails too.
+ */
+export function dmThreadNote(channel: string, threadTs: string): string {
+  return `\n\n_This watch lives in <${permalink(channel, threadTs)}|your DM with Bays>. Reply there, so the watch sees it._`;
+}
+
+async function post(channel: string, text: string, threadTs: string | null, owner?: string): Promise<Posted> {
+  const viaOwner = Boolean(owner && threadTs && /^D/.test(channel));
+  const g = viaOwner
+    ? await genieSlack.postAsGenie(owner as string, text + dmThreadNote(channel, threadTs as string), [], undefined, { guarded: true })
+    : await genieSlack.postAsGenie(channel, text, [], undefined, { ...(threadTs ? { thread_ts: threadTs } : {}), guarded: true });
+  if (g.ok) return { ok: true, ts: g.ts, channel: g.channel ?? (viaOwner ? (owner as string) : channel), as: 'Genie' };
   const b = await postAsBays(channel, text, threadTs);
   if (!b.ok) return { ok: false, error: `as Genie: ${g.error}; as Bays: ${b.error}` };
   console.error(`[decision-watch] Genie could not post in ${channel}, Bays posted it instead: ${g.error}`);
@@ -1160,7 +1173,7 @@ export async function sweep(now = new Date(), opts: { dry?: boolean; only?: stri
         // The claim comes first: whoever moves the row out of 'watching' is the one that posts.
         const claim = await query(`UPDATE engine_decision_watches SET status = 'escalating' WHERE watch_id = $1 AND status = 'watching' AND reminders_sent = $2`, [w.watch_id, w.reminders_sent]);
         if (!claim.rowCount) continue;
-        const p = await post(target.channel, escalationText(live), target.thread);
+        const p = await post(target.channel, escalationText(live), target.thread, w.owner_user_id);
         await query(`UPDATE engine_decision_watches SET status = 'watching' WHERE watch_id = $1 AND status = 'escalating'`, [w.watch_id]);
         if (!p.ok) { out.failed.push(w.watch_id); await note(w, { last_error: `escalation not posted: ${p.error}` }); continue; }
         await query(`UPDATE engine_decision_watches SET history = history || $2::jsonb WHERE watch_id = $1`, [w.watch_id, JSON.stringify([{ at: now.toISOString(), what: `escalation posted as ${p.as}${p.genie_error ? ` (Genie could not: ${clip(p.genie_error, 200)})` : ''}`, post: 'true' }])]);
@@ -1180,7 +1193,7 @@ export async function sweep(now = new Date(), opts: { dry?: boolean; only?: stri
         [w.watch_id, n, now.toISOString(), w.reminders_sent],
       );
       if (!claim.rowCount) continue;
-      const p = w.thread_ts ? await post(w.channel_id as string, reminderText(live, n, now), w.thread_ts) : await post(w.owner_user_id, reminderText(live, n, now), null);
+      const p = w.thread_ts ? await post(w.channel_id as string, reminderText(live, n, now), w.thread_ts, w.owner_user_id) : await post(w.owner_user_id, reminderText(live, n, now), null);
       if (!p.ok) {
         // Nothing went out, so the claim is given back and the next pass tries again.
         await query(
