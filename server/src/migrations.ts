@@ -5132,6 +5132,30 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
               ON CONFLICT (item_id) DO NOTHING`;
     }),
   },
+  {
+    id: 152,
+    name: "Knowledge capture: Destiny picks up Hardik's, Ahad's and Jegan's rows; his own rows need no pickup (23 Nov 2026, Destiny)",
+    statements: [
+      `INSERT INTO engine_events (event_type, subject_id, actor, detail, dedupe_key)
+         SELECT 'knowledge_capture_changed', item_id, 'U0AEW3TBYH1',
+                jsonb_build_object('action', 'updated', 'via', 'migration 152', 'field', 'picked_up_by', 'before', picked_up_by, 'after', 'U0AEW3TBYH1'),
+                'kc152:pick:' || item_id
+           FROM engine_knowledge_capture
+          WHERE item_id = ANY(ARRAY['KC-CAD-SEED01','KC-GOLDEN-SEED02','KC-SUBSCR-SEED03','KC-CST-SEED04','KC-VFARMI-SEED05','KC-DATABA-SEED06','KC-RACKHA-SEED07','KC-VFARMB-SEED08','KC-BHARAG-SEED09','KC-AWS-SEED10']) AND picked_up_by IS NULL AND removed_at IS NULL
+         ON CONFLICT (dedupe_key) DO NOTHING`,
+      `UPDATE engine_knowledge_capture SET picked_up_by = 'U0AEW3TBYH1', updated_by = 'U0AEW3TBYH1', updated_at = now()
+        WHERE item_id = ANY(ARRAY['KC-CAD-SEED01','KC-GOLDEN-SEED02','KC-SUBSCR-SEED03','KC-CST-SEED04','KC-VFARMI-SEED05','KC-DATABA-SEED06','KC-RACKHA-SEED07','KC-VFARMB-SEED08','KC-BHARAG-SEED09','KC-AWS-SEED10']) AND picked_up_by IS NULL AND removed_at IS NULL`,
+      `INSERT INTO engine_events (event_type, subject_id, actor, detail, dedupe_key)
+         SELECT 'knowledge_capture_changed', item_id, 'U0AEW3TBYH1',
+                jsonb_build_object('action', 'updated', 'via', 'migration 152', 'field', 'notes', 'before', notes, 'after', 'No pickup person: Destiny holds these and is staying (Destiny, 23 Nov 2026).'),
+                'kc152:note:' || item_id
+           FROM engine_knowledge_capture
+          WHERE item_id = ANY(ARRAY['KC-DASHBO-SEED11','KC-N8NENG-SEED12','KC-GENIE-SEED13','KC-REPAIR-SEED14','KC-BHARSS-SEED15','KC-SITE-SEED16','KC-KEYS-SEED17']) AND removed_at IS NULL
+         ON CONFLICT (dedupe_key) DO NOTHING`,
+      `UPDATE engine_knowledge_capture SET notes = 'No pickup person: Destiny holds these and is staying (Destiny, 23 Nov 2026).', updated_by = 'U0AEW3TBYH1', updated_at = now()
+        WHERE item_id = ANY(ARRAY['KC-DASHBO-SEED11','KC-N8NENG-SEED12','KC-GENIE-SEED13','KC-REPAIR-SEED14','KC-BHARSS-SEED15','KC-SITE-SEED16','KC-KEYS-SEED17']) AND removed_at IS NULL AND notes IS DISTINCT FROM 'No pickup person: Destiny holds these and is staying (Destiny, 23 Nov 2026).'`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

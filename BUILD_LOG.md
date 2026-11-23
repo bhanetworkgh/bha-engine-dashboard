@@ -16151,3 +16151,10 @@ Decision:   Drafted from the open loops and repos only. Every row is "to confirm
 Intent:     Check the seed on production.
 Problem:    The 15:15 entry says 11 rows are BLOCKS_PILOT_1; the rows hold 12 (Hardik 3, Ahad 2, Jegan 3, Destiny 4).
 Fix:        None needed in code; this line corrects the count. Migration 151 live, 17 rows; read_income_board 68 KB (was about 229 KB), knowledge_capture total 17, to_confirm 17, captured 0.
+
+## 2026-11-23 15:55 — Knowledge capture: who picks each piece up
+Intent:     Destiny: "put me for hardik ahad and jegan, no need for any body on mine because i'm not going anywhere".
+Files:      server/src/migrations.ts (migration 152), BUILD_LOG.md
+Problem:    set_knowledge_capture is still not in this session's tool list after a refresh, and the tab's edit needs the admin login.
+Fix:        Migration 152: picked_up_by = Destiny (U0AEW3TBYH1) on the 10 rows Hardik, Ahad and Jegan hold (SEED01 to SEED10); a note on Destiny's 7 rows (SEED11 to SEED17) that they need no pickup, his decision. Each change writes its knowledge_capture_changed event first, keyed kc152:*, so the history matches what setItem would have written.
+Decision:   Only rows still with no pickup are touched, so a pickup set by hand before the deploy is kept. Handover dates stay empty: none was named.
