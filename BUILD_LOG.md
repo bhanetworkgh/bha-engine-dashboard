@@ -16190,3 +16190,10 @@ Files:      server/src/mcp/decisionWatchTools.ts, server/src/mcp/agentDescriptio
 Problem:    Genie already held list_decision_watches (it came with Bays' scope on 20 Nov), but the tool returns at most 40 of 109 open watches with no way to ask by topic, so Genie never reached DW-1794181771227-53O8 and told Jason it could not surface it.
 Fix:        list_decision_watches takes `search`: each word (over two letters, stopwords out) is looked for in the decision, next step, SOP and North Star refs and the watch id; no match is left out, best match first. Agent description says so.
 Decision:   No scope change: Genie keeps update_decision_watch and snooze from Bays' scope, so it can keep the watch current once it finds it. Local node_modules is broken and the session has no network, so the typecheck and test run in CI.
+
+## 2026-11-23 19:30 — A refused loop-updates post is raised
+Intent:     Slack refused every loop-updates pass from 13:11 with invalid_blocks and nothing said so; the log pre-check flagged it as a silent failure.
+Files:      server/src/changeAnnounce.ts, CLAUDE.md
+Problem:    a refused post only wrote console.error and retried; nobody was told.
+Fix:        raiseRefused(): one change_announce_refused event per hour (dedupe key per UTC hour) and one line in the engine alerts channel as Bays; a failed alert is logged.
+Decision:   once an hour, so a stuck pass every 5 minutes does not flood the channel.

@@ -31,6 +31,7 @@ import { record } from './engineEvents';
 import * as slack from './slack';
 import { postAsGenie } from './genieSlack';
 import * as timers from './timers';
+import * as quota from './quota';
 
 export const RULE = {
   channel: process.env.CHANGE_ANNOUNCE_CHANNEL?.trim() || 'C0CJUTHBBH8', // #bha-loop-updates (18 Nov 2026; was #bha-coordination)
@@ -590,6 +591,28 @@ export async function moveOldPosts(now = new Date()): Promise<string> {
 
 let timer: NodeJS.Timeout | null = null;
 let busy = false;
+/**
+ * A refused post is never silent (23 Nov 2026, Destiny: Slack refused every pass from 13:11 with
+ * invalid_blocks and nothing said so). One `change_announce_refused` event an hour, and with it one
+ * line in the engine alerts channel as Bays. The changes stay claimed-back and the next pass retries.
+ */
+export async function raiseRefused(error: string, pending: number, now = new Date(), postAlert = postRefusedAlert): Promise<{ recorded: boolean; alerted: boolean; detail: string }> {
+  const hour = now.toISOString().slice(0, 13);
+  const ev = await record({ event_type: 'change_announce_refused', subject_id: 'change_announce', lane: 'ENGINE', actor: 'change-announce', detail: { error, pending }, dedupe_key: `change_announce_refused:${hour}` });
+  if (!ev.recorded) return { recorded: false, alerted: false, detail: 'already raised this hour' };
+  const text = `:warning: The loop-updates post was refused by Slack (${error}). ${pending} change(s) are waiting and will be retried on the next pass. Check the dashboard log for [change-announce].`;
+  const p = await postAlert(text);
+  if (!p.ok) console.error(`[change-announce] could not raise the refused post: ${p.error}`);
+  return { recorded: true, alerted: p.ok, detail: p.ok ? 'alerted' : p.error };
+}
+
+async function postRefusedAlert(text: string): Promise<{ ok: boolean; error: string }> {
+  const channel = quota.channelId();
+  if (!channel) return { ok: false, error: `${quota.CHANNEL_VAR} is not set` };
+  const r = await slack.botCall('chat.postMessage', { channel, text, unfurl_links: false });
+  return r.ok ? { ok: true, error: '' } : { ok: false, error: String(r.error ?? 'refused') };
+}
+
 export function startSweeping(): void {
   if (timer) return;
   const tick = () => {
@@ -602,6 +625,7 @@ export function startSweeping(): void {
       .then(() => pass())
       .then((r) => {
         if (r.posted || r.failed) console.log(`[change-announce] ${r.pending} changes, ${r.posted} posted${r.batched ? ` in combined posts of up to ${RULE.batch_size}` : ''}${r.failed ? `, refused: ${r.failed}` : ''}`);
+        if (r.failed) return raiseRefused(r.failed, r.pending);
       })
       .catch((e) => console.error(`[change-announce] pass failed: ${e instanceof Error ? e.message : String(e)}`))
       .finally(() => (busy = false));
