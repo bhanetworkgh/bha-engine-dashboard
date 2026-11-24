@@ -32,6 +32,8 @@ import type { MediaPost, Platform } from './mediaPosts';
 export const REVIEWER = posts.REVIEWER_ID;
 export const PAUSE_KEY = 'media_twin.autopost_paused';
 export const CHANNEL = process.env.MEDIA_TWIN_CHANNEL?.trim() || 'C0AFR4BH9UH';
+/** A TEST draft's log goes to #bha-builder-sandbox, never the team channel (Destiny's standing rule). */
+export const TEST_CHANNEL = process.env.MEDIA_TWIN_TEST_CHANNEL?.trim() || 'C0ATTFED35E';
 const MODEL_TIMEOUT_MS = 60_000;
 
 /** The reviewer's rules, word for word what the model is shown. Jason's rails (24 Nov 2026) and the v2 plan's four rules. */
@@ -273,7 +275,7 @@ async function ensureLogThread(post: MediaPost, chain: MediaPost[]): Promise<{ c
   if (!at) {
     const headline = String(post.card?.headline ?? '').replace(/\*/g, '');
     const r = await slack.botCall('chat.postMessage', {
-      channel: CHANNEL,
+      channel: post.test ? TEST_CHANNEL : CHANNEL,
       text: `${post.test ? 'TEST · ' : ''}Media Twin, ${post.run_date}: today's post passed the second review and is going out on its own. "${clip(headline, 140)}" (${post.post_id}). Each live link and its time in UTC follows in this thread.`,
       unfurl_links: false,
     });
@@ -281,7 +283,7 @@ async function ensureLogThread(post: MediaPost, chain: MediaPost[]): Promise<{ c
       await record({ event_type: 'media_post_log_not_posted', subject_id: post.post_id, lane: 'MEDIA', actor: REVIEWER, detail: { error: String(r.error ?? 'no ts') } }).catch(() => undefined);
       return null;
     }
-    at = { channel: String(r.channel ?? CHANNEL), ts: String(r.ts) };
+    at = { channel: String(r.channel ?? (post.test ? TEST_CHANNEL : CHANNEL)), ts: String(r.ts) };
   }
   await posts.attach(post.post_id, { slack_channel: at.channel, slack_ts: at.ts });
   return at;
