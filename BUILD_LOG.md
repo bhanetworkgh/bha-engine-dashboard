@@ -16264,3 +16264,10 @@ Files:      server/src/eodReport.ts
 Problem:    POST /api/engine/eod-report {"dry_run": true} answered {"ok":true,"due":false,"posted":false} (n8n execution 112915): the 17:00 check ran before the dry run.
 Fix:        A dry run builds the report whatever the time; only a real post waits for 17:00 New York or force.
 Decision:   A preview that only works after 17:00 is no preview.
+
+## 2026-11-24 14:50 — The end of day report names who is waited on instead of tagging them
+Intent:     Read the first preview (n8n execution 112932) before the first real post.
+Files:      server/src/eodReport.ts, server/test/eod-report.test.cjs, CLAUDE.md
+Problem:    The blocked section tagged everyone being waited on, Jason for 22 loops, every day. The Monday and Friday blocker alerts already tag each person once with their loops.
+Fix:        The daily report names them without a tag.
+Decision:   One place tags people about blockers, twice a week; the daily report is for reading.

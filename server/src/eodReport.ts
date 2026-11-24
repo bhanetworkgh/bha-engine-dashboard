@@ -110,7 +110,7 @@ export function reportText(r: {
   for (const { person, loops } of r.blocked) {
     const late = loops.filter((l) => l.late).length;
     const shown = loops.slice(0, RULE.max_blocked_per_person).map((l) => `${ref(l.loop_id, l.link)} ${cut(l.title, 60)}${l.late ? ` (${l.days_late}d late)` : ''}`).join('; ');
-    out.push(`• Waiting on <@${person.id}>: ${loops.length} loop${loops.length === 1 ? '' : 's'}${late ? `, ${late} late` : ''}: ${shown}${loops.length > RULE.max_blocked_per_person ? `, and ${loops.length - RULE.max_blocked_per_person} more` : ''}`);
+    out.push(`• Waiting on ${person.name}: ${loops.length} loop${loops.length === 1 ? '' : 's'}${late ? `, ${late} late` : ''}: ${shown}${loops.length > RULE.max_blocked_per_person ? `, and ${loops.length - RULE.max_blocked_per_person} more` : ''}`);
   }
 
   out.push('', "*Tomorrow's priorities*");
