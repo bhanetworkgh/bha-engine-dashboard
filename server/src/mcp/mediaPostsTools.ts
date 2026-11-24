@@ -9,6 +9,7 @@
  * `edit_media_post` — a person's exact words on a draft still waiting for its decision. Write connection, no agent's scope.
  */
 import * as posts from '../mediaPosts';
+import * as review from '../mediaReview';
 import { auditClose, auditOpen } from './writeTools';
 import type { ToolDefinition } from './tools';
 
@@ -188,5 +189,42 @@ export const setMediaPostPattern = gateTool(
   (a) => str(a, 'post_id'),
 );
 
+
+export const setMediaAutopost: ToolDefinition = {
+  name: 'set_media_autopost',
+  description:
+    "Pause or resume the Media Twin's automatic posting (24 Nov 2026). While paused, a draft that would have passed the second review and posted on its own goes to Jason and Destiny as Approve / Reject cards instead; resuming lets the next review post again. Nothing already posted changes. HELD HERE: requester_user_id is Jason or Destiny (not_permitted); refused on any agent token; a reason is required. With no paused argument it reads the current state and changes nothing. dry_run shows the change and writes nothing. One media_autopost_paused or media_autopost_resumed event. Audited on engine_mcp_writes.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      paused: { type: 'boolean', description: 'true pauses, false resumes. Leave out to read the state.' },
+      reason: { type: 'string' },
+      requester_user_id: { type: 'string' },
+      dry_run: { type: 'boolean' },
+    },
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false, title: 'Pause or resume Media Twin posting' },
+  handler: async (args, deps) => {
+    if (typeof args.paused !== 'boolean') return { ok: true, ...(await review.pauseState()) };
+    if (deps.agent) return { ok: false, reason: 'agent_not_permitted', message: `An agent (${deps.agent}) may not pause or resume Media Twin posting.` };
+    const dry = args.dry_run === true;
+    const requester = str(args, 'requester_user_id');
+    const audit = await auditOpen({ tool: 'set_media_autopost', args, access: deps.access, kind: 'media_posts', requester, dry_run: dry });
+    try {
+      const out = await review.setPaused({ paused: args.paused, by: requester, reason: str(args, 'reason'), dry_run: dry });
+      await auditClose(audit, { outcome: dry ? 'dry_run' : 'written', natural_id: 'media_twin' });
+      return { ...out, audit_id: audit };
+    } catch (e) {
+      if (e instanceof posts.MediaPostError) {
+        await auditClose(audit, { outcome: 'refused', detail: e.reason, natural_id: 'media_twin' });
+        return { ok: false, reason: e.reason, message: e.message, audit_id: audit };
+      }
+      await auditClose(audit, { outcome: 'failed', detail: String(e), natural_id: 'media_twin' });
+      throw e;
+    }
+  },
+};
+
 export const MEDIA_POSTS_READ_TOOLS: ToolDefinition[] = [readMediaPosts];
-export const MEDIA_POSTS_WRITE_TOOLS: ToolDefinition[] = [editMediaPost, recordMediaPostLink, markMediaPattern, setMediaPostPattern];
+export const MEDIA_POSTS_WRITE_TOOLS: ToolDefinition[] = [editMediaPost, recordMediaPostLink, markMediaPattern, setMediaPostPattern, setMediaAutopost];

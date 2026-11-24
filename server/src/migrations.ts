@@ -5262,6 +5262,17 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
          ON CONFLICT (dedupe_key) DO NOTHING`,
     ],
   },
+  {
+    // 24 Nov 2026, Destiny (Jason, #bha-media-twin 1795544611.144079): the Media Twin's second reviewer decides too.
+    // Its decisions are written as media-twin-reviewer (mediaReview.ts); Slack and HTTP still decide only as Jason or
+    // Destiny, held in mediaPosts.decide.
+    id: 157,
+    name: 'media post second reviewer decides',
+    statements: [
+      `ALTER TABLE engine_media_post_decisions DROP CONSTRAINT IF EXISTS engine_media_post_decisions_decided_by_check`,
+      `ALTER TABLE engine_media_post_decisions ADD CONSTRAINT engine_media_post_decisions_decided_by_check CHECK (decided_by IN ('U0A9V97949F','U0AEW3TBYH1','media-twin-reviewer'))`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

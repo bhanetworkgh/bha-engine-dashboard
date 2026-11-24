@@ -146,6 +146,7 @@ import * as vfarmGates from './vfarmGates';
 import * as vfarmGateAuto from './vfarmGateAuto';
 import * as mediaPostLog from './mediaPostLog';
 import * as mediaPosts from './mediaPosts';
+import * as mediaReview from './mediaReview';
 import * as helpPages from './helpPages';
 import * as cstHelp from './cstHelp';
 import * as evidence from './evidence';
@@ -1435,8 +1436,24 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      * POST …/:id/decision records an Approve or Reject; POST …/:id/metrics adds analytics.
      * GET reads (?post_id, ?status, ?slack_ts, ?include_test=1). A refusal writes nothing.
      */
+    // 24 Nov 2026: pausing the Media Twin's automatic posting (mediaReview.ts). GET reads; POST {paused, by, reason}.
+    if (p === '/api/engine/media-autopost') {
+      try {
+        if (method === 'GET') return send(res, 200, { ok: true, ...(await mediaReview.pauseState()) });
+        if (method === 'POST') {
+          const body = await readJson(req, 16 * 1024);
+          const r = await mediaReview.setPaused(body ?? {});
+          await mirror.logWrite({ endpoint, kind: 'media_posts', method, key_label: 'DASHBOARD_INBOUND_KEY', natural_id: 'media_twin', outcome: 'updated' as never, detail: `autopost paused=${String(body?.paused)}`, ms: Date.now() - t0 });
+          return send(res, 200, r);
+        }
+        throw new HttpError(405, 'GET or POST /api/engine/media-autopost.');
+      } catch (e) {
+        if (e instanceof mediaPosts.MediaPostError) return send(res, e.status, { ok: false, reason: e.reason, message: `${e.message} Nothing was written.` });
+        throw e;
+      }
+    }
     {
-      const mp = p.match(/^\/api\/engine\/media-posts(?:\/([A-Za-z0-9-]+))?(?:\/(decision|metrics|edit|posted))?$/);
+      const mp = p.match(/^\/api\/engine\/media-posts(?:\/([A-Za-z0-9-]+))?(?:\/(decision|metrics|edit|posted|review))?$/);
       if (mp) {
         const [, postId, sub] = mp;
         const log = (outcome: string, detail: string, id: string | null = postId ?? null) =>
@@ -1478,6 +1495,12 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
             const body = await readJson(req, 64 * 1024);
             const r = await mediaPosts.recordPosted(postId, body ?? {});
             await log(r.written ? 'updated' : 'read', `posted ${str(body?.platform, 20)}: ${str(body?.posted_url, 200)}`);
+            return send(res, 200, r);
+          }
+          if (postId && sub === 'review' && method === 'POST') {
+            // 24 Nov 2026: the second review (mediaReview.ts), run by n8n's Media Twin — Second Review.
+            const r = await mediaReview.review(postId);
+            await log('updated', `review round ${r.round}: ${r.next}; approved ${r.approved.join(',') || '-'}; rejected ${r.rejected.join(',') || '-'}; people ${r.people.map((x) => x.platform).join(',') || '-'}`);
             return send(res, 200, r);
           }
           if (postId && sub === 'metrics' && method === 'POST') {

@@ -16271,3 +16271,11 @@ Files:      server/src/eodReport.ts, server/test/eod-report.test.cjs, CLAUDE.md
 Problem:    The blocked section tagged everyone being waited on, Jason for 22 loops, every day. The Monday and Friday blocker alerts already tag each person once with their loops.
 Fix:        The daily report names them without a tag.
 Decision:   One place tags people about blockers, twice a week; the daily report is for reading.
+
+## 2026-11-24 — Media Twin second review and automatic posting
+
+Intent:     Jason asked that misses be made hard and that autonomous posting stay a plan until it is a logged, working implementation (#bha-media-twin 1795485826.492839, 1795544611.144079). Destiny's plan: draft at 11:30 New York, a second reviewer, rewrite once on a fail, post by noon, a card to Jason and Destiny on a second fail, a pause.
+Files:      server/src/mediaReview.ts (new), server/src/mediaPosts.ts, server/src/index.ts, server/src/mcp/mediaPostsTools.ts, server/src/migrations.ts (157), server/test/media-review.test.cjs, package.json, CLAUDE.md
+Built:      POST /api/engine/media-posts/:id/review; the reviewer decides as media-twin-reviewer (in process only); bhanetwork.org links tagged per platform before approval; the live link said with its UTC time; set_media_autopost and /api/engine/media-autopost for the pause.
+Decision:   A review that cannot run posts nothing and goes to the cards. A platform that failed before or that a person rejected goes to a person on a second fail.
+Proof:      Not yet. The first real run is the 11:30 New York draft on 25 Nov 2026.

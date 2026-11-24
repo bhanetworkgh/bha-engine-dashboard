@@ -573,12 +573,21 @@ export interface DecideInput {
   by: string;
   note?: string | null;
   via?: string;
+  /**
+   * In process only, from mediaReview.review (24 Nov 2026): the second reviewer deciding. No route sets it, so
+   * over HTTP and Slack only Jason or Destiny still decide.
+   */
+  reviewer?: boolean;
 }
+
+/** The second reviewer's id on a decision (mediaReview.ts). Never a Slack user. */
+export const REVIEWER_ID = 'media-twin-reviewer';
+const deciderName = (by: string) => APPROVERS[by] ?? (by === REVIEWER_ID ? 'the second review' : by);
 
 /** Records Jason's (or Destiny's) Approve or Reject for one platform. Append-only history beside the row. */
 export async function decide(postId: string, input: DecideInput) {
-  const by = bare(s(input.by, 40));
-  if (!by || !APPROVERS[by]) refuse('not_permitted', `Only Jason or Destiny decide on a Media Twin post${by ? `; ${by} is not one of them` : ''}.`, 403);
+  const by = input.reviewer === true ? REVIEWER_ID : bare(s(input.by, 40));
+  if (!by || !(APPROVERS[by] || (input.reviewer === true && by === REVIEWER_ID))) refuse('not_permitted', `Only Jason or Destiny decide on a Media Twin post${by ? `; ${by} is not one of them` : ''}.`, 403);
   const platform = s(input.platform, 20) as Platform;
   if (!(PLATFORMS as readonly string[]).includes(platform)) refuse('bad_value', `platform must be one of ${PLATFORMS.join(', ')}.`);
   const decision = s(input.decision, 10);
@@ -623,7 +632,7 @@ export async function decide(postId: string, input: DecideInput) {
     );
     events.changed('media_posts', postId, db);
     const auto_post = decision === 'approve' ? await autoPostFor(db, before!, platform) : { post: false, mode: 'record_only' as const, reason: 'A reject posts nothing.' };
-    return { ok: true, post: { ...before!, platforms, status }, decided: { platform, decision, by, by_name: APPROVERS[by!], note, at: now }, auto_post };
+    return { ok: true, post: { ...before!, platforms, status }, decided: { platform, decision, by, by_name: deciderName(by!), note, at: now }, auto_post };
   });
   // After the commit, never awaited: the decision stands whatever the platform says, and the outcome goes in the card's thread.
   if (out.auto_post.post) void runAutoPost(out.post, platform, out.auto_post.mode, by!);
@@ -684,7 +693,10 @@ async function runAutoPost(post: MediaPost, platform: Platform, mode: 'post' | '
   }
   await record({ event_type: failure ? 'media_post_auto_failed' : 'media_post_auto_posted', subject_id: id, lane: 'MEDIA', actor: by, source_ref: post.slack_ts, detail: { schema: SCHEMA, platform, mode, pattern_ref: post.pattern_ref, posted_url: live, error: failure, test: post.test } }).catch((e) => console.error('[media-posts] auto post event not written', e));
   if (failure) console.error(`[media-posts] auto post of ${id} ${platform} failed: ${failure}`);
-  await say(post, platform, failure ? `Approve did not post ${platform} on ${id}: ${failure}. The approval stands. Check the draft before running it again.` : mode === 'post' ? `Posted to ${platform} through Approve: ${live}` : `Test draft ${id}: the gate passed for ${platform} and the check ran. Nothing was posted.`);
+  // 24 Nov 2026 (Jason, 1795544611.144079): every live post is logged the same day with its link and UTC time.
+  const how = by === REVIEWER_ID ? 'after the second review' : `through ${deciderName(by)}'s Approve`;
+  const utc = new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+  await say(post, platform, failure ? `${platform} on ${id} did not post ${how}: ${failure}. The approval stands. Check the draft before running it again.` : mode === 'post' ? `Posted to ${platform} ${how}, ${utc}: ${live}` : `Test draft ${id}: the gate passed for ${platform} and the check ran. Nothing was posted.`);
 }
 
 /** Jason or Destiny only. The mark is what opens Approve, so no agent and no engine write can set it. */
