@@ -334,6 +334,24 @@ export async function review(postId: string): Promise<ReviewOutcome> {
     return { ...base, next: 'people', paused: false, reviewed: unreviewed, people: keys.map((k) => ({ platform: k, reasons: why })), why: `${why} Nothing was posted; the cards go to Jason and Destiny.` };
   }
 
+  // The claim rules decide too: a platform the claim check marks blocked, or a target while Stage 1 has not proved
+  // it, would be refused at the approval, so it fails here and is rewritten instead of waiting for a person
+  // (24 Nov 2026, TEST run MTP-1795553547294-2XX3: "Grab-and-go, not a science project" on X and Instagram).
+  const claimed = keys.filter((k) => ['blocked', 'target'].includes(post.platforms[k]!.claim_check_status));
+  const gate = claimed.some((k) => post.platforms[k]!.claim_check_status === 'target') ? await posts.targetGate() : null;
+  for (const k of claimed) {
+    const d = post.platforms[k]!;
+    if (d.claim_check_status === 'target' && gate?.cleared) continue;
+    const lines = d.claim_findings.filter((f) => f.status === d.claim_check_status).map((f) => `"${clip(f.text, 160)}"`).join('; ') || 'a line';
+    const v = verdicts[k];
+    verdicts[k] = {
+      pass: false,
+      failed: [...new Set([...v.failed, 'stage1_from_record'])],
+      reasons: `The claim check marks ${lines} as ${d.claim_check_status === 'target' ? 'a target stated as fact' : 'a blocked claim'}.${v.pass ? '' : ' ' + v.reasons}`,
+      fix: `Say it as what vFarm is being built to do and how Stage 1 is testing it, not as what it does today.${v.fix ? ' ' + v.fix : ''}`,
+    };
+  }
+
   // A platform that failed this review before, or that a person rejected, goes to a person on a second fail.
   const rejectedBefore = new Set<string>();
   for (const p of chain) for (const k of keys) if (p.platforms[k]?.decision === 'rejected') rejectedBefore.add(k);
