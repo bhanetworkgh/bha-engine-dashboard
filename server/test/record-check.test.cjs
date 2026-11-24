@@ -53,7 +53,9 @@ const rc = require(path.join(DIST, 'server/src/recordCheck.js'));
   assert.equal(rc.kindOfId('CODEX-20261113-destiny-arupi-genie-cutover-readback-fix'), 'codex');
   assert.equal(rc.kindOfId('EV-1793991062901-4CJK'), 'evidence');
   assert.equal(rc.kindOfId('BP-INFRA-002'), 'pattern');
-  assert.equal(rc.kindOfId('K9VT'), null);
+  assert.equal(rc.kindOfId('K9VT'), 'short');
+  assert.equal(rc.kindOfId('JSON'), 'short');
+  assert.equal(rc.kindOfId('2026'), null);
   assert.equal(rc.kindOfId('GAP-1795251553077-G5O7'), null);
   ok('an id’s kind is read from its shape');
 

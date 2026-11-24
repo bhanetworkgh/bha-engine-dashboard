@@ -16230,3 +16230,9 @@ Intent:     The retried proof ask still missed Bays' 19 Nov Grok post (Genie eve
 Files:      server/src/mcp/northStarTools.ts (Genie: src/agent/openaiService.ts)
 Problem:    A keyword read took each channel's newest 200 messages and never paged; #bha-coordination had more than 200 since 19 Nov, so the post was out of reach. No way to ask for one day.
 Fix:        on_date (YYYY-MM-DD UTC, up to 60 days back) reads that day only. A keyword read narrowed by slack_channel or on_date pages up to 5 x 200 a channel. A channel with more than was reached is named in channels_capped with read_back_to and a capped_note saying older messages were not read. Genie's rule: a named day is read with on_date; capped means narrow, never "does not exist".
+
+## 2026-11-24 11:50 — Short ids resolve on the record check; Genie's pronouns held in code
+Intent:     Jason's two asks in C0AFEAEHWR2 1795442808.726689: Genie said it "couldn't match EXLZ, SJCJ or YS6W" minutes after closing EXLZ, and called Destiny "her".
+Files:      server/src/recordCheck.ts, server/test/record-check.test.cjs (Genie: src/tools/recordCheck.ts, src/integrations/pronounGuard.ts, src/integrations/slack.ts, src/integrations/slackAnswerBlocks.ts, src/agent/openaiService.ts)
+Problem:    The record check only took full ids. Genie's people list carried "he" for Destiny, and the writer ignored it once.
+Fix:        recordCheck kind 'short' (four capitals/digits with a letter): resolved by ending across loops, watches, evidence and candidates; one match is on record with resolved_id, several are named, none is not checked (often a word). Genie looks up every id in the message, short ones included, before planning (records_named). Genie's pronoun guard swaps wrong pronouns in a sentence naming a he/she profile and the sentence after, on the answer text before Slack blocks are built.

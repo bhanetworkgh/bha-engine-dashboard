@@ -16,7 +16,7 @@
 import { query } from './pg';
 
 type Row = Record<string, unknown>;
-export type RecordKind = 'loop' | 'decision_watch' | 'incident' | 'codex' | 'evidence' | 'pattern_candidate' | 'backlog_task' | 'pattern';
+export type RecordKind = 'loop' | 'decision_watch' | 'incident' | 'codex' | 'evidence' | 'pattern_candidate' | 'backlog_task' | 'pattern' | 'short';
 
 export interface RecordAnswer {
   id: string;
@@ -30,6 +30,8 @@ export interface RecordAnswer {
   detail?: string;
   /** Held more than once under this id (a loop left behind by a move, a log held twice). */
   copies?: number;
+  /** A short id (the last four characters, EXLZ for LOOP-1788044070649-EXLZ) resolved to the one full id it names. */
+  resolved_id?: string;
   /** Not held, but a record of the same kind ends the same way: usually the id the writer meant. */
   closest?: { id: string; title: string; status?: string; owner?: string }[];
   note?: string;
@@ -46,6 +48,9 @@ const SHAPES: [RecordKind, RegExp][] = [
   ['pattern_candidate', /^CAND-\d{10,}-[A-Z0-9]{4}$/],
   ['backlog_task', /^TASK-[A-Z0-9][A-Z0-9-]{3,}$/],
   ['pattern', /^BP-[A-Z0-9_]+-[A-Z0-9_-]+$/],
+  // The last four characters of a loop, watch, evidence or candidate id, as people write them in Slack
+  // (24 Nov 2026: Jason wrote EXLZ, SJCJ and YS6W and Genie said it could not match them).
+  ['short', /^(?=.*[A-Z])[A-Z0-9]{4}$/],
 ];
 
 /** Pure: which kind of record an id names, from its shape alone. */
@@ -170,6 +175,39 @@ async function evidence(ids: string[], out: Map<string, RecordAnswer>): Promise<
   for (const id of ids) if (!out.has(id)) out.set(id, { id, kind: 'evidence', on_record: false });
 }
 
+/**
+ * A short id resolved by its ending across the four kinds whose ids end in four characters. One match is on
+ * record under its full id; several are named in closest and the full id is needed; none is not checked rather
+ * than missing, because four capital letters are often just a word (JSON, HTTP).
+ */
+async function shorts(ids: string[], out: Map<string, RecordAnswer>): Promise<void> {
+  if (!ids.length) return;
+  const r = await query<Row>(
+    `SELECT * FROM (
+       (SELECT DISTINCT ON (natural_id) 'loop' AS kind, natural_id AS id, fields->>'What' AS title, fields->>'Status' AS status, builder_id AS owner, fields->>'lane_tag' AS lane, right(natural_id, 4) AS tail
+          FROM engine_loops WHERE natural_id LIKE 'LOOP-%' AND right(natural_id, 4) = ANY($1) ORDER BY natural_id, updated_at DESC NULLS LAST, id DESC)
+       UNION ALL
+       (SELECT 'decision_watch', watch_id, decision, status, owner_name, lane, right(watch_id, 4) FROM engine_decision_watches WHERE right(watch_id, 4) = ANY($1))
+       UNION ALL
+       (SELECT 'evidence', evidence_id, title, CASE WHEN test THEN 'test' ELSE 'held' END, author_name, NULL, right(evidence_id, 4) FROM engine_evidence WHERE right(evidence_id, 4) = ANY($1))
+       UNION ALL
+       (SELECT 'pattern_candidate', natural_id, fields->>'Candidate', fields->>'Status', fields->>'Builder', fields->>'Lane', right(natural_id, 4) FROM engine_pattern_candidates WHERE natural_id LIKE 'CAND-%' AND right(natural_id, 4) = ANY($1))
+     ) x`,
+    [ids],
+  );
+  for (const id of ids) {
+    const hits = r.rows.filter((x) => x.tail === id);
+    if (hits.length === 1) {
+      const x = hits[0];
+      out.set(id, { id, kind: x.kind as RecordKind, on_record: true, resolved_id: String(x.id), title: s(x.title), status: s(x.status, 40), owner: s(x.owner, 60), lane: s(x.lane, 40), note: `${id} is the short form of ${x.id}.` });
+    } else if (hits.length > 1) {
+      out.set(id, { id, kind: 'short', on_record: false, closest: hits.slice(0, 5).map((x) => ({ id: String(x.id), title: s(x.title, 160) ?? '', status: s(x.status, 40), owner: s(x.owner, 60) })), note: `${hits.length} records end in ${id}; name the one meant by its full id.` });
+    } else {
+      out.set(id, { id, kind: 'short', on_record: null, note: `No loop, Decision Watch, evidence document or pattern candidate ends in ${id}; it may not be an id.` });
+    }
+  }
+}
+
 async function simple(ids: string[], kind: RecordKind, table: string, titleField: string, statusField: string | null, out: Map<string, RecordAnswer>, missingNote?: string): Promise<void> {
   if (!ids.length) return;
   const r = await query<Row>(`SELECT natural_id, fields->>($2::text) AS title${statusField ? `, fields->>($3::text) AS status` : ''} FROM ${table} WHERE natural_id = ANY($1)`, statusField ? [ids, titleField, statusField] : [ids, titleField]);
@@ -200,6 +238,7 @@ export async function check(rawIds: unknown): Promise<CheckResult> {
   await incidents(of(ids, 'incident'), out);
   await codex(of(ids, 'codex'), out);
   await evidence(of(ids, 'evidence'), out);
+  await shorts(of(ids, 'short'), out);
   await simple(of(ids, 'pattern_candidate'), 'pattern_candidate', 'engine_pattern_candidates', 'Candidate', 'Status', out, 'A candidate registered as a pattern leaves the candidate list, so this may have been registered.');
   await simple(of(ids, 'backlog_task'), 'backlog_task', 'engine_lane_backlog', 'task', 'status', out);
   await simple(of(ids, 'pattern'), 'pattern', 'engine_build_patterns', 'pattern_name', null, out);
