@@ -28,6 +28,14 @@ assert.throws(() => kc.normalise({ ...base, holder: 'Hardik' }, null), /holder/)
 assert.throws(() => kc.normalise({ ...base, status: 'captured' }, null), /proof/);
 assert.throws(() => kc.normalise({ ...base, lives_in: [{ kind: 'wiki', ref: 'x' }] }, null), /kind/);
 assert.throws(() => kc.normalise({ ...base, handover_date: '1 Dec' }, null), /YYYY-MM-DD/);
+// A row already dated, as pg hands it back (a Date at local midnight), is edited without sending the date again.
+{
+  const before = { ...base, lives_in: [], status: 'not_started', handover_date: new Date(2026, 11, 13) };
+  const w = kc.normalise({ status: 'captured', proof_ref: 'a891fb24-a334-4d08-9abe-90c48634ee55' }, before);
+  assert.equal(w.handover_date, '2026-12-13');
+  assert.equal(kc.dateOnly('2026-12-06'), '2026-12-06');
+  assert.equal(kc.dateOnly(null), null);
+}
 const kept = kc.normalise({ status: 'in_progress' }, { ...base, lives_in: [{ kind: 'loop', ref: 'LOOP-1794856066847-5DX1' }], handover_date: '2026-12-01' });
 assert.equal(kept.area, 'CAD API');
 assert.equal(kept.handover_date, '2026-12-01');

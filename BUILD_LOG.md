@@ -16243,3 +16243,10 @@ Files:      server/src/blockerAlerts.ts (new), server/src/index.ts, server/src/t
 Problem:    "Blocked By" is free text. About a third of the 94 live entries name the person with no colon ("Jason Bays (authorized reviewer…)", "Sample video approval (Jason)"), and some brackets are prose ("(Hardik's email, 19 Nov)") that must tag nobody.
 Fix:        whoPart reads the colon first, else the words before "(" or a bracket holding only names. Tested on the real texts.
 Decision:   14:00 UTC so India, Lagos and New York are all awake. Replies go onto the loop's decision_log, never its status: a person saying why is not the loop moving.
+
+## 2026-11-24 13:50 — A dated Knowledge Capture row could not be edited
+Intent:     Mark Destiny's seven Knowledge Capture rows captured, with his operator playbook (version 4, section 9) as the proof.
+Files:      server/src/knowledgeCapture.ts, server/test/knowledge-capture.test.cjs
+Problem:    set_knowledge_capture answered {"ok":false,"reason":"bad_date","message":"handover_date is YYYY-MM-DD, or left empty."} on all seven, though no date was sent. pg returns the stored date column as a Date, and normalise() turned it into "Sun Dec 13" with String(...).slice(0, 10), which failed its own date check.
+Fix:        dateOnly() formats a stored Date as YYYY-MM-DD from its local parts; used for the read model and for the date carried over on an edit. A test edits a dated row without sending the date.
+Decision:   Local parts, not toISOString: pg builds a date column's Date at local midnight, so ISO would shift a day on any server east of UTC.

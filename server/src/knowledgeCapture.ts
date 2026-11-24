@@ -67,7 +67,7 @@ export function proofProblem(proof: string | null): string | null {
 }
 
 function toRow(r: Record<string, unknown>, today: string): KnowledgeRow {
-  const date = r.handover_date ? String(r.handover_date).slice(0, 10) : null;
+  const date = dateOnly(r.handover_date);
   const status = r.status as Status;
   const lives = Array.isArray(r.lives_in) ? (r.lives_in as Ref[]).map((x) => ({ kind: x.kind, ref: x.ref, url: refUrl(x) })) : [];
   return {
@@ -141,6 +141,18 @@ export interface KnowledgeInput {
 const text = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
 const SLACK_ID = /^[UW][A-Z0-9]{8,}$/;
 
+/** A stored date as YYYY-MM-DD. pg hands a date column back as a Date at local midnight, and String() of that is
+ *  "Sun Dec 13 2026 …", which failed this file's own date check on every later edit of a dated row (24 Nov 2026). */
+export function dateOnly(v: unknown): string | null {
+  if (!v) return null;
+  if (v instanceof Date) {
+    if (Number.isNaN(v.getTime())) return null;
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${v.getFullYear()}-${p(v.getMonth() + 1)}-${p(v.getDate())}`;
+  }
+  return String(v).slice(0, 10);
+}
+
 /** Checks and normalises one write. Pure apart from nothing: callers fetch `before`. */
 export function normalise(i: KnowledgeInput, before: Record<string, unknown> | null): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -155,7 +167,7 @@ export function normalise(i: KnowledgeInput, before: Record<string, unknown> | n
   out.proof_ref = pick('proof_ref', 400);
   out.to_confirm = pick('to_confirm', 300);
   out.notes = pick('notes', 1200);
-  const date = has('handover_date') ? text(i.handover_date, 10) : before?.handover_date ? String(before.handover_date).slice(0, 10) : null;
+  const date = has('handover_date') ? text(i.handover_date, 10) : dateOnly(before?.handover_date);
   out.handover_date = date;
   let lives: Ref[] = Array.isArray(before?.lives_in) ? (before!.lives_in as Ref[]) : [];
   if (has('lives_in')) {
