@@ -16250,3 +16250,10 @@ Files:      server/src/knowledgeCapture.ts, server/test/knowledge-capture.test.c
 Problem:    set_knowledge_capture answered {"ok":false,"reason":"bad_date","message":"handover_date is YYYY-MM-DD, or left empty."} on all seven, though no date was sent. pg returns the stored date column as a Date, and normalise() turned it into "Sun Dec 13" with String(...).slice(0, 10), which failed its own date check.
 Fix:        dateOnly() formats a stored Date as YYYY-MM-DD from its local parts; used for the read model and for the date carried over on an edit. A test edits a dated row without sending the date.
 Decision:   Local parts, not toISOString: pg builds a date column's Date at local midnight, so ISO would shift a day on any server east of UTC.
+
+## 2026-11-24 14:55 — The end of day report, posted by Genie at 17:00 New York
+Intent:     Jason asked Destiny, as engine steward for the 30-day Pilot 1 window, to be able to say by end of day what moved, what is blocked and on whom, and tomorrow's 1 or 2 priorities per person. Destiny asked for it to be automatic, read from the day's sessions and Codex logs, at 17:00 New York.
+Files:      server/src/eodReport.ts (new), server/src/index.ts, server/src/timers.ts, server/test/eod-report.test.cjs, package.json, CLAUDE.md
+Problem:    The Income Board held each person's Pilot 1 items but only 3 of 13 had a date, so "tomorrow's priorities" had no order to read.
+Fix:        Destiny set a two-week window: every undated Pilot 1 item now targets 8 Dec 2026 (set_income_board_item, audits 8072 to 8081). The report reads priorities from the board, late first, then soonest date, then In Progress first.
+Decision:   Built from the records, not by a model: it costs no credit and can say nothing the records do not. One post per New York day, claimed before posting, with a refusal said in the engine alerts channel, so a missing report is never silent.

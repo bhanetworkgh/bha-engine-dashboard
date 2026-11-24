@@ -38,6 +38,7 @@ const KNOWN: Array<{ name: string; what: string; every: string }> = [
   { name: 'decision watch', what: 'Checks watched decisions and posts a reminder where one has gone quiet past its wait', every: '5 minutes' },
   { name: 'draft eval orphan sweep', what: 'Marks a draft eval interrupted when no live process holds it, so a deploy cannot leave one running for good', every: '1 minute' },
   { name: 'change announcements', what: 'Posts a progress or completion report in #bha-coordination when a loop or Decision Watch changes', every: '5 minutes' },
+  { name: 'end of day report', what: 'Every day from 17:00 New York, Genie posts what moved for Pilot 1, what is blocked and on whom, and tomorrow\'s priorities per person in #bha-coordination, once a day', every: '10 minutes' },
   { name: 'blocker alerts', what: 'Monday and Friday from 14:00 UTC, tags each person a blocked loop waits on in #bha-coordination as Genie, and writes their thread reply onto the loops', every: '15 minutes' },
   { name: 'held pay watch', what: 'Checks new evidence against held pay and posts a release card in #bha-pay-reviews when it matches', every: '5 minutes' },
   { name: 'genie approvals sweep', what: 'Expires Genie change requests nobody decided in 24 hours, and marks a build nobody rated in 48 hours as not rated', every: '15 minutes' },

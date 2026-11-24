@@ -116,6 +116,7 @@ import * as patternCapture from './patternCapture';
 import * as codexGap from './codexGap';
 import * as changeAnnounce from './changeAnnounce';
 import * as blockerAlerts from './blockerAlerts';
+import * as eodReport from './eodReport';
 import * as heldPayWatch from './heldPayWatch';
 import * as acceptanceCheckTools from './mcp/acceptanceCheckTools';
 import * as renewalReminder from './renewalReminder';
@@ -1204,6 +1205,16 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         },
         describe: (r) => `${r.submission_id}: ${r.dry_run ? 'would complete' : 'completed'} a parked log with no second review${r.ok === false ? `; ${r.message}` : ''}`.slice(0, 400),
         hint: 'POST { submission_id, answers: { <missing field>: <answer> }, requester_user_id (Destiny or Jason), dry_run? }.',
+      },
+      /** The end of day report (24 Nov 2026, eodReport.ts): dry_run builds today's report and posts nothing; force posts it now, once per New York day. */
+      '/api/engine/eod-report': {
+        kind: 'loops',
+        store: async (b) => {
+          const r = await eodReport.run(new Date(), { force: b.force === true, dry_run: b.dry_run !== false });
+          return { ...r, ok: !r.error, dry_run: b.dry_run !== false, inserted: 0, updated: r.posted ? 1 : 0, unchanged: r.posted ? 0 : 1 };
+        },
+        describe: (r) => `end of day report: ${r.posted ? `posted ${String(r.ts)}` : r.already ? 'already posted today' : r.error ? `not posted: ${String(r.error)}` : r.dry_run ? 'built, not posted (dry run)' : 'not due yet'}`.slice(0, 400),
+        hint: 'POST { dry_run? (default true: returns the text), force? (post now, before 17:00 New York; still once per day) }.',
       },
       /** /held-pay (15 Nov 2026, Destiny; heldPay.ts): the asker's held pay, why, and what proof releases it, for Bays to post only to them. Reads; writes nothing. */
       '/api/engine/held-pay': {
@@ -3913,6 +3924,7 @@ async function boot(): Promise<void> {
     watchPenalty.startSweeping();
     changeAnnounce.startSweeping();
     blockerAlerts.startSweeping();
+    eodReport.startSweeping();
   heldPayWatch.startSweeping();
     intentHeal.startSweeping();
     loopConvergence.startSweeping();
