@@ -16236,3 +16236,10 @@ Intent:     Jason's two asks in C0AFEAEHWR2 1795442808.726689: Genie said it "co
 Files:      server/src/recordCheck.ts, server/test/record-check.test.cjs (Genie: src/tools/recordCheck.ts, src/integrations/pronounGuard.ts, src/integrations/slack.ts, src/integrations/slackAnswerBlocks.ts, src/agent/openaiService.ts)
 Problem:    The record check only took full ids. Genie's people list carried "he" for Destiny, and the writer ignored it once.
 Fix:        recordCheck kind 'short' (four capitals/digits with a letter): resolved by ending across loops, watches, evidence and candidates; one match is on record with resolved_id, several are named, none is not checked (often a word). Genie looks up every id in the message, short ones included, before planning (records_named). Genie's pronoun guard swaps wrong pronouns in a sentence naming a he/she profile and the sentence after, on the answer text before Slack blocks are built.
+
+## 2026-11-24 13:10 — Blocker alerts, Monday and Friday
+Intent:     Jason asked to be lit up when he is the blocker. Destiny: Genie tags whoever a blocked loop waits on in #bha-coordination, asks why it is held and when they can clear it, Monday and Friday.
+Files:      server/src/blockerAlerts.ts (new), server/src/index.ts, server/src/timers.ts, server/test/blocker-alerts.test.cjs, package.json, CLAUDE.md
+Problem:    "Blocked By" is free text. About a third of the 94 live entries name the person with no colon ("Jason Bays (authorized reviewer…)", "Sample video approval (Jason)"), and some brackets are prose ("(Hardik's email, 19 Nov)") that must tag nobody.
+Fix:        whoPart reads the colon first, else the words before "(" or a bracket holding only names. Tested on the real texts.
+Decision:   14:00 UTC so India, Lagos and New York are all awake. Replies go onto the loop's decision_log, never its status: a person saying why is not the loop moving.

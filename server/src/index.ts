@@ -115,6 +115,7 @@ import * as decisionWatch from './decisionWatch';
 import * as patternCapture from './patternCapture';
 import * as codexGap from './codexGap';
 import * as changeAnnounce from './changeAnnounce';
+import * as blockerAlerts from './blockerAlerts';
 import * as heldPayWatch from './heldPayWatch';
 import * as acceptanceCheckTools from './mcp/acceptanceCheckTools';
 import * as renewalReminder from './renewalReminder';
@@ -3911,6 +3912,7 @@ async function boot(): Promise<void> {
     codexGap.startSweeping();
     watchPenalty.startSweeping();
     changeAnnounce.startSweeping();
+    blockerAlerts.startSweeping();
   heldPayWatch.startSweeping();
     intentHeal.startSweeping();
     loopConvergence.startSweeping();

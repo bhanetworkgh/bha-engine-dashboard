@@ -154,6 +154,7 @@
     "test:acceptance-check": "node server/test/acceptance-check.test.cjs",
     "test:outside-sources": "npm run build:server --silent && node server/test/outside-sources.test.cjs",
     "test:build-trail": "npm run build:server --silent && node server/test/build-trail.test.cjs",
+    "test:blocker-alerts": "npm run build:server --silent && node server/test/blocker-alerts.test.cjs",
     "test:record-check": "npm run build:server --silent && node server/test/record-check.test.cjs",
     "test:intent-heal": "npm run build:server --silent && node server/test/intent-heal.test.cjs",
     "test:ask-genie": "npm run build:server --silent && node server/test/ask-genie.test.cjs",
