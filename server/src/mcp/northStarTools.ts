@@ -190,6 +190,16 @@ interface SlackMsg {
   subtype?: string;
   reply_count?: number;
   latest_reply?: string;
+  files?: { id?: string; name?: string; title?: string }[];
+}
+
+/**
+ * The files a message carries, by id and name (24 Nov 2026): Genie could not find the 29-point Grok list Bays
+ * attached on 19 Nov, because a read showed the message text and never the file on it. Each id is what
+ * read_slack_file (or Genie's slack_file_read) takes.
+ */
+export function messageFiles(m: { files?: { id?: string; name?: string; title?: string }[] }): { id: string; name: string }[] {
+  return (m.files ?? []).filter((f) => f && f.id).map((f) => ({ id: String(f.id), name: String(f.title || f.name || '') }));
 }
 
 export interface ReadSlackArgs {
@@ -251,7 +261,7 @@ export async function readSlackThread(ref: unknown, max: number, keywords?: unkn
     .map((m) => {
       const bot = !!m.bot_id;
       const text = cleanSlackText(m.text);
-      return { author: bot ? ((m.bot_profile && m.bot_profile.name) || m.username || 'bot') + ' (bot)' : PEOPLE[m.user ?? ''] || m.user || 'unknown', at: new Date(parseFloat(m.ts) * 1000).toISOString(), kind: m.ts === at.ts ? 'message' : 'thread reply', is_bot: bot, text: bot ? text.slice(0, THREAD_BOT_CLIP) : text, chars: text.length, link: link(m.ts) };
+      return { author: bot ? ((m.bot_profile && m.bot_profile.name) || m.username || 'bot') + ' (bot)' : PEOPLE[m.user ?? ''] || m.user || 'unknown', at: new Date(parseFloat(m.ts) * 1000).toISOString(), kind: m.ts === at.ts ? 'message' : 'thread reply', is_bot: bot, text: bot ? text.slice(0, THREAD_BOT_CLIP) : text, chars: text.length, link: link(m.ts), ...(messageFiles(m).length ? { files: messageFiles(m) } : {}) };
     });
   const total = rows.length;
   const q = String(keywords ?? '').trim();
@@ -355,7 +365,7 @@ async function readSlackUncached(args: ReadSlackArgs): Promise<Record<string, un
   }
 
   /* RS - Collect Messages */
-  const parents: { channel_id: string; channel: string; ts: string; user: string; bot: boolean; bot_name: string; text: string; reply_count: number }[] = [];
+  const parents: { channel_id: string; channel: string; ts: string; user: string; bot: boolean; bot_name: string; text: string; reply_count: number; files: { id: string; name: string }[] }[] = [];
   const threads: { channel_id: string; channel: string; ts: string; oldest: number; latest: number }[] = [];
   const failed: string[] = [];
   res.forEach((r, i) => {
@@ -367,7 +377,7 @@ async function readSlackUncached(args: ReadSlackArgs): Promise<Record<string, un
     }
     for (const m of (r.messages as SlackMsg[]) || []) {
       if (m.subtype && SKIP.includes(m.subtype)) continue;
-      parents.push({ channel_id: p.channel_id, channel: p.channel_name, ts: m.ts, user: m.user || '', bot: !!m.bot_id, bot_name: (m.bot_profile && m.bot_profile.name) || m.username || '', text: String(m.text || '').slice(0, 2000), reply_count: m.reply_count || 0 });
+      parents.push({ channel_id: p.channel_id, channel: p.channel_name, ts: m.ts, user: m.user || '', bot: !!m.bot_id, bot_name: (m.bot_profile && m.bot_profile.name) || m.username || '', text: String(m.text || '').slice(0, 2000), reply_count: m.reply_count || 0, files: messageFiles(m) });
       if ((m.reply_count || 0) > 0 && parseFloat(m.latest_reply || '0') >= p.oldest) threads.push({ channel_id: p.channel_id, channel: p.channel_name, ts: m.ts, oldest: p.oldest, latest: parseFloat(m.latest_reply || m.ts) });
     }
   });
@@ -392,14 +402,14 @@ async function readSlackUncached(args: ReadSlackArgs): Promise<Record<string, un
   const link = (ch: string, ts: string, thr?: string) => LINK_BASE + ch + '/p' + String(ts).replace('.', '') + (thr && thr !== ts ? '?thread_ts=' + thr : '');
   const clean = cleanSlackText;
 
-  const all: { channel: string; author: string; is_bot: boolean; ts: string; kind: string; replies?: number; text: string; link: string }[] = [];
-  for (const m of parents) all.push({ channel: m.channel, author: who(m.user, m.bot, m.bot_name), is_bot: m.bot, ts: m.ts, kind: 'message', replies: m.reply_count, text: clean(m.text), link: link(m.channel_id, m.ts) });
+  const all: { channel: string; author: string; is_bot: boolean; ts: string; kind: string; replies?: number; text: string; link: string; files?: { id: string; name: string }[] }[] = [];
+  for (const m of parents) all.push({ channel: m.channel, author: who(m.user, m.bot, m.bot_name), is_bot: m.bot, ts: m.ts, kind: 'message', replies: m.reply_count, text: clean(m.text), link: link(m.channel_id, m.ts), files: m.files });
   titems.forEach((t, i) => {
     const r = reps[i] || {};
     if (r.ok === false || r.error) return;
     for (const m of (r.messages as SlackMsg[]) || []) {
       if (m.ts === t.ts || parseFloat(m.ts) < t.oldest) continue;
-      all.push({ channel: t.channel, author: who(m.user, !!m.bot_id, m.bot_profile ? m.bot_profile.name : ''), is_bot: !!m.bot_id, ts: m.ts, kind: 'thread reply', text: clean(String(m.text || '').slice(0, 2000)), link: link(t.channel_id, m.ts, t.ts) });
+      all.push({ channel: t.channel, author: who(m.user, !!m.bot_id, m.bot_profile ? m.bot_profile.name : ''), is_bot: !!m.bot_id, ts: m.ts, kind: 'thread reply', text: clean(String(m.text || '').slice(0, 2000)), link: link(t.channel_id, m.ts, t.ts), files: messageFiles(m) });
     }
   });
 
@@ -407,7 +417,7 @@ async function readSlackUncached(args: ReadSlackArgs): Promise<Record<string, un
   let kept = all;
   if (q) {
     const words = q.toLowerCase().split(/[\s,]+/).filter((w) => w.length > 2);
-    if (words.length) kept = all.filter((m) => { const t = m.text.toLowerCase(); return words.some((w) => t.includes(w)); });
+    if (words.length) kept = all.filter((m) => { const t = (m.text + ' ' + (m.files ?? []).map((f) => f.name).join(' ')).toLowerCase(); return words.some((w) => t.includes(w)); });
   }
   kept.sort((a, b) => parseFloat(b.ts) - parseFloat(a.ts));
 
@@ -420,6 +430,7 @@ async function readSlackUncached(args: ReadSlackArgs): Promise<Record<string, un
     if (out.length >= maxMessages) break;
     const row: Record<string, unknown> = { channel: '#' + m.channel, author: m.author, at: new Date(parseFloat(m.ts) * 1000).toISOString(), kind: m.kind, text: m.is_bot ? m.text.slice(0, BOT_CLIP) : m.text.slice(0, PERSON_CLIP), link: m.link };
     if (m.replies) row.replies = m.replies;
+    if (m.files?.length) row.files = m.files;
     chars += JSON.stringify(row).length;
     if (chars > SLACK_CHARS) break;
     out.push(row);
@@ -445,7 +456,7 @@ async function readSlackUncached(args: ReadSlackArgs): Promise<Record<string, un
 export const readSlackTool: ToolDefinition = {
   name: 'read_slack',
   description:
-    'North Star’s Slack read, as its own bot: every public and private channel it is in (never DMs or group DMs, archived excluded), threads included, newest first. since_hours defaults to 72 and is capped at 168. keywords keeps messages containing any of the words (over two characters). slack_channel narrows to one channel by name or id. Caps, as tuned on the 22 Sep out-of-memory crash: 50 messages a channel, the 25 newest threads with replies in the window expanded, 50 replies a thread, 60,000 characters out; bot posts cut to 300 characters, people’s to 1,200 (pass thread to read one thread whole, people’s messages in full). Each item is {channel, author, at, kind (message | thread reply), text, link}. By default the newest 40 messages across channels come back, unless since_hours or slack_channel narrows the read; the answer is held to max_chars (20,000 by default) and a truncated answer says so in note — do not call again with the same arguments. A Slack 429 is waited out once (up to 30s) and retried; still limited, it is ok:false rate_limited with retry_after, never partial data. The same read within a minute is served from the last one (cached: true). Also returns window_hours, channels_read, channels_failed, threads_expanded, threads_not_expanded, messages_matched, messages_returned, truncated, no_data. A missing scope or no channel is ok:false with the reason.',
+    'North Star’s Slack read, as its own bot: every public and private channel it is in (never DMs or group DMs, archived excluded), threads included, newest first. since_hours defaults to 72 and is capped at 168. keywords keeps messages containing any of the words (over two characters). slack_channel narrows to one channel by name or id. Caps, as tuned on the 22 Sep out-of-memory crash: 50 messages a channel, the 25 newest threads with replies in the window expanded, 50 replies a thread, 60,000 characters out; bot posts cut to 300 characters, people’s to 1,200 (pass thread to read one thread whole, people’s messages in full). Each item is {channel, author, at, kind (message | thread reply), text, link, files}: files lists each file attached to the message by id and name, and keywords also match a file's name; read a file's contents with read_slack_file (or slack_file_read) and its id. By default the newest 40 messages across channels come back, unless since_hours or slack_channel narrows the read; the answer is held to max_chars (20,000 by default) and a truncated answer says so in note — do not call again with the same arguments. A Slack 429 is waited out once (up to 30s) and retried; still limited, it is ok:false rate_limited with retry_after, never partial data. The same read within a minute is served from the last one (cached: true). Also returns window_hours, channels_read, channels_failed, threads_expanded, threads_not_expanded, messages_matched, messages_returned, truncated, no_data. A missing scope or no channel is ok:false with the reason.',
   inputSchema: {
     type: 'object',
     properties: {
