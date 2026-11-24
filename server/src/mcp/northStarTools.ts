@@ -46,6 +46,10 @@ const HISTORY_LIMIT = 50;
 const MAX_THREADS = 25;
 /** A keyword search reads more of each channel and more threads (16 Nov 2026): its answer is filtered, so the wider read costs reads, not answer size. */
 const HISTORY_LIMIT_SEARCH = 200;
+/** Pages of 200 a keyword read narrowed to one channel or one day may follow (24 Nov 2026): one page left #bha-coordination's 19 Nov post out of reach five days later. */
+const HISTORY_PAGES_NARROW = 5;
+/** How many days back on_date may reach. */
+const ON_DATE_MAX_DAYS = 60;
 const MAX_THREADS_SEARCH = 60;
 const REPLIES_LIMIT = 50;
 const REPLIES_LIMIT_SEARCH = 200;
@@ -204,6 +208,8 @@ export function messageFiles(m: { files?: { id?: string; name?: string; title?: 
 
 export interface ReadSlackArgs {
   since_hours?: unknown;
+  /** One UTC day, YYYY-MM-DD: the read covers that day only, up to 60 days back. */
+  on_date?: unknown;
   keywords?: unknown;
   slack_channel?: unknown;
   /** How many messages at most; the tool sets 40 when nothing narrows the read. */
@@ -305,7 +311,7 @@ const SLACK_CACHE_MS = (() => {
 const slackCache = new Map<string, { at: number; out: Record<string, unknown> }>();
 
 export async function readSlack(args: ReadSlackArgs): Promise<Record<string, unknown>> {
-  const key = JSON.stringify([args.since_hours ?? null, args.keywords ?? null, args.slack_channel ?? null, args.max_messages ?? null]);
+  const key = JSON.stringify([args.since_hours ?? null, args.on_date ?? null, args.keywords ?? null, args.slack_channel ?? null, args.max_messages ?? null]);
   const hit = slackCache.get(key);
   if (hit && Date.now() - hit.at < SLACK_CACHE_MS) return { ...structuredClone(hit.out), cached: true, cached_seconds_ago: Math.round((Date.now() - hit.at) / 1000) };
   let out: Record<string, unknown>;
@@ -340,7 +346,17 @@ async function readSlackUncached(args: ReadSlackArgs): Promise<Record<string, un
   let hours = parseInt(String(args.since_hours ?? ''), 10);
   if (!hours || hours < 1) hours = 72;
   if (hours > 168) hours = 168;
-  const oldest = Math.floor(Date.now() / 1000) - hours * 3600;
+  let oldest = Math.floor(Date.now() / 1000) - hours * 3600;
+  let latest: number | undefined;
+  const day = String(args.on_date ?? '').trim();
+  if (day) {
+    const t = /^\d{4}-\d{2}-\d{2}$/.test(day) ? Date.parse(day + 'T00:00:00Z') : NaN;
+    if (!Number.isFinite(t)) return { ok: false, reason: 'bad_on_date', message: `on_date must be a day written YYYY-MM-DD (UTC); "${day}" is not one.` };
+    if (t > Date.now() || Date.now() - t > ON_DATE_MAX_DAYS * 86_400_000) return { ok: false, reason: 'bad_on_date', message: `on_date must be today or up to ${ON_DATE_MAX_DAYS} days back; "${day}" is not.` };
+    oldest = Math.floor(t / 1000);
+    latest = oldest + 86_400;
+    hours = 24;
+  }
   const only = String(args.slack_channel || '').replace(/^#/, '').trim().toLowerCase();
   const chans = ((body.channels as { id: string; name?: string; is_archived?: boolean; is_im?: boolean; is_mpim?: boolean }[]) || [])
     .filter((c) => !c.is_archived && !c.is_im && !c.is_mpim)
@@ -354,11 +370,33 @@ async function readSlackUncached(args: ReadSlackArgs): Promise<Record<string, un
   }
   const plans = chans.map((c) => ({ channel_id: c.id, channel_name: c.name ?? c.id, oldest, hours }));
   const searching = String(args.keywords || '').trim().length > 0;
+  // A keyword read narrowed to one channel or one day pages back to the window's start (at most
+  // HISTORY_PAGES_NARROW pages); every other read keeps the one page tuned on 22 Sep. A channel that
+  // still had more is named in channels_capped with how far back it got.
+  const pages = searching && (only || day) ? HISTORY_PAGES_NARROW : 1;
+  const capped: { channel: string; read_back_to: string }[] = [];
 
   /* RS - Channel History */
   let res: Record<string, unknown>[];
   try {
-    res = await batched(plans, (p) => slackCall(tok, 'conversations.history', { channel: p.channel_id, oldest: p.oldest, limit: searching ? HISTORY_LIMIT_SEARCH : HISTORY_LIMIT }));
+    res = await batched(plans, async (p) => {
+      const base: Record<string, string | number | boolean> = { channel: p.channel_id, oldest: p.oldest, limit: searching ? HISTORY_LIMIT_SEARCH : HISTORY_LIMIT };
+      if (latest) base.latest = latest;
+      let first: Record<string, unknown> | null = null;
+      const msgs: SlackMsg[] = [];
+      let cursor = '';
+      for (let i = 0; i < pages; i++) {
+        const r = await slackCall(tok, 'conversations.history', cursor ? { ...base, cursor } : base);
+        if (!first) first = r;
+        if (!r || r.ok === false || r.error) return i === 0 ? r : { ...first, messages: msgs };
+        msgs.push(...(((r.messages as SlackMsg[]) || [])));
+        cursor = String(((r.response_metadata as { next_cursor?: string } | undefined) || {}).next_cursor || '');
+        if (!r.has_more || !cursor) return { ...first, messages: msgs };
+      }
+      const last = msgs[msgs.length - 1];
+      if (last) capped.push({ channel: '#' + p.channel_name, read_back_to: new Date(parseFloat(last.ts) * 1000).toISOString() });
+      return { ...first, messages: msgs };
+    });
   } catch (e) {
     if (e instanceof slack.SlackRateLimited) throw e;
     return { ok: false, reason: 'slack_error', step: 'conversations.history', message: e instanceof Error ? e.message : String(e) };
@@ -440,6 +478,9 @@ async function readSlackUncached(args: ReadSlackArgs): Promise<Record<string, un
     ok: true,
     mode: 'slack',
     window_hours: hours,
+    on_date: day || null,
+    channels_capped: capped,
+    ...(capped.length ? { capped_note: `Some channels had more messages than this read reaches (${capped.map((c) => `${c.channel} back to ${c.read_back_to}`).join('; ')}). Anything older in those channels was not read: narrow with slack_channel or on_date, never say it does not exist.` } : {}),
     keywords: q || null,
     channels_read: plans.length,
     channels_failed: failed,
@@ -456,11 +497,12 @@ async function readSlackUncached(args: ReadSlackArgs): Promise<Record<string, un
 export const readSlackTool: ToolDefinition = {
   name: 'read_slack',
   description:
-    'North Star’s Slack read, as its own bot: every public and private channel it is in (never DMs or group DMs, archived excluded), threads included, newest first. since_hours defaults to 72 and is capped at 168. keywords keeps messages containing any of the words (over two characters). slack_channel narrows to one channel by name or id. Caps, as tuned on the 22 Sep out-of-memory crash: 50 messages a channel, the 25 newest threads with replies in the window expanded, 50 replies a thread, 60,000 characters out; bot posts cut to 300 characters, people’s to 1,200 (pass thread to read one thread whole, people’s messages in full). Each item is {channel, author, at, kind (message | thread reply), text, link, files}: files lists each file attached to the message by id and name, and keywords also match the file name; read the contents of a file with read_slack_file (or slack_file_read) and its id. By default the newest 40 messages across channels come back, unless since_hours or slack_channel narrows the read; the answer is held to max_chars (20,000 by default) and a truncated answer says so in note — do not call again with the same arguments. A Slack 429 is waited out once (up to 30s) and retried; still limited, it is ok:false rate_limited with retry_after, never partial data. The same read within a minute is served from the last one (cached: true). Also returns window_hours, channels_read, channels_failed, threads_expanded, threads_not_expanded, messages_matched, messages_returned, truncated, no_data. A missing scope or no channel is ok:false with the reason.',
+    'North Star’s Slack read, as its own bot: every public and private channel it is in (never DMs or group DMs, archived excluded), threads included, newest first. since_hours defaults to 72 and is capped at 168. keywords keeps messages containing any of the words (over two characters). slack_channel narrows to one channel by name or id. on_date (YYYY-MM-DD, UTC, up to 60 days back) reads that one day only, for a question about something posted on a given date. A keyword read narrowed by slack_channel or on_date pages back through up to 1,000 messages a channel; every other read takes the newest page (200 with keywords), and a channel with more than it reached is named in channels_capped with how far back it got. Caps, as tuned on the 22 Sep out-of-memory crash: 50 messages a channel, the 25 newest threads with replies in the window expanded, 50 replies a thread, 60,000 characters out; bot posts cut to 300 characters, people’s to 1,200 (pass thread to read one thread whole, people’s messages in full). Each item is {channel, author, at, kind (message | thread reply), text, link, files}: files lists each file attached to the message by id and name, and keywords also match the file name; read the contents of a file with read_slack_file (or slack_file_read) and its id. By default the newest 40 messages across channels come back, unless since_hours or slack_channel narrows the read; the answer is held to max_chars (20,000 by default) and a truncated answer says so in note — do not call again with the same arguments. A Slack 429 is waited out once (up to 30s) and retried; still limited, it is ok:false rate_limited with retry_after, never partial data. The same read within a minute is served from the last one (cached: true). Also returns window_hours, channels_read, channels_failed, threads_expanded, threads_not_expanded, messages_matched, messages_returned, truncated, no_data. A missing scope or no channel is ok:false with the reason.',
   inputSchema: {
     type: 'object',
     properties: {
       since_hours: { type: 'number', description: 'How far back. Default 72, at most 168.' },
+      on_date: { type: 'string', description: 'Optional. One UTC day, YYYY-MM-DD, up to 60 days back: read only that day (since_hours is ignored). Use it when the question names the day something was posted.' },
       keywords: { type: 'string', description: 'Optional. Any-word match, e.g. "LOOP-" or "vfarm, pilot".' },
       slack_channel: { type: 'string', description: 'Optional. One channel, by name (with or without #) or id.' },
       thread: { type: 'string', description: 'Optional. One thread, by its Slack link (or "<channel id> <ts>"): read whole, root and every reply oldest first, each person\'s message in full (no 1,200 cut). Use it to quote or copy a message word for word. since_hours and slack_channel are ignored; keywords keeps only matching messages; max_chars defaults to 40,000 here.' },
@@ -478,8 +520,8 @@ export const readSlackTool: ToolDefinition = {
       return th;
     }
     const max = maxCharsOf(args);
-    const narrowed = args.since_hours !== undefined || (typeof args.slack_channel === 'string' && args.slack_channel.trim() !== '');
-    const read = await readSlack({ since_hours: args.since_hours, keywords: args.keywords, slack_channel: args.slack_channel, max_messages: narrowed ? undefined : DEFAULT_MESSAGES });
+    const narrowed = args.since_hours !== undefined || (typeof args.on_date === 'string' && args.on_date.trim() !== '') || (typeof args.slack_channel === 'string' && args.slack_channel.trim() !== '');
+    const read = await readSlack({ since_hours: args.since_hours, on_date: args.on_date, keywords: args.keywords, slack_channel: args.slack_channel, max_messages: narrowed ? undefined : DEFAULT_MESSAGES });
     let out = read;
     if (read.ok) {
       const matched = Number(read.messages_matched);

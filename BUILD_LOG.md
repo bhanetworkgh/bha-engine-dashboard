@@ -16224,3 +16224,9 @@ Intent:     Second proof ask failed honestly: Genie could not find the 29-point 
 Files:      server/src/mcp/northStarTools.ts (Genie: src/agent/openaiService.ts)
 Problem:    read_slack returned each message's text only, so a list attached as a file was invisible; Genie had no file id to read.
 Fix:        Every message and thread reply carries files [{id, name}] (messageFiles), keywords also match a file's name, and the description says to read a file with read_slack_file by its id. Genie's rules: an attached file is read whole by its id; a cut read_slack is narrowed, never repeated.
+
+## 2026-11-24 10:40 — read_slack reads a named day and pages back
+Intent:     The retried proof ask still missed Bays' 19 Nov Grok post (Genie event 09:27, satisfied, "can't confirm").
+Files:      server/src/mcp/northStarTools.ts (Genie: src/agent/openaiService.ts)
+Problem:    A keyword read took each channel's newest 200 messages and never paged; #bha-coordination had more than 200 since 19 Nov, so the post was out of reach. No way to ask for one day.
+Fix:        on_date (YYYY-MM-DD UTC, up to 60 days back) reads that day only. A keyword read narrowed by slack_channel or on_date pages up to 5 x 200 a channel. A channel with more than was reached is named in channels_capped with read_back_to and a capped_note saying older messages were not read. Genie's rule: a named day is read with on_date; capped means narrow, never "does not exist".
