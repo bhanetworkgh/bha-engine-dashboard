@@ -16257,3 +16257,10 @@ Files:      server/src/eodReport.ts (new), server/src/index.ts, server/src/timer
 Problem:    The Income Board held each person's Pilot 1 items but only 3 of 13 had a date, so "tomorrow's priorities" had no order to read.
 Fix:        Destiny set a two-week window: every undated Pilot 1 item now targets 8 Dec 2026 (set_income_board_item, audits 8072 to 8081). The report reads priorities from the board, late first, then soonest date, then In Progress first.
 Decision:   Built from the records, not by a model: it costs no credit and can say nothing the records do not. One post per New York day, claimed before posting, with a refusal said in the engine alerts channel, so a missing report is never silent.
+
+## 2026-11-24 14:45 — The end of day report's dry run answered "not due" before 17:00 New York
+Intent:     Preview today's report before the first real post.
+Files:      server/src/eodReport.ts
+Problem:    POST /api/engine/eod-report {"dry_run": true} answered {"ok":true,"due":false,"posted":false} (n8n execution 112915): the 17:00 check ran before the dry run.
+Fix:        A dry run builds the report whatever the time; only a real post waits for 17:00 New York or force.
+Decision:   A preview that only works after 17:00 is no preview.

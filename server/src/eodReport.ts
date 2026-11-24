@@ -186,7 +186,7 @@ async function alertRefused(day: string, error: string): Promise<void> {
 
 /** One report per New York day, from 17:00 New York. dry_run builds it and posts nothing. */
 export async function run(now = new Date(), opts: { force?: boolean; dry_run?: boolean } = {}): Promise<{ due: boolean; posted: boolean; already?: boolean; ts?: string; error?: string; text?: string }> {
-  if (!opts.force && !isDue(now)) return { due: false, posted: false };
+  if (!opts.force && !opts.dry_run && !isDue(now)) return { due: false, posted: false };
   const day = nyClock(now).date;
   const report = await build(now);
   if (opts.dry_run) return { due: true, posted: false, text: report.text };
