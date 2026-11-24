@@ -75,7 +75,8 @@ export const askGenie: ToolDefinition = {
       const res = await fetch(`${genieUrl()}/api/genie/engine-ask`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-dashboard-key': key },
-        body: JSON.stringify({ channel: a.channel_id, thread_ts: a.thread_ts, asked_by: a.asked_by, question: a.question, from: 'bays', deep }),
+        // 24 Nov 2026 (INC-BAYS.AGENT-130): base64, because Render's firewall refuses a question that quotes curl or SQL.
+        body: JSON.stringify({ body_b64: Buffer.from(JSON.stringify({ channel: a.channel_id, thread_ts: a.thread_ts, asked_by: a.asked_by, question: a.question, from: 'bays', deep }), 'utf8').toString('base64') }),
         signal: AbortSignal.timeout(20_000),
       });
       status = res.status;
@@ -86,7 +87,7 @@ export const askGenie: ToolDefinition = {
       return { ok: false, reason: 'genie_unreachable', handed_over: false, raise: true, message: why, audit_id: audit };
     }
     if (status !== 202 || body.ok !== true) {
-      const why = `Genie refused the hand-off (HTTP ${status}): ${body.error ?? 'no reason given'}`;
+      const why = `Genie refused the hand-off (HTTP ${status}): ${body.error ?? (status === 403 ? 'no JSON answer, most likely Render\'s firewall before Genie' : 'no reason given')}`;
       await auditClose(audit, { outcome: 'failed', detail: why });
       return { ok: false, reason: 'genie_refused', handed_over: false, raise: true, message: why, audit_id: audit };
     }

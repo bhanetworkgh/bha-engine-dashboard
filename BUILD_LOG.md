@@ -16205,3 +16205,9 @@ Files:      server/src/executions.ts
 Problem:    every 45 s the poll re-reads the last 400 execution ids (the lookback that catches long runs) and the upsert rewrote all of them, finished and unchanged, then announced `executions` on the bus, so open pages and memoised figures re-read on every pass.
 Fix:        the ON CONFLICT update runs only WHERE the stored row IS DISTINCT FROM the read one; only real inserts and changes are counted and announced. The lookback itself is unchanged.
 Proof:      the next hourly [memory] lines in the production log.
+
+## 2026-11-24 07:30 — Bays to Genie hand-off survives code in the question (INC-BAYS.AGENT-130)
+Intent:     a tag on Bays quoting curl and SQL was refused 403 by Render's firewall, so the person got the pointer.
+Files:      server/src/mcp/genieAskTools.ts; n8n Bays — Front Door 97ed9c38 (Encode Hand-Off, restore 788d8c94); genie src/server.ts 4c77e3e
+Problem:    after the Front Door sent body_b64 (exec 112096), the next hop failed: "Genie refused the hand-off (HTTP 403): no reason given" — the firewall again, in front of Genie.
+Fix:        ask_genie sends Genie's engine-ask its body as body_b64; Genie decodes it. A 403 with no JSON is named as the firewall.
