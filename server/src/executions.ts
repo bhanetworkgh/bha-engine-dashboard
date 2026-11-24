@@ -163,6 +163,13 @@ function durationOf(e: n8n.N8nExecution): number | null {
  * Returns how many rows were new. `xmax = 0` is true only for a row this
  * statement inserted, which is how an insert is told from an update without a
  * second query.
+ *
+ * A row already held as it is now is left alone (24 Nov 2026, Destiny — D4). The
+ * lookback re-reads about 400 runs every 45 seconds, nearly all finished and
+ * unchanged, and each pass rewrote every one and announced `executions` on the
+ * bus, so every open page and memoised figure re-read on every poll. The
+ * dashboard's heap ranking put this poll first (1,368 MB of growth over 793
+ * samples, 23 to 24 Nov). Only a real change is written, counted and announced.
  */
 async function put(rows: n8n.N8nExecution[], name: (id: string, fallback: string) => string, at: string): Promise<{ inserted: number; updated: number }> {
   let inserted = 0;
@@ -200,6 +207,13 @@ async function put(rows: n8n.N8nExecution[], name: (id: string, fallback: string
          stopped_at    = EXCLUDED.stopped_at,
          duration_ms   = EXCLUDED.duration_ms,
          updated_at    = EXCLUDED.updated_at
+       WHERE (engine_execution_runs.workflow_id, engine_execution_runs.workflow_name, engine_execution_runs.status,
+              engine_execution_runs.mode, engine_execution_runs.day, engine_execution_runs.started_at,
+              engine_execution_runs.stopped_at, engine_execution_runs.duration_ms)
+             IS DISTINCT FROM
+             (EXCLUDED.workflow_id, EXCLUDED.workflow_name, EXCLUDED.status,
+              COALESCE(EXCLUDED.mode, engine_execution_runs.mode), EXCLUDED.day, EXCLUDED.started_at,
+              EXCLUDED.stopped_at, EXCLUDED.duration_ms)
        RETURNING (xmax = 0) AS inserted`,
       values,
     );

@@ -16197,3 +16197,11 @@ Files:      server/src/changeAnnounce.ts, CLAUDE.md
 Problem:    a refused post only wrote console.error and retried; nobody was told.
 Fix:        raiseRefused(): one change_announce_refused event per hour (dedupe key per UTC hour) and one line in the engine alerts channel as Bays; a failed alert is logged.
 Decision:   once an hour, so a stuck pass every 5 minutes does not flood the channel.
+
+### 2026-11-24 — The executions poll writes only what changed (D4)
+
+Intent:     the hourly [memory] line ranked the executions poll the heaviest timer (1,368 MB of heap growth over 793 samples since the 23 Nov 18:18 boot).
+Files:      server/src/executions.ts
+Problem:    every 45 s the poll re-reads the last 400 execution ids (the lookback that catches long runs) and the upsert rewrote all of them, finished and unchanged, then announced `executions` on the bus, so open pages and memoised figures re-read on every pass.
+Fix:        the ON CONFLICT update runs only WHERE the stored row IS DISTINCT FROM the read one; only real inserts and changes are counted and announced. The lookback itself is unchanged.
+Proof:      the next hourly [memory] lines in the production log.
