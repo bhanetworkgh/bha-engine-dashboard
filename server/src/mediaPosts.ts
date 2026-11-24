@@ -660,6 +660,15 @@ export async function autoPostFor(_db: Queryable, post: Pick<MediaPost, 'pattern
   return post.test ? { post: true, mode: 'check', reason: 'A test draft runs the check and posts nothing.' } : { post: true, mode: 'post', reason: 'Approved, so it posts.' };
 }
 
+/** The model the second review runs on (mediaReview.ts), named on every post it approved. */
+export const REVIEWER_MODEL = 'Claude Sonnet 5.5';
+
+/** Pure: how a platform came to be approved, for the post's log line. */
+export function decisionPath(post: Pick<MediaPost, 'parent_post_id'>, by: string): string {
+  if (by !== REVIEWER_ID) return `approved by ${deciderName(by)}`;
+  return post.parent_post_id ? 'passed the second review on a rewrite' : 'passed the second review first time';
+}
+
 /** Pure: the thread a platform's news goes in: its own card's thread, else the draft's first card (drafts before 7 Nov). */
 export function threadFor(post: Pick<MediaPost, 'platforms' | 'slack_ts'>, platform: Platform): string | null {
   const p = post.platforms[platform];
@@ -694,9 +703,14 @@ async function runAutoPost(post: MediaPost, platform: Platform, mode: 'post' | '
   await record({ event_type: failure ? 'media_post_auto_failed' : 'media_post_auto_posted', subject_id: id, lane: 'MEDIA', actor: by, source_ref: post.slack_ts, detail: { schema: SCHEMA, platform, mode, pattern_ref: post.pattern_ref, posted_url: live, error: failure, test: post.test } }).catch((e) => console.error('[media-posts] auto post event not written', e));
   if (failure) console.error(`[media-posts] auto post of ${id} ${platform} failed: ${failure}`);
   // 24 Nov 2026 (Jason, 1795544611.144079): every live post is logged the same day with its link and UTC time.
+  // Jason's logging rule (1795544611.144079 thread, 24 Nov 2026): each auto-post carries the final text, the reviewer
+  // id and the decision path (passed first review / passed on a rewrite / approved by a person).
   const how = by === REVIEWER_ID ? 'after the second review' : `through ${deciderName(by)}'s Approve`;
   const utc = new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
-  await say(post, platform, failure ? `${platform} on ${id} did not post ${how}: ${failure}. The approval stands. Check the draft before running it again.` : mode === 'post' ? `Posted to ${platform} ${how}, ${utc}: ${live}` : `Test draft ${id}: the gate passed for ${platform} and the check ran. Nothing was posted.`);
+  const path = decisionPath(post, by);
+  const p = post.platforms[platform];
+  const finalText = p ? [p.text, ...(p.thread ?? [])].join('\n\n') : '';
+  await say(post, platform, failure ? `${platform} on ${id} did not post ${how}: ${failure}. The approval stands. Check the draft before running it again.` : mode === 'post' ? `Posted to ${platform} ${how}, ${utc}: ${live}\nDecision path: ${path}.\nReviewer: ${by === REVIEWER_ID ? `${REVIEWER_ID} (${REVIEWER_MODEL})` : `${deciderName(by)} (${by})`}.\nFinal text:\n${finalText.split('\n').map((l) => '> ' + l).join('\n').slice(0, 3500)}` : `Test draft ${id}: the gate passed for ${platform} and the check ran. Nothing was posted.`);
 }
 
 /** Jason or Destiny only. The mark is what opens Approve, so no agent and no engine write can set it. */

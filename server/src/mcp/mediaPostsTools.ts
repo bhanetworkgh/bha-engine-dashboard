@@ -193,7 +193,7 @@ export const setMediaPostPattern = gateTool(
 export const setMediaAutopost: ToolDefinition = {
   name: 'set_media_autopost',
   description:
-    "Pause or resume the Media Twin's automatic posting (24 Nov 2026). While paused, a draft that would have passed the second review and posted on its own goes to Jason and Destiny as Approve / Reject cards instead; resuming lets the next review post again. Nothing already posted changes. HELD HERE: requester_user_id is Jason or Destiny (not_permitted); refused on any agent token; a reason is required. With no paused argument it reads the current state and changes nothing. dry_run shows the change and writes nothing. One media_autopost_paused or media_autopost_resumed event. Audited on engine_mcp_writes.",
+    "Pause or resume the Media Twin's automatic posting (24 Nov 2026). Use it when Jason or Destiny asks, in any words, to turn automatic posting off, stop it, disable it, hold it, or turn it back on: paused true to stop, false to resume, and the reason in their words. While paused, a draft that would have passed the second review and posted on its own goes to Jason and Destiny as Approve / Reject cards instead; resuming lets the next review post again. Nothing already posted changes. HELD HERE: requester_user_id is Jason or Destiny (not_permitted); refused on any agent token but Genie's, whose call is checked against the ask; a reason is required. With no paused argument it reads the current state and changes nothing. dry_run shows the change and writes nothing. One media_autopost_paused or media_autopost_resumed event. Audited on engine_mcp_writes.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -207,7 +207,8 @@ export const setMediaAutopost: ToolDefinition = {
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false, title: 'Pause or resume Media Twin posting' },
   handler: async (args, deps) => {
     if (typeof args.paused !== 'boolean') return { ok: true, ...(await review.pauseState()) };
-    if (deps.agent) return { ok: false, reason: 'agent_not_permitted', message: `An agent (${deps.agent}) may not pause or resume Media Twin posting.` };
+    // Genie may, for Jason or Destiny asking it in Slack (24 Nov 2026, Destiny); its call is intent-checked first.
+    if (deps.agent && deps.agent !== 'genie') return { ok: false, reason: 'agent_not_permitted', message: `An agent (${deps.agent}) may not pause or resume Media Twin posting.` };
     const dry = args.dry_run === true;
     const requester = str(args, 'requester_user_id');
     const audit = await auditOpen({ tool: 'set_media_autopost', args, access: deps.access, kind: 'media_posts', requester, dry_run: dry });

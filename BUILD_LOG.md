@@ -16279,3 +16279,9 @@ Files:      server/src/mediaReview.ts (new), server/src/mediaPosts.ts, server/sr
 Built:      POST /api/engine/media-posts/:id/review; the reviewer decides as media-twin-reviewer (in process only); bhanetwork.org links tagged per platform before approval; the live link said with its UTC time; set_media_autopost and /api/engine/media-autopost for the pause.
 Decision:   A review that cannot run posts nothing and goes to the cards. A platform that failed before or that a person rejected goes to a person on a second fail.
 Proof:      Not yet. The first real run is the 11:30 New York draft on 25 Nov 2026.
+
+## 2026-11-24 — Genie pauses Media Twin posting; Jason's logging rule
+Intent:     Destiny: Jason should be able to say "@Genie turn off automatic posting" however he phrases it. Jason's go-ahead (C0AFR4BH9UH 1795485826.492839) asked every auto-post to log its final text, the reviewer id and the decision path, and named uptime and the Intake-2 / WFJO / Charge Gate rails.
+Files:      server/src/mcp/mediaPostsTools.ts, server/src/mcp/index.ts, server/src/intentCheck.ts, server/src/mediaPosts.ts, server/src/mediaReview.ts, server/test/media-review.test.cjs, CLAUDE.md
+Built:      set_media_autopost in Genie's scope, intent-checked, Jason or Destiny only. The posted line in the thread names the decision path, the reviewer and the final text. Two reviewer rules: no uptime figure; nothing ahead of the buyer gates (no price, plan or install figure, no buyer or payment claim).
+Proof:      Not yet: a real "@Genie turn off automatic posting" and the 25 Nov 11:30 New York run.

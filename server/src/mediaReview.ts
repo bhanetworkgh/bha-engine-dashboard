@@ -40,7 +40,8 @@ const MODEL_TIMEOUT_MS = 60_000;
 export const RULES: { id: string; rule: string }[] = [
   { id: 'no_buying', rule: 'Nothing about buying, prices, charging, deposits, paying, pre-orders, discounts or ads. No dollar amounts and no "$199". The only ask allowed is joining vFarm Early Access.' },
   { id: 'one_soft_ask', rule: 'At most one call to action, and it is a soft Early Access ask. No pressure, no urgency, no scarcity.' },
-  { id: 'no_live_monitoring', rule: 'No promise or claim that vFarm monitoring is live, real time, always on, 24/7 or watching your farm today. Monitoring is described as in development or being tested.' },
+  { id: 'no_live_monitoring', rule: 'No promise or claim that vFarm monitoring is live, real time, always on, 24/7 or watching your farm today, and no uptime or reliability figure. Monitoring is described as in development or being tested.' },
+  { id: 'no_gate_contradiction', rule: 'Nothing ahead of where the buyer gates stand: no price, plan, install or maintenance figure, no claim that anyone has bought, paid, reserved or been charged, and no claim that buyers, pilots or site specifications are further along than the draft\'s own sources show.' },
   { id: 'stage1_from_record', rule: 'Any Stage 1, hardware or test result is stated only as far as the draft\'s own sources show it. No invented results, numbers, dates or customers.' },
   { id: 'problem_with_fix', rule: 'Every problem the post mentions is paired with what is being done about it, with equal weight. No problem left hanging.' },
   { id: 'something_new', rule: 'It says something new compared with the last three posts on this platform: not the same story, hook or wording again.' },

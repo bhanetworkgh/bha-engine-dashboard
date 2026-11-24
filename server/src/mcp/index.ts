@@ -386,6 +386,9 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         'rank_lanes', 'lane_health', 'get_priority_evidence',
         // 2026-11-20 (Destiny, Jason 1795202126.334919): the Production-Income Board, read and kept on his ask.
         'read_income_board', 'set_income_board_item',
+        // 2026-11-24 (Destiny): Jason says "@Genie turn off automatic posting" in any words; Jason or Destiny only,
+        // intent-checked.
+        'set_media_autopost',
         // 2026-11-23 (Destiny, LOOP-1795365194865-CV3L): the Decision Watch pay penalty, read only.
         'read_watch_penalties',
         // 2026-11-14 (D4): the daily outside digest from BHA RSS, the one read of outside sources.

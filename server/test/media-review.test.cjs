@@ -28,4 +28,10 @@ ok('all pass: post', () => assert.equal(m.nextStep({ x: { pass: true }, linkedin
 ok('a first fail: rewrite', () => assert.equal(m.nextStep({ x: { pass: true }, linkedin: { pass: false } }, new Set()), 'rewrite'));
 ok('a fail on a platform rejected before: a person', () => assert.equal(m.nextStep({ x: { pass: false }, linkedin: { pass: false } }, new Set(['linkedin'])), 'people'));
 ok('the note carries the reasons, the rules and the fix', () => assert.equal(m.note({ pass: false, failed: ['no_buying'], reasons: 'Says $199.', fix: 'Drop the price.' }), 'Second review: Says $199. (rules: no_buying) Fix: Drop the price.'));
+const posts = require(path.join(dist, 'mediaPosts.js'));
+ok('the decision path is named on every post', () => {
+  assert.equal(posts.decisionPath({ parent_post_id: null }, 'media-twin-reviewer'), 'passed the second review first time');
+  assert.equal(posts.decisionPath({ parent_post_id: 'MTP-1-AAAA' }, 'media-twin-reviewer'), 'passed the second review on a rewrite');
+  assert.equal(posts.decisionPath({ parent_post_id: null }, 'U0A9V97949F'), 'approved by Jason');
+});
 console.log(`${n} passed`);

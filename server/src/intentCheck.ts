@@ -233,6 +233,8 @@ export async function describe(tool: string, args: Args): Promise<string | null>
       return `Change the Google Doc ${str(args.document_id)}: ${Array.isArray(args.replacements) && args.replacements.length ? `replace ${clip(args.replacements, 1500)}` : 'no replacements'}${typeof args.append === 'string' && args.append ? `; add at the end: "${clip(args.append, 1500)}"` : ''}.`;
     case 'set_income_board_item':
       return `${str(args.action) === 'remove' ? 'Take' : 'Put'} ${str(args.record_id)} ${str(args.action) === 'remove' ? 'off' : 'on'} the Production-Income Board${str(args.target_date) ? `, target date ${str(args.target_date)}` : ''}. Reason given: "${clip(args.reason, 400)}".`;
+    case 'set_media_autopost':
+      return `${args.paused === true ? 'Pause' : args.paused === false ? 'Resume' : 'Read the state of'} the Media Twin's automatic posting. Reason given: "${clip(args.reason, 400)}".`;
     case 'log_sop':
       return `Log a new ${/^Spec\s+--/i.test(str(args.title)) ? 'spec' : 'SOP'} in BHARAG titled "${clip(args.title, 300)}"${Array.isArray(args.tags) && args.tags.length ? `, tagged ${args.tags.join(', ')}` : ''}. Its text: "${shown(args.content, 6000)}".`;
     case 'edit_sop':
@@ -252,6 +254,8 @@ export const CHECKED: ReadonlyArray<string> = [
   'post_channel_message', 'edit_doc',
   // 20 Nov 2026: the Production-Income Board.
   'set_income_board_item',
+  // 24 Nov 2026: Jason or Destiny turning the Media Twin's automatic posting off or on through Genie.
+  'set_media_autopost',
 ];
 
 /* ------------------------------------------------------------------ the ask */
