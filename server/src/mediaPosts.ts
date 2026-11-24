@@ -884,18 +884,30 @@ export async function posted(input: { since: string; platform?: string | null; l
   };
 }
 
-export async function read(input: { post_id?: string | null; status?: string | null; include_test?: boolean; limit?: number } = {}) {
+/** Pure: the words a search looks for, at most 8, each at least 2 characters (24 Nov 2026). */
+export function searchWords(search: string | null | undefined): string[] {
+  return [...new Set(String(search ?? '').toLowerCase().split(/[^a-z0-9-]+/).filter((w) => w.length >= 2))].slice(0, 8);
+}
+
+export async function read(input: { post_id?: string | null; status?: string | null; include_test?: boolean; limit?: number; search?: string | null; slack_ts?: string | null } = {}) {
   const where: string[] = [];
   const vals: unknown[] = [];
   const add = (sql: string, v: unknown) => {
     vals.push(v);
-    where.push(sql.replace('?', `$${vals.length}`));
+    where.push(sql.replaceAll('?', `$${vals.length}`));
   };
   if (input.post_id) add('post_id = ?', input.post_id);
   if (input.status) add('status = ?', input.status);
+  // 24 Nov 2026 (Destiny): Genie could only see the newest drafts, so it told Jason a 10 Nov post was never posted.
+  // search finds a draft by its own words wherever it sits; slack_ts finds the draft a Slack card or thread is about.
+  const words = searchWords(input.search);
+  for (const w of words) add(`lower(post_id || ' ' || coalesce(angle, '') || ' ' || coalesce(card::text, '') || ' ' || coalesce(platforms::text, '')) LIKE '%' || ? || '%'`, w);
+  if (input.slack_ts) add(`(slack_ts = ? OR EXISTS (SELECT 1 FROM jsonb_each(platforms) e WHERE e.value->>'slack_ts' = ? OR e.value->>'slack_thread_ts' = ?))`, input.slack_ts);
   if (!input.include_test && !input.post_id) where.push('test = false');
   const limit = Math.min(Math.max(Number(input.limit) || 100, 1), 500);
-  const r = await query(`SELECT ${COLS} FROM engine_media_posts ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY created_at DESC LIMIT ${limit}`, vals);
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const r = await query(`SELECT ${COLS} FROM engine_media_posts ${whereSql} ORDER BY created_at DESC LIMIT ${limit}`, vals);
+  const m = await query<{ n: string; oldest: Date | null; newest: Date | null }>(`SELECT count(*)::text AS n, min(created_at) AS oldest, max(created_at) AS newest FROM engine_media_posts ${whereSql}`, vals);
   const posts = r.rows.map((x) => show(x as Record<string, unknown>));
   const ids = posts.map((p) => p.post_id);
   const hist = ids.length
@@ -918,8 +930,33 @@ export async function read(input: { post_id?: string | null; status?: string | n
        FROM engine_media_posts`,
   );
   const k = c.rows[0] ?? {};
+  const matched = Number(m.rows[0]?.n ?? 0);
+  const isoOf = (d: unknown) => (d instanceof Date ? d.toISOString() : d ? String(d) : null);
+  const shown = posts.map((p) => p.created_at).sort();
   return {
     schema: SCHEMA,
+    // What was looked at, first, so a cut answer still says how far back it reached (24 Nov 2026).
+    looked_at: {
+      matched,
+      returned: posts.length,
+      all_returned: posts.length >= matched,
+      search: words.length ? words.join(' ') : null,
+      slack_ts: input.slack_ts ?? null,
+      oldest_returned: shown[0] ?? null,
+      newest_returned: shown[shown.length - 1] ?? null,
+      oldest_matching: isoOf(m.rows[0]?.oldest),
+      note: posts.length >= matched
+        ? 'Every draft matching this lookup is in the answer.'
+        : `Only the newest ${posts.length} of ${matched} matching drafts are in the answer. A draft older than ${shown[0] ?? 'these'} is not shown: search by its words or post_id before saying it was not done.`,
+    },
+    // One line per draft before the whole drafts, so the key facts survive a cut: what it is and where each platform stands.
+    summary: posts.map((p) => ({
+      post_id: p.post_id,
+      run_date: p.run_date,
+      status: p.status,
+      headline: String((p.card as Record<string, unknown> | null)?.headline ?? '').replace(/\*/g, ''),
+      platforms: Object.fromEntries(Object.entries(p.platforms ?? {}).map(([k2, v]) => [k2, v?.posted_url ? `live ${v.posted_url}` : `${v?.decision ?? 'none'}${v?.claim_check_status && v.claim_check_status !== 'clean' ? ` (${v.claim_check_status})` : ''}`])),
+    })),
     counts: { drafts: Number(k.drafts ?? 0), waiting_on_decision: Number(k.waiting ?? 0), approved: Number(k.approved ?? 0), rejected: Number(k.rejected ?? 0), blocked: Number(k.blocked ?? 0), target: Number(k.target ?? 0), test_drafts: Number(k.tests ?? 0) },
     posts: posts.map((p) => ({
       ...p,
@@ -931,7 +968,7 @@ export async function read(input: { post_id?: string | null; status?: string | n
       `Target: a reliability claim stated as today's behaviour ("no surprises", "only runs when needed", "feels like an appliance"); it cannot be approved until ${STAGE_GATE_LOOP} is Closed, a real Stage 1 record has passed and a real cabinet log is saved as evidence under ${TARGET_PROOF_GATE}. Framed as what we are building or testing, it is fine.`,
       'Flagged: a number about how the farm performs or what it earns; Jason checks it before approving.',
       'Only Jason or Destiny decide; a reject carries a note, and the Media Twin rewrites the draft from it as the next revision.',
-      'Approve posts live only for a draft on a pattern with a Codex entry and an approved for automated reuse mark, on Instagram and X. Otherwise a decision here is the record, and the post goes by hand.',
+      'Approve posts that platform live on LinkedIn, X, Facebook and Instagram, any day (the standard from 15 Nov 2026, LinkedIn from 18 Nov). A platform with a live link went out; one approved with no link has not posted yet.',
     ],
   };
 }

@@ -17,7 +17,7 @@ const str = (args: Record<string, unknown>, key: string): string => (typeof args
 export const readMediaPosts: ToolDefinition = {
   name: 'read_media_posts',
   description:
-    'Read the Media Twin\'s drafts (media.post.v1), newest first: for each, the occasion and angle, the text for LinkedIn, X, Facebook and Instagram, the branded card and its image links, the claim check per platform (clean, flagged, target, blocked, with the sentence that tripped it and, on a target, which Stage 1 records are missing), Jason\'s Approve or Reject per platform with his note, the revision and the draft it replaced, the Slack card, and analytics once posting is on. Use it to see what is waiting on Jason, what he rejected and why (read the notes before rewriting a draft), and what has been approved. Each post\'s text comes back whole. Test drafts are left out unless include_test is true. Returns {schema, counts, posts, rules}. For what went out (what was posted today, what went live on LinkedIn), pass posted_since (a date or time, e.g. today\'s date) and optionally platform: it answers one line per platform posted, with the live link and the whole text.',
+    'Read the Media Twin\'s drafts (media.post.v1), newest first: for each, the occasion and angle, the text for LinkedIn, X, Facebook and Instagram, the branded card and its image links, the claim check per platform (clean, flagged, target, blocked, with the sentence that tripped it and, on a target, which Stage 1 records are missing), Jason\'s Approve or Reject per platform with his note, the revision and the draft it replaced, the Slack card, and analytics once posting is on. Use it to see what is waiting on Jason, what he rejected and why (read the notes before rewriting a draft), and what has been approved. Each post\'s text comes back whole. Test drafts are left out unless include_test is true. Returns {schema, looked_at, summary, counts, posts, rules}: looked_at says how many drafts matched and whether all of them are in the answer, and summary gives one line per draft (status, headline, each platform live with its link or its decision) before the drafts in full. A plain read shows the NEWEST drafts only: to find a particular post, whatever its age, pass search (its words, e.g. "vertical farm twin") or post_id, or slack_ts (the ts of its Slack card or that card\'s thread). Never say a post was not done or not posted from a read that did not include it. For what went out (what was posted today, what went live on LinkedIn), pass posted_since (a date or time, e.g. today\'s date) and optionally platform: it answers one line per platform posted, with the live link and the whole text.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -27,6 +27,8 @@ export const readMediaPosts: ToolDefinition = {
       limit: { type: 'number', description: 'Drafts, newest first. Default 20, at most 100.' },
       posted_since: { type: 'string', description: 'A date (YYYY-MM-DD, UTC) or time: answer only what went live since then, one line per platform with its link.' },
       platform: { type: 'string', enum: ['linkedin', 'x', 'facebook', 'instagram'], description: 'With posted_since, one platform only.' },
+      search: { type: 'string', description: 'Words the draft contains (its text, headline, angle or id), e.g. "vertical farm twin". Every word must appear. Finds a draft whatever its age.' },
+      slack_ts: { type: 'string', description: 'The ts of a Media Twin card in Slack, or of the thread it sits in: returns the draft that card belongs to.' },
     },
     additionalProperties: false,
   },
@@ -41,6 +43,8 @@ export const readMediaPosts: ToolDefinition = {
       status: str(args, 'status') || null,
       include_test: args.include_test === true,
       limit: Math.min(typeof args.limit === 'number' ? args.limit : 20, 100),
+      search: str(args, 'search') || null,
+      slack_ts: str(args, 'slack_ts') || null,
     })),
   },
 };

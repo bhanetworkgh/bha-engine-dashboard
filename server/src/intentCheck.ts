@@ -674,6 +674,8 @@ It answers when it does what was asked, gives the information asked for, says it
 
 It does not answer when it says there is no request or question when the message plainly has one, asks the person what they want when the message already said, answers a different question from the one asked, or only describes an error or missing input instead of the message.
 
+A reply that tells someone their work was not done (not posted, not live, not sent, not logged, missing) as a fact, when the message says or implies it was done, must say what it looked up to know that (the record, id or words it searched, or how far back it read). Stated with nothing behind it, the reply does not answer: it is an unchecked claim (24 Nov 2026: Genie told Jason three posts that went live on 10 Nov were not confirmed, from a read of the newest drafts only).
+
 A message can be addressed to someone else, with Bays only copied in (cc). Then its questions are that person's to answer, not Bays'. A reply that notes the message, records it on the right record, or says it is waiting on that person answers it. A reply that answers for that person, makes up their dates or commits them to anything does not.
 
 Return exactly one JSON object and nothing else: {"answers": true or false, "reason": "one short sentence"}.`;
