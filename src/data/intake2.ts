@@ -5,10 +5,17 @@
  * section 1.B; Jason's go-ahead the same day: a unique-link page, not a Google
  * Form, writing onto the lead's existing record).
  *
- * **31 fields, 25 required, 6 optional, labels copied character for
- * character.** The label is the key an answer is stored under, so changing
- * one is a contract change: Hardik first, then here, then BUILD_LOG.
- * `id` is only the page's form-control name and is never stored.
+ * **v2, the NFT leafy-greens rack (25 Nov 2026, Destiny — Jegan's marking in
+ * C0ASMPYQLG3 1795447055.043229, on Jason's ask in the same thread; Hardik is
+ * no longer at BHA).** Shibu's Pilot 1 rack is NFT leafy greens, not the tomato
+ * tray, so 9 questions are reworded for it, 27 and 29 are removed, and 10 crop
+ * and site questions (32 to 41) are added. `n` is a question's fixed number and
+ * is never reused: the upload fields stay 5 and 31, and 27 and 29 are gone, not
+ * renumbered. 39 fields.
+ *
+ * The label is the key an answer is stored under, so changing one is a
+ * contract change: here, then BUILD_LOG, with Jason's yes before a buyer sees
+ * it. `id` is only the page's form-control name and is never stored.
  *
  * This is the one place the server (validation, the buyer page) and the Early
  * Access tab (display) read the fields from.
@@ -19,7 +26,7 @@
  * write a number or "Unknown"; a part the contract leaves open is optional.
  */
 
-export const INTAKE2_CONTRACT = 'VFARM_BUYER_INTAKE.v1';
+export const INTAKE2_CONTRACT = 'VFARM_BUYER_INTAKE.v2';
 
 export interface Intake2Part {
   key: string;
@@ -28,6 +35,8 @@ export interface Intake2Part {
   options?: readonly string[];
   required?: boolean;
   hint?: string;
+  /** A value the page fills in from the lead's own record, for the buyer to confirm or change. */
+  prefill?: 'facility' | 'street' | 'city' | 'region' | 'country';
 }
 
 export type Intake2Field =
@@ -39,11 +48,12 @@ export type Intake2Field =
       label: string;
       required: boolean;
       kind: 'select' | 'multi';
+      hint?: string;
       options: readonly string[];
       /** A free-text box beside the choice; `when` limits it to one option (the "Other" text). */
       detail?: { label: string; when?: string; required?: boolean };
     }
-  | { n: number; id: string; label: string; required: boolean; kind: 'group'; parts: readonly Intake2Part[] }
+  | { n: number; id: string; label: string; required: boolean; kind: 'group'; hint?: string; parts: readonly Intake2Part[] }
   | { n: number; id: string; label: string; required: boolean; kind: 'file' };
 
 const UNITS_LEN = ['mm', 'cm', 'm', 'in', 'ft'] as const;
@@ -54,7 +64,7 @@ const NUM_OR_UNKNOWN = 'A number, or Unknown';
 
 export const INTAKE2_FIELDS: readonly Intake2Field[] = [
   { n: 1, id: 'f1', label: 'What deployment outcome should this first vFarm installation support?', required: true, kind: 'longtext' },
-  { n: 2, id: 'f2', label: 'Which unit type should BHA evaluate?', required: true, kind: 'select', options: ['Standard tomato P1.0 rack', 'Unsure — BHA to confirm fit'] },
+  { n: 2, id: 'f2', label: 'Which unit type should BHA evaluate?', required: true, kind: 'select', options: ['NFT leafy-greens rack (4 channels of 4.5 ft per level)', 'Unsure — BHA to confirm fit'] },
   { n: 3, id: 'f3', label: 'How many racks should the feasibility review evaluate?', required: true, kind: 'integer', min: 1 },
   {
     n: 4,
@@ -62,6 +72,7 @@ export const INTAKE2_FIELDS: readonly Intake2Field[] = [
     label: 'How do you expect the racks to be arranged?',
     required: true,
     kind: 'select',
+    hint: 'Place racks in a row with both channel ends reachable: harvest and channel cleaning happen at the ends, and the reservoir sits at the base of each rack.',
     options: ['Single row', 'Multiple rows', 'Along a wall/perimeter', 'Layout not yet decided', 'Other'],
     detail: { label: 'Describe the arrangement', when: 'Other', required: true },
   },
@@ -72,12 +83,14 @@ export const INTAKE2_FIELDS: readonly Intake2Field[] = [
     label: 'Confirm the proposed installation site.',
     required: true,
     kind: 'group',
+    hint: 'We have filled in the site we hold for you. Please confirm it or correct it, and add the floor or room.',
     parts: [
-      { key: 'p1', label: 'Facility/site name', kind: 'text', required: true },
-      { key: 'p2', label: 'Street or location reference', kind: 'text', required: true },
-      { key: 'p3', label: 'City', kind: 'text', required: true },
-      { key: 'p4', label: 'Region', kind: 'text', required: true },
-      { key: 'p5', label: 'Country', kind: 'text', required: true },
+      { key: 'p1', label: 'Facility/site name', kind: 'text', required: true, prefill: 'facility' },
+      { key: 'p2', label: 'Street or location reference', kind: 'text', required: true, prefill: 'street' },
+      { key: 'p3', label: 'City', kind: 'text', required: true, prefill: 'city' },
+      { key: 'p4', label: 'Region', kind: 'text', required: true, prefill: 'region' },
+      { key: 'p5', label: 'Country', kind: 'text', required: true, prefill: 'country' },
+      { key: 'p6', label: 'Floor or room', kind: 'text', required: true },
     ],
   },
   {
@@ -105,6 +118,7 @@ export const INTAKE2_FIELDS: readonly Intake2Field[] = [
       { key: 'p3', label: 'Right', kind: 'text', required: true, hint: NUM_OR_UNKNOWN },
       { key: 'p4', label: 'Rear', kind: 'text', required: true, hint: NUM_OR_UNKNOWN },
       { key: 'p5', label: 'Unit', kind: 'select', options: UNITS_LEN, required: true },
+      { key: 'p6', label: 'At least one side of each channel end free for harvest and channel cleaning', kind: 'select', options: YNU, required: true },
     ],
   },
   {
@@ -140,17 +154,15 @@ export const INTAKE2_FIELDS: readonly Intake2Field[] = [
   {
     n: 11,
     id: 'f11',
-    label: 'Describe electrical service at the proposed installation point.',
+    label: 'Describe the 110 V outlet for the rack.',
     required: true,
     kind: 'group',
+    hint: 'The rack runs on 120 V single phase and draws under 300 W, so only the outlet near it matters here.',
     parts: [
-      { key: 'p1', label: 'Availability', kind: 'select', options: AVAIL, required: true },
-      { key: 'p2', label: 'Voltage', kind: 'text', hint: 'Unknown is fine' },
-      { key: 'p3', label: 'Phase', kind: 'text', hint: 'Unknown is fine' },
-      { key: 'p4', label: 'Circuit/breaker rating', kind: 'text', hint: 'Unknown is fine' },
-      { key: 'p5', label: 'Dedicated circuit', kind: 'select', options: YNU },
-      { key: 'p6', label: 'Distance', kind: 'text', hint: 'From the installation point, with a unit' },
-      { key: 'p7', label: 'Notes', kind: 'text' },
+      { key: 'p1', label: '110 V outlet within 3 m of the rack', kind: 'select', options: YNU, required: true },
+      { key: 'p2', label: 'GFCI protected', kind: 'select', options: YNU, required: true },
+      { key: 'p3', label: 'Racks sharing that circuit', kind: 'text', required: true, hint: NUM_OR_UNKNOWN },
+      { key: 'p4', label: 'Notes', kind: 'text' },
     ],
   },
   {
@@ -159,13 +171,17 @@ export const INTAKE2_FIELDS: readonly Intake2Field[] = [
     label: 'Describe the water connection available at the proposed installation point.',
     required: true,
     kind: 'group',
+    hint: 'NFT greens are sensitive to the inlet water: its source and quality set the nutrient mix.',
     parts: [
       { key: 'p1', label: 'Availability', kind: 'select', options: AVAIL, required: true },
-      { key: 'p2', label: 'Source/type', kind: 'text' },
+      { key: 'p2', label: 'Source', kind: 'select', options: ['Tap/municipal', 'RO', 'Well', 'Other', 'Unknown'], required: true },
       { key: 'p3', label: 'Potable', kind: 'select', options: YNU },
-      { key: 'p4', label: 'Pressure/flow', kind: 'text', hint: 'If known' },
-      { key: 'p5', label: 'Distance', kind: 'text', hint: 'From the installation point, with a unit' },
-      { key: 'p6', label: 'Notes', kind: 'text' },
+      { key: 'p4', label: 'Supply pressure', kind: 'text', hint: 'If known' },
+      { key: 'p5', label: 'TDS or EC', kind: 'text', hint: 'If known' },
+      { key: 'p6', label: 'pH', kind: 'text', hint: 'If known' },
+      { key: 'p7', label: 'Chlorine', kind: 'text', hint: 'If known' },
+      { key: 'p8', label: 'Distance', kind: 'text', hint: 'From the installation point, with a unit' },
+      { key: 'p9', label: 'Notes', kind: 'text' },
     ],
   },
   {
@@ -183,10 +199,13 @@ export const INTAKE2_FIELDS: readonly Intake2Field[] = [
     label: 'Describe the indoor or protected conditions at the installation site.',
     required: true,
     kind: 'group',
+    hint: 'Lettuce bolts in a warm room, so the room temperature through the year decides the crop plan.',
     parts: [
       { key: 'p1', label: 'Conditions', kind: 'select', options: ['Fully indoor', 'Protected but not conditioned', 'Semi-exposed', 'Exposed', 'Unknown'], required: true },
       { key: 'p2', label: 'Weather exposure', kind: 'text' },
-      { key: 'p3', label: 'Conditioned/HVAC', kind: 'select', options: YNU },
+      { key: 'p3', label: 'Air conditioning in the room', kind: 'select', options: YNU, required: true },
+      { key: 'p5', label: 'Room temperature range through the year', kind: 'text', required: true, hint: 'With a unit, or Unknown' },
+      { key: 'p6', label: 'Room humidity range through the year', kind: 'text', required: true, hint: 'Percent, or Unknown' },
       { key: 'p4', label: 'Notes', kind: 'text' },
     ],
   },
@@ -219,8 +238,9 @@ export const INTAKE2_FIELDS: readonly Intake2Field[] = [
     n: 18,
     id: 'f18',
     label: 'What network connectivity is available at the installation area?',
-    required: false,
+    required: true,
     kind: 'multi',
+    hint: 'The rack controller needs Wi-Fi or an Ethernet point at the rack.',
     options: ['Ethernet', 'Wi-Fi', 'Cellular only', 'None', 'Unknown'],
     detail: { label: 'Notes' },
   },
@@ -266,35 +286,137 @@ export const INTAKE2_FIELDS: readonly Intake2Field[] = [
     options: ['Yes', 'No', 'Needs discussion'],
     detail: { label: 'Constraints' },
   },
-  { n: 27, id: 'f27', label: 'What feasibility questions must BHA resolve?', required: false, kind: 'longtext' },
-  { n: 28, id: 'f28', label: 'What pricing information or decision criteria do you need?', required: false, kind: 'longtext' },
-  { n: 29, id: 'f29', label: 'What ownership or operating-responsibility questions must be resolved?', required: false, kind: 'longtext' },
+  { n: 28, id: 'f28', label: 'What decision criteria will you use when the price is put to you?', required: false, kind: 'longtext', hint: 'The price itself comes from BHA\'s cost review, not from this form.' },
   {
     n: 30,
     id: 'f30',
-    label: 'What licensing or food-safety requirements are known for this site and intended use?',
+    label: 'What local food-safety or health rules apply to growing and handling leafy greens for eating at this site?',
     required: true,
     kind: 'group',
     parts: [
-      { key: 'p1', label: 'Intended produce use', kind: 'select', options: ['Internal use', 'Sale', 'Service to public', 'Research or education', 'Not decided', 'Other'], required: true },
-      { key: 'p2', label: 'Jurisdiction/authority', kind: 'text' },
-      { key: 'p3', label: 'Known permit or food-safety requirements', kind: 'text' },
+      { key: 'p2', label: 'Jurisdiction/authority', kind: 'text', required: true, hint: 'For example the city or county health department, or Unknown' },
+      { key: 'p3', label: 'Known food-safety or health rules for growing and handling produce', kind: 'text', required: true, hint: '"None known" is a fine answer' },
       { key: 'p4', label: 'Responsible contact', kind: 'text' },
       { key: 'p5', label: 'Notes', kind: 'text' },
     ],
   },
   { n: 31, id: 'f31', label: 'Upload supporting site, utility, approval or compliance documents, if available.', required: false, kind: 'file' },
+  // 32 to 41: the NFT leafy-greens questions (25 Nov 2026, Jegan).
+  {
+    n: 32,
+    id: 'f32',
+    label: 'Which greens do you want to grow first?',
+    required: true,
+    kind: 'multi',
+    options: ['Lettuce varieties', 'Basil', 'Spinach', 'A mix of greens', 'Not sure yet'],
+    detail: { label: 'Varieties or notes' },
+  },
+  {
+    n: 33,
+    id: 'f33',
+    label: 'Should the kit ship with seed and starter plugs, or will you buy them locally?',
+    required: true,
+    kind: 'select',
+    options: ['Ship seed and starter plugs with the kit', 'We will buy seed locally', 'Not decided'],
+  },
+  {
+    n: 34,
+    id: 'f34',
+    label: 'Who will seed and transplant?',
+    required: true,
+    kind: 'select',
+    options: ['Our team, from the BHA procedure', 'Seedlings supplied to us', 'Not decided'],
+    detail: { label: 'Notes' },
+  },
+  {
+    n: 35,
+    id: 'f35',
+    label: 'How do you want to harvest?',
+    required: true,
+    kind: 'group',
+    parts: [
+      { key: 'p1', label: 'Harvest style', kind: 'select', options: ['Whole head', 'Cut-and-come-again', 'Not decided'], required: true },
+      { key: 'p2', label: 'How often', kind: 'select', options: ['Every week', 'Every two weeks', 'Other', 'Not decided'], required: true },
+      { key: 'p3', label: 'Notes', kind: 'text' },
+    ],
+  },
+  {
+    n: 36,
+    id: 'f36',
+    label: 'Where will the produce go?',
+    required: true,
+    kind: 'select',
+    options: ['Sale', 'A kitchen', 'Demonstration', 'Not decided', 'Other'],
+    detail: { label: 'Details', when: 'Other', required: true },
+  },
+  {
+    n: 37,
+    id: 'f37',
+    label: 'What yield are you aiming for?',
+    required: true,
+    kind: 'group',
+    hint: 'For reference, the prototype carries 40 net cups on 4 channels, 10 per channel, on a 30 to 40 day cycle after transplant.',
+    parts: [
+      { key: 'p1', label: 'Heads per channel per cycle', kind: 'text', required: true, hint: NUM_OR_UNKNOWN },
+      { key: 'p2', label: 'Heads per week per rack', kind: 'text', required: true, hint: NUM_OR_UNKNOWN },
+    ],
+  },
+  {
+    n: 38,
+    id: 'f38',
+    label: 'At full run, how many levels per rack and how many racks do you plan?',
+    required: true,
+    kind: 'group',
+    hint: 'This sets the yield target and the water sizing together.',
+    parts: [
+      { key: 'p1', label: 'Levels per rack', kind: 'text', required: true, hint: NUM_OR_UNKNOWN },
+      { key: 'p2', label: 'Racks', kind: 'text', required: true, hint: NUM_OR_UNKNOWN },
+    ],
+  },
+  {
+    n: 39,
+    id: 'f39',
+    label: 'Does daylight reach the rack?',
+    required: true,
+    kind: 'select',
+    hint: 'This sets the timer plan for the grow lights.',
+    options: ['Dark room, no daylight', 'Some daylight', 'Direct sunlight on the rack', 'Unknown'],
+  },
+  {
+    n: 40,
+    id: 'f40',
+    label: 'What hygiene arrangements are there at the rack?',
+    required: true,
+    kind: 'group',
+    parts: [
+      { key: 'p1', label: 'Hand wash point near the rack', kind: 'select', options: YNU, required: true },
+      { key: 'p2', label: 'Footwear or pest rules for the room', kind: 'text', hint: '"None" is a fine answer' },
+      { key: 'p3', label: 'Who cleans the channels and reservoir between cycles', kind: 'select', options: WHO, required: true },
+    ],
+  },
+  {
+    n: 41,
+    id: 'f41',
+    label: 'Where would nutrient and seed be stored, and spent nutrient solution disposed of?',
+    required: true,
+    kind: 'group',
+    parts: [
+      { key: 'p1', label: 'Dry shelf for nutrient A and B and seed', kind: 'select', options: YNU, required: true },
+      { key: 'p2', label: 'Where spent nutrient solution can be disposed of', kind: 'text', required: true, hint: 'For example a sink or floor drain, or Unknown' },
+    ],
+  },
 ];
 
 /** Grouped for the page and the dashboard, in the list's own order. The titles are ours, not the contract's. */
 export const INTAKE2_SECTIONS: { title: string; fields: number[] }[] = [
   { title: 'The installation', fields: [1, 2, 3, 4, 5] },
+  { title: 'The crop', fields: [32, 33, 34, 35, 36, 37, 38] },
   { title: 'The site', fields: [6, 7, 8, 9, 10] },
-  { title: 'Power, water and environment', fields: [11, 12, 13, 14, 15] },
+  { title: 'Power, water and environment', fields: [11, 12, 13, 14, 15, 39] },
   { title: 'Approvals and access', fields: [16, 17, 18] },
-  { title: 'Operation', fields: [19, 20, 21] },
+  { title: 'Operation and hygiene', fields: [19, 20, 21, 40, 41] },
   { title: 'Timing and decision', fields: [22, 23, 24, 25, 26] },
-  { title: 'Open questions and compliance', fields: [27, 28, 29, 30, 31] },
+  { title: 'Pricing and food safety', fields: [28, 30, 31] },
 ];
 
 /** File limits for the two upload fields. */

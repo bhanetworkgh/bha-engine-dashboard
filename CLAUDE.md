@@ -1388,8 +1388,15 @@ contract of 13 Oct and field list of 14 Oct, `VFARM_BUYER_INTAKE.v1`; Jason in
 that lead's existing record; the 31 fields exactly as defined, including the two file
 uploads without forcing Google login"). `server/src/intake2.ts`, the page
 `server/src/intake2Page.ts`, the fields `src/data/intake2.ts` (labels copied character
-for character; a label is the key an answer is stored under, so a change is Hardik's,
-then here, then BUILD_LOG), migration 76.
+for character; a label is the key an answer is stored under, so a change is made there,
+then BUILD_LOG, with Jason's yes before a buyer sees it; Hardik is no longer at BHA), migration 76.
+- **v2, the NFT leafy-greens list** (25 Nov 2026, Destiny — Jegan's marking in C0ASMPYQLG3
+  1795447055.043229): contract `VFARM_BUYER_INTAKE.v2`, 39 questions. Nine reworded for the NFT rack,
+  27 and 29 removed, 32 to 41 added (the crop, yield, daylight, hygiene, storage). A question's `n` is
+  never reused, so the uploads stay 5 and 31; the page numbers questions in the order shown. Question 6
+  is filled in from the lead's own record (`sitePrefill`: a person-set `intake_2_invite.site_prefill`,
+  else the organisation and Form A's city, region and country) for the buyer to confirm; migration 159
+  set Shibu's street, 401 Main Street, Utica (Jason's Pilot 1 design baseline).
 
 - **The Stage 1 → 2 move is the trigger.** `earlyAccess.moveStage` to 2 calls
   `intake2.issueInvite`; the invite never undoes the move, and its outcome comes back

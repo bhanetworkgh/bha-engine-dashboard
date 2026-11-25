@@ -3,7 +3,7 @@
  * please test it from the dashboard somehow").
  *
  *   test_submit_intake2 — write connection only, in no agent's scope. Builds one valid answer
- *                         for every one of the 31 questions from the field list itself
+ *                         for every question from the field list itself
  *                         (src/data/intake2.ts), so it can never drift from the form, and sends
  *                         them through intake2.submit — the function the buyer's own link calls.
  *                         So the test is the real path: the answers land on the lead, the event is
@@ -85,7 +85,7 @@ function tinyPdf(): Buffer {
 export const testSubmitIntake2Tool: ToolDefinition = {
   name: 'test_submit_intake2',
   description:
-    'Fill Form 2 (the 31-question site and deployment specification) for a TEST lead and send it through the buyer link\'s own submit, so the whole path runs for real: answers on the lead, the completed event, the #vfarm-early-access post and the buyer\'s receipt email. One valid answer per question is built from the form\'s own field list, free text starting "TEST". Only Destiny or Jason; only a lead whose email is an @bhanetwork.org address (a real buyer is refused); the lead must be in Stage 2 with a Form 2 link. lead: the lead\'s row id or its buyer_intake_id (VFBUYER-…). confirm: exactly "SUBMIT TEST <buyer_intake_id>". with_file: also upload a one-page test PDF to question 5 through the link. dry_run: validate the answers and write nothing. A second call with the same answers is a retry (already: true). Audited on engine_mcp_writes.',
+    'Fill Form 2 (the site and deployment specification) for a TEST lead and send it through the buyer link\'s own submit, so the whole path runs for real: answers on the lead, the completed event, the #vfarm-early-access post and the buyer\'s receipt email. One valid answer per question is built from the form\'s own field list, free text starting "TEST". Only Destiny or Jason; only a lead whose email is an @bhanetwork.org address (a real buyer is refused); the lead must be in Stage 2 with a Form 2 link. lead: the lead\'s row id or its buyer_intake_id (VFBUYER-…). confirm: exactly "SUBMIT TEST <buyer_intake_id>". with_file: also upload a one-page test PDF to question 5 through the link. dry_run: validate the answers and write nothing. A second call with the same answers is a retry (already: true). Audited on engine_mcp_writes.',
   inputSchema: {
     type: 'object',
     properties: {

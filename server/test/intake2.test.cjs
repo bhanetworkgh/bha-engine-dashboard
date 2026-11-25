@@ -87,11 +87,13 @@ const srv = http.createServer((req, res) => {
   const eventsFor = async (type, subject) => Number((await query(`SELECT count(*) FROM engine_events WHERE event_type = $1 AND subject_id = $2`, [type, subject])).rows[0].count);
 
   /* 0. the contract's numbers */
-  assert.equal(INTAKE2_FIELDS.length, 31);
-  assert.equal(INTAKE2_FIELDS.filter((f) => f.required).length, 25);
-  assert.equal(INTAKE2_FIELDS.filter((f) => !f.required).length, 6);
-  assert.deepEqual(INTAKE2_FIELDS.map((f) => f.n), Array.from({ length: 31 }, (_, i) => i + 1));
-  ok('31 fields, 25 required, 6 optional, numbered in order');
+  // v2 (25 Nov 2026): the NFT leafy-greens list. 27 and 29 are gone and never reused; 32 to 41 are new.
+  assert.equal(INTAKE2_FIELDS.length, 39);
+  assert.equal(INTAKE2_FIELDS.filter((f) => f.required).length, 36);
+  assert.equal(INTAKE2_FIELDS.filter((f) => !f.required).length, 3);
+  assert.deepEqual(INTAKE2_FIELDS.map((f) => f.n), [...Array.from({ length: 26 }, (_, i) => i + 1), 28, 30, 31, ...Array.from({ length: 10 }, (_, i) => i + 32)]);
+  assert.deepEqual(INTAKE2_FIELDS.filter((f) => f.kind === 'file').map((f) => f.n), [5, 31]);
+  ok('39 fields, 36 required, 3 optional; 27 and 29 removed, 32 to 41 added, uploads still 5 and 31');
 
   /* 1. a Stage 1 lead is refused, and nothing is sent */
   const L = await lead({ name: 'Ama Test Mensah', email: `ama+${T.toLowerCase()}@example.org`, org: 'Test Farm', form_a: { answers: {}, buyer_intake_id: BUYER, early_access_lead_id: `VFLEAD-${T}`, correlation_id: `VFARM-FORMA-T${T}`, source_campaign: null, submitted_at: null } });
@@ -158,26 +160,26 @@ const srv = http.createServer((req, res) => {
   ok('only PDF, JPG, PNG on the two file questions; one private folder per lead');
 
   /* 7. validation */
-  await assert.rejects(i2.submit(token, { answers: {} }, null), (e) => e.status === 422 && e.errors.length === 25);
+  await assert.rejects(i2.submit(token, { answers: {} }, null), (e) => e.status === 422 && e.errors.length === 36);
   const good = {
-    f1: 'Year-round tomatoes for the office cafe.',
-    f2: { choice: 'Standard tomato P1.0 rack' },
+    f1: 'Year-round greens for the office cafe.',
+    f2: { choice: 'NFT leafy-greens rack (4 channels of 4.5 ft per level)' },
     f3: '5',
     f4: { choice: 'Other', detail: '' },
     f5: [f1.file_id],
-    f6: { p1: 'HQ', p2: '1 Main St', p3: 'Lagos', p4: 'Lagos', p5: 'Nigeria' },
+    f6: { p1: 'HQ', p2: '1 Main St', p3: 'Lagos', p4: 'Lagos', p5: 'Nigeria', p6: 'Ground floor, cafe' },
     f7: { p1: '4', p2: '2.5', p3: '2.8', p4: 'm' },
-    f8: { p1: '1', p2: 'Unknown', p3: '0.5', p4: '1', p5: 'm' },
+    f8: { p1: '1', p2: 'Unknown', p3: '0.5', p4: '1', p5: 'm', p6: 'Yes' },
     f9: { p1: 'Ground', p2: 'Sealed concrete', p3: 'Yes', p4: 'None known' },
     f10: { p1: '0.9', p2: '2.1', p3: 'm', p4: 'No', p5: 'Not applicable', p6: 'Loading dock' },
-    f11: { p1: 'Available', p2: '230 V' },
-    f12: { p1: 'Planned' },
+    f11: { p1: 'Yes', p2: 'Unknown', p3: '1' },
+    f12: { p1: 'Planned', p2: 'Tap/municipal' },
     f13: { choice: 'Floor drain', detail: '3 m away' },
-    f14: { p1: 'Fully indoor', p3: 'Yes' },
+    f14: { p1: 'Fully indoor', p3: 'Yes', p5: '20 to 24 C', p6: 'Unknown' },
     f15: { p5: 'HVAC', p6: ['None known'] },
     f16: { choices: ['Facilities approval'] },
     f17: 'None known',
-    f18: { choices: [] },
+    f18: { choices: ['Wi-Fi'] },
     f19: { choice: 'Buyer staff' },
     f20: { choice: 'Buyer staff' },
     f21: { choices: ['Remote status', 'Alerts'] },
@@ -186,7 +188,17 @@ const srv = http.createServer((req, res) => {
     f24: 'Facilities lead, by email',
     f25: 'No blocker known',
     f26: { choice: 'Yes' },
-    f30: { p1: 'Internal use' },
+    f30: { p2: 'City health department', p3: 'None known' },
+    f32: { choices: ['Lettuce varieties'], detail: 'Butterhead' },
+    f33: { choice: 'Ship seed and starter plugs with the kit' },
+    f34: { choice: 'Our team, from the BHA procedure' },
+    f35: { p1: 'Whole head', p2: 'Every week' },
+    f36: { choice: 'A kitchen' },
+    f37: { p1: '10', p2: 'Unknown' },
+    f38: { p1: '1', p2: '1' },
+    f39: { choice: 'Dark room, no daylight' },
+    f40: { p1: 'Yes', p3: 'Buyer staff' },
+    f41: { p1: 'Yes', p2: 'Floor drain' },
     f31: [f2.file_id],
   };
   await assert.rejects(i2.submit(token, { answers: good }, null), (e) => e.errors.length === 1 && e.errors[0].field === 4);

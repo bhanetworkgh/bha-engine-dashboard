@@ -12,7 +12,7 @@
  *   - **writes to that lead's existing record, no duplicate contacts.** The
  *     answers land in `engine_vfarm_leads.intake_2` on the row the link was
  *     issued for. Nothing here inserts a row.
- *   - **the 31 fields exactly as the contract defines them, uploads without a
+ *   - **the fields exactly as `src/data/intake2.ts` defines them (39 from v2, 25 Nov 2026), uploads without a
  *     Google sign-in.** The fields are `src/data/intake2.ts`; files are
  *     uploaded through this server into a private Drive folder per lead.
  *
@@ -113,11 +113,11 @@ interface Row {
   email: string | null;
   organization_name: string | null;
   stage: number;
-  form_a: { buyer_intake_id?: string; early_access_lead_id?: string | null; correlation_id?: string | null } | null;
+  form_a: { buyer_intake_id?: string; early_access_lead_id?: string | null; correlation_id?: string | null; answers?: Record<string, unknown> } | null;
   closed_at?: Date | string | null;
   intake_2: Intake2Stored | null;
   intake_2_completed_at: Date | null;
-  intake_2_invite: (Omit<Intake2Invite, 'link'> & { uploads?: (Intake2File & { field: number; at: string })[] }) | null;
+  intake_2_invite: (Omit<Intake2Invite, 'link'> & { uploads?: (Intake2File & { field: number; at: string })[]; site_prefill?: Partial<Record<SitePrefillKey, string>> }) | null;
 }
 
 const COLS = `id, full_name, email, organization_name, stage, form_a, intake_2, intake_2_completed_at, intake_2_invite, closed_at`;
@@ -260,9 +260,33 @@ async function sendEmail(a: { kind?: MailKind; send_id: string; invite_id: strin
 
 /* ------------------------------------------------------------ the buyer page */
 
+type SitePrefillKey = 'facility' | 'street' | 'city' | 'region' | 'country';
+
+/**
+ * What the page fills in on question 6 for the buyer to confirm (25 Nov 2026, Jegan: prefill Shibu's site).
+ * Read from the lead's own record only: a person-set `intake_2_invite.site_prefill` wins, else the
+ * organisation and Form A's city, region and country. Nothing here is guessed; a key with no value is left out.
+ */
+export function sitePrefill(row: Pick<Row, 'organization_name' | 'form_a' | 'intake_2_invite'>): Partial<Record<SitePrefillKey, string>> {
+  const a = (row.form_a?.answers ?? {}) as Record<string, unknown>;
+  const s = (x: unknown) => (typeof x === 'string' && x.trim() ? x.trim() : undefined);
+  const set = row.intake_2_invite?.site_prefill ?? {};
+  const out: Partial<Record<SitePrefillKey, string>> = {
+    facility: s(set.facility) ?? s(row.organization_name),
+    street: s(set.street),
+    city: s(set.city) ?? s(a['City']),
+    region: s(set.region) ?? s(a['State / Province / Region']),
+    country: s(set.country) ?? s(a['Country']),
+  };
+  for (const k of Object.keys(out) as SitePrefillKey[]) if (!out[k]) delete out[k];
+  return out;
+}
+
 export interface PageState {
   first_name: string;
   organisation: string | null;
+  /** Question 6's site as the lead's record holds it, for the buyer to confirm. */
+  prefill: Partial<Record<SitePrefillKey, string>>;
   submitted: boolean;
   submitted_at: string | null;
   uploads: { field: number; name: string; size: number; file_id: string }[];
@@ -285,6 +309,7 @@ export async function pageState(token: string): Promise<PageState | null> {
   return {
     first_name: (row.full_name || '').trim().split(/\s+/)[0] || 'there',
     organisation: row.organization_name,
+    prefill: sitePrefill(row),
     submitted: Boolean(row.intake_2_completed_at),
     submitted_at: row.intake_2_completed_at ? row.intake_2_completed_at.toISOString() : null,
     uploads: (row.intake_2_invite?.uploads ?? []).map((u) => ({ field: u.field, name: u.name, size: u.size, file_id: u.file_id })),
@@ -537,7 +562,7 @@ async function announce(row: Row, stored: Intake2Stored): Promise<void> {
     const f = INTAKE2_FIELDS.find((x) => x.n === n)!;
     return answerText(f, a[f.label]) || 'not given';
   };
-  const site = (a[INTAKE2_FIELDS[5].label] ?? {}) as Record<string, unknown>;
+  const site = (a[INTAKE2_FIELDS.find((x) => x.n === 6)!.label] ?? {}) as Record<string, unknown>;
   const where = [site['City'], site['Country']].filter(Boolean).join(', ') || 'not given';
   const text = [
     '*Form 2 received (site and deployment specification)*',

@@ -5314,6 +5314,20 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
        END $$`,
     ],
   },
+  {
+    // 25 Nov 2026 (Destiny; Jason in C0ASMPYQLG3 1795447055.043229): Shibu's site, which Jason set as the
+    // Pilot 1 design baseline, so Form 2 v2 fills question 6 with it for him to confirm. Only his two leads,
+    // only where an invite is held, and only the street: city, region and country come from his own Form A.
+    id: 159,
+    name: 'intake-2 site prefill for Shibu (401 Main Street, Utica)',
+    statements: [
+      `UPDATE engine_vfarm_leads
+          SET intake_2_invite = jsonb_set(intake_2_invite, '{site_prefill}', '{"street": "401 Main Street, Utica, NY 13501"}'::jsonb)
+        WHERE id IN ('657b654b-2d35-4426-aef6-962ec4668ba2', 'cf95fc83-8d86-401d-9702-fc660d896ce7')
+          AND intake_2_invite IS NOT NULL
+          AND (intake_2_invite->'site_prefill') IS NULL`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
