@@ -16285,3 +16285,10 @@ Intent:     Destiny: Jason should be able to say "@Genie turn off automatic post
 Files:      server/src/mcp/mediaPostsTools.ts, server/src/mcp/index.ts, server/src/intentCheck.ts, server/src/mediaPosts.ts, server/src/mediaReview.ts, server/test/media-review.test.cjs, CLAUDE.md
 Built:      set_media_autopost in Genie's scope, intent-checked, Jason or Destiny only. The posted line in the thread names the decision path, the reviewer and the final text. Two reviewer rules: no uptime figure; nothing ahead of the buyer gates (no price, plan or install figure, no buyer or payment claim).
 Proof:      Not yet: a real "@Genie turn off automatic posting" and the 25 Nov 11:30 New York run.
+
+## 2026-11-25 09:10 — The intent check knows who a tagged id is
+Intent:     Genie could not nudge Destiny: Jason asked twice in C0ASMPYQLG3 1793968475.591139 and both were refused.
+Files:      server/src/intentCheck.ts, server/test/intent-check.test.cjs, CLAUDE.md
+Problem:    audit 8175: "the post addresses user U0AEW3TBYH1, which is not Destiny"; 8176 repeated it and opened INC-BAYS.AGENT-134; 8177 (send_nudge) was refused as targeting "the id the dashboard had just blocked as not matching Destiny"; 8178/8179: "nothing in the records shows that ID is Jegan's" (INC-BAYS.AGENT-135). The recipients line named people, but the message text the check reads still said <@U0AEW3TBYH1> with no name.
+Fix:        named() puts the person's name after every <@id> in any text the check is shown (clip and shown), from NAMES: the roster in northStarTools.PEOPLE plus Bays and Genie.
+Decision:   Kept the raw id beside the name, so the check can still see exactly who is tagged.

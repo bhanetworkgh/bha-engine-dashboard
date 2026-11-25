@@ -76,8 +76,17 @@ export const ASK_PROPERTY = {
 
 type Args = Record<string, unknown>;
 const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+/**
+ * Who each Slack id is (25 Nov 2026, INC-BAYS.AGENT-134 and -135): a nudge Jason asked Genie to send Destiny was
+ * refused twice because the text said <@U0AEW3TBYH1> and the check could not tell that id was Destiny, and a post
+ * cc'ing <@U0AF011R821> was refused as "nothing shows that id is Jegan's". Every <@id> the check is shown now carries
+ * the person's name beside it.
+ */
+export const NAMES: Record<string, string> = { ...PEOPLE, U0BD5EA1F71: 'Bays (the bot)', U0ADAEB9JTH: 'Genie (the bot)' };
+export const named = (s: string): string =>
+  s.replace(/<@([UW][A-Z0-9]+)(\|[^>]*)?>/g, (m, id: string) => (NAMES[id] ? `${m} (${NAMES[id]})` : m));
 const clip = (v: unknown, n: number): string => {
-  const s = typeof v === 'string' ? v : v === undefined || v === null ? '' : JSON.stringify(v);
+  const s = named(typeof v === 'string' ? v : v === undefined || v === null ? '' : JSON.stringify(v));
   return s.length > n ? s.slice(0, n - 1) + '…' : s;
 };
 /**
@@ -86,10 +95,10 @@ const clip = (v: unknown, n: number): string => {
  * cutting the message and refused it twice). Past the limit the view says it is shortened and the text is sent whole.
  */
 export const shown = (v: unknown, n: number): string => {
-  const s = typeof v === 'string' ? v : v === undefined || v === null ? '' : JSON.stringify(v);
+  const s = named(typeof v === 'string' ? v : v === undefined || v === null ? '' : JSON.stringify(v));
   return s.length > n ? `${s.slice(0, n)} [this view is shortened for the check: the full text is ${s.length} characters and is sent whole]` : s;
 };
-const person = (id: string): string => (id ? `${PEOPLE[id] || 'unknown person'} (${id})` : '(nobody)');
+const person = (id: string): string => (id ? `${NAMES[id] || 'unknown person'} (${id})` : '(nobody)');
 const ids = (v: unknown): string[] =>
   (Array.isArray(v) ? v.map(String) : String(v ?? '').split(/[\s,;]+/)).map((t) => (/[UW][A-Z0-9]{6,}/.exec(t) || [''])[0]).filter(Boolean);
 
@@ -273,7 +282,7 @@ type AskResult = { ok: true; ask: Ask } | { ok: false; reason: 'ask_required' | 
 const isTs = (s: string) => /^\d{9,11}\.\d{3,6}$/.test(s);
 const cleanText = (t: unknown): string =>
   String(t || '')
-    .replace(/<@([UW][A-Z0-9]+)(\|[^>]*)?>/g, (_m, id: string) => '@' + (PEOPLE[id] || id))
+    .replace(/<@([UW][A-Z0-9]+)(\|[^>]*)?>/g, (_m, id: string) => '@' + (NAMES[id] || id))
     .replace(/<#C[A-Z0-9]+\|([^>]+)>/g, '#$1')
     .replace(/<(https?:[^|>]+)\|([^>]+)>/g, '$2 ($1)')
     .replace(/<(https?:[^>]+)>/g, '$1');
@@ -296,7 +305,7 @@ async function readThread(channel: string, threadTs: string): Promise<{ ok: true
   return { ok: false, error: last || 'unreadable' };
 }
 
-const line = (m: Msg, n: number) => `${m.bot_id ? 'Bays or another bot' : PEOPLE[m.user ?? ''] || m.user || 'someone'}: ${clip(cleanText(m.text), n)}`;
+const line = (m: Msg, n: number) => `${m.bot_id ? 'Bays or another bot' : NAMES[m.user ?? ''] || m.user || 'someone'}: ${clip(cleanText(m.text), n)}`;
 
 async function scheduledTasks(): Promise<string[]> {
   const r = await query<{ tasks: { name?: string; enabled?: boolean }[] | null }>(`SELECT tasks FROM engine_agent_inventory WHERE agent_id = 'Nw5igXu4WWrjUMWB'`);

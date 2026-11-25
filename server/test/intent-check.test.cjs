@@ -38,6 +38,9 @@ const ok = (m) => { n += 1; console.log('  ok  ' + m); };
   const word = await ic.describe('send_nudge', { recipients: ['U0AEW3TBYH1'], text: long });
   assert.ok(word.includes(long.trim()), 'a 2,760-character DM is shown whole'); assert.ok(!word.includes('…')); ok('a word-for-word DM under 6,000 characters is shown to the check whole, never with "…" (INC-BAYS.AGENT-112, -113)');
   const huge = 'x'.repeat(7000);
+  { const v = ic.shown('<@U0AEW3TBYH1>, Jason asked me to nudge you. cc <@U0AF011R821|Jegan>', 6000);
+    assert.match(v, /<@U0AEW3TBYH1> \(Destiny Arupi\)/); assert.match(v, /<@U0AF011R821\|Jegan> \(Jegan\)/);
+    ok('a tagged id in the text carries its name, so the check knows <@U0AEW3TBYH1> is Destiny (INC-BAYS.AGENT-134, -135)'); }
   assert.match(ic.shown(huge, 6000), /shortened for the check: the full text is 7000 characters and is sent whole/); ok('a longer one says it is shortened and sent whole');
   assert.match(ic.SYSTEM, /as it stands now, before this action/); assert.match(ic.SYSTEM, /never call it cut off/); ok('the check is told what is context and what is shortened');
   const add = await ic.describe('update_decision_watch', { watch_id: 'DW-1', next_step: 'Pilot 1 v1.0 spec' });
