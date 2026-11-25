@@ -27,7 +27,7 @@
         document.documentElement.dataset.theme = t;
         // The window scrolls on every page but Ask Bays (see index.css), set
         // here too so the first paint is already in the right layout.
-        document.documentElement.dataset.scroll = location.pathname.indexOf('/ask-bays') === 0 ? 'shell' : 'document';
+        document.documentElement.dataset.scroll = 'document';
       })();
     </script>
   </head>

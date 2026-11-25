@@ -16335,3 +16335,10 @@ Files:      server/src/intentCheck.ts, server/test/intent-check.test.cjs, CLAUDE
 Problem:    IC-1795628498251-4772 and IC-1795628522959-79DF refused Genie's post_channel_message, but on side facts ("Fri 27 Nov" date; UUCT "escalated"), so a corrected retry would have passed. INC-BAYS.AGENT-137.
 Fix:        New rule in SYSTEM: work the message puts on a named person (their own A/B/C classification, summary, evidence, answer, log, decision) posted or drafted by the agent is a miss, even when every fact is right and the agent is tagged. Reading, reporting, flagging mismatches and checking proof once the person labels their items stay allowed where asked. Test line added.
 Decision:   Held in the check every agent write passes through, not in one agent's prompt, so it covers Bays, Genie and any later agent alike.
+
+## 2026-11-25 22:20 — The Ask Bays panel is retired (DW-1795208783665-DM7Y)
+Intent:     Jason (20 Nov, C0AFPJ5S1C1 1795208730.939919): retire the Ask Bays panel completely, so the team has one place to ask, which is Genie.
+Files:      src/App.tsx, src/components/Layout.tsx, src/screens/Overview.tsx, src/screens/Settings.tsx, src/data/index.ts, src/data/types.ts, server/src/engine.ts, server/src/index.ts, index.html, CLAUDE.md; deleted src/screens/AskBays.tsx, src/data/fixtures/chat.ts, server/src/ask.ts
+Problem:    The /ask-bays page, its sidebar link, two Overview links and the /api/ask proxy to Bays — Agent Delivery were all still live on main (8a080a5).
+Fix:        Removed the page, route, sidebar link, the Overview quick action, the /api/ask and /api/ask-bays routes, the Ask Bays rows on Settings and the ask.ts proxy. The Overview's "Ask Bays about today" button is now "Ask Genie about today" and opens genie.bhanetwork.org/chat.
+Decision:   n8n's dashboard-ask-bays webhook is left as it is (it is a path on Bays — Agent Delivery, which still serves Slack); its registry rows stay as history. The ChatThread and AskReply types stay in types.ts, unused, rather than chase every reference.

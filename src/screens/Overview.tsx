@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useData } from '../app/useData';
 import { BUILDER_NAMES, getOverview, type FeedItem, type OverviewData, type OverviewTile } from '../data';
-import { Button, ButtonLink, Bars, Card, Icon, LoadFailed, Loading, Pill, Ring, type IconName } from '../components/ui';
+import { Button, ButtonAnchor, Bars, Card, Icon, LoadFailed, Loading, Pill, Ring, type IconName } from '../components/ui';
 import { ageTone, healthText } from '../lib';
 
 /**
@@ -110,9 +110,9 @@ function Hero({ data }: { data: OverviewData }) {
           {HEADLINES[i][1]}
         </h2>
         <p className="mt-3 max-w-[46ch] text-[14px] leading-relaxed text-dim">{sentence}</p>
-        <ButtonLink to="/ask-bays" className="mt-5 h-9 rounded-full px-4 text-[13px] shadow-[var(--shadow-card)]">
-          Ask Bays about today
-        </ButtonLink>
+        <ButtonAnchor href="https://genie.bhanetwork.org/chat" target="_blank" rel="noreferrer" className="mt-5 h-9 rounded-full px-4 text-[13px] shadow-[var(--shadow-card)]">
+          Ask Genie about today
+        </ButtonAnchor>
       </div>
 
       {/* The orb sits just left of three uniform glass chips that step down to the right, clear of the edge. */}
@@ -298,7 +298,6 @@ export default function Overview() {
         <Card className="frost flex flex-col p-5">
           <CardTitle title="Quick actions" />
           <div className="flex flex-1 flex-col justify-around divide-y divide-line">
-            <QuickAction to="/ask-bays" icon="chat" tint="tile-graphite" title="Ask Bays" sub="Question the engine" />
             <QuickAction to="/open-loops" icon="loop" tint="tile-teal" title="Open loops" sub="Close, start or open a loop" />
             <QuickAction to="/engine-health" icon="pulse" tint="tile-red" title="Engine health" sub="Incidents and retries" />
             <QuickAction to="/vfarm" icon="leaf" tint="tile-green" title="vFarm" sub={`${halloween} days to Halloween`} />

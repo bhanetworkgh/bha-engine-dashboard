@@ -19,7 +19,6 @@ import Overview from './screens/Overview';
  * Overview is not split: it is what the dashboard opens on, so its chunk would
  * be a second round trip before the first paint every time.
  */
-const AskBays = lazy(() => import('./screens/AskBays'));
 const NorthStar = lazy(() => import('./screens/NorthStar'));
 const ResearchTwin = lazy(() => import('./screens/ResearchTwin'));
 const Clients = lazy(() => import('./screens/Clients'));
@@ -70,7 +69,6 @@ export default function App() {
       <Routes>
       <Route element={<Layout />}>
         <Route path="/" element={<Overview />} />
-        <Route path="/ask-bays" element={<Suspense fallback={<Loading />}><AskBays /></Suspense>} />
         <Route path="/north-star" element={<Suspense fallback={<Loading />}><NorthStar /></Suspense>} />
         <Route path="/research-twin" element={<Suspense fallback={<Loading />}><ResearchTwin /></Suspense>} />
         <Route path="/media-twin" element={<Suspense fallback={<Loading />}><MediaTwin /></Suspense>} />

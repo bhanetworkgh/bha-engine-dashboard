@@ -89,9 +89,6 @@ export type SignInResult = { ok: true; session: AuthSession } | { ok: false; rea
 export interface ServerStatus {
   auth_configured: boolean;
   session_secret_configured: boolean;
-  ask_bays_configured: boolean;
-  ask_bays_url: string;
-  model_label: string;
   data_dir: string;
   history_since: string | null;
   records_held: Record<string, number>;

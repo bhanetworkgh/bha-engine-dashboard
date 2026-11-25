@@ -89,9 +89,6 @@ export default function Settings() {
                   value={s.session_secret_configured ? 'Set' : 'Random each boot · sessions end on restart'}
                   tone={s.session_secret_configured ? 'ok' : 'off'}
                 />
-                <Row label="Ask Bays" value={s.ask_bays_configured ? 'Connected' : 'No API key on the server'} tone={s.ask_bays_configured ? 'ok' : 'off'} />
-                <Row label="Bays workflow" value={<span className="break-all">{s.ask_bays_url}</span>} />
-                <Row label="Bays model" value={s.model_label} />
                 <Row
                   label="Engine writes"
                   value={s.inbound_configured ? 'Key set · the engine can write to /api/engine' : 'No DASHBOARD_INBOUND_KEY · nothing can reach the record tables'}

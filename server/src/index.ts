@@ -19,7 +19,6 @@
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import path from 'node:path';
-import { ask, ASK_URL, ASK_URL_FROM_ENV, askConfigured, MODEL_LABEL } from './ask';
 import { authConfigured, login, logout, readSession, sessionInfo, sessionSecretConfigured } from './auth';
 import { databaseIdentity } from './db';
 import { migrate, MIGRATION_COUNT } from './migrations';
@@ -2524,9 +2523,6 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         const status: ServerStatus = {
           auth_configured: authConfigured(),
           session_secret_configured: sessionSecretConfigured,
-          ask_bays_configured: askConfigured(),
-          ask_bays_url: ASK_URL,
-          model_label: MODEL_LABEL,
           // Where the rows actually are. Host and database only — the URL
           // carries the password and this response reaches the browser.
           data_dir: db ? `postgres ${db.server_version} · ${db.host}/${db.database}${db.internal ? ' (internal)' : ''}` : 'postgres (not connected)',
@@ -2783,8 +2779,6 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
        */
       case '/api/vfarm/leads':
         return send(res, 200, await earlyAccess.leads());
-      case '/api/ask-bays':
-        return send(res, 200, engine.getAskBays(q));
       // The Slack apps on the workspace, their commands and bots, read from Slack (13 Nov 2026). Read only:
       // the POST takes a fresh read from Slack and changes nothing in Slack.
       case '/api/slack-apps':
@@ -3486,15 +3480,6 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
         throw e;
       }
     }
-    if (p === '/api/ask') {
-      const body = await readJson(req);
-      const message = str(body.message, 8000).trim();
-      const sessionId = str(body.session_id, 120).trim();
-      const builderId = str(body.builder_id, 40).trim() || 'admin';
-      if (!message) throw new HttpError(400, 'A message is required.');
-      if (!sessionId) throw new HttpError(400, 'A session_id is required.');
-      return send(res, 200, await ask(message, sessionId, builderId));
-    }
   }
 
   throw new HttpError(404, 'No such route.');
@@ -3811,7 +3796,6 @@ async function boot(): Promise<void> {
     // Say where the URL came from, not just what it is. The line printed the
     // retired host for as long as it was wrong and read exactly like a
     // configured one, because a URL on its own cannot tell you nobody chose it.
-    console.log(`  ask bays: ${askConfigured() ? `${ASK_URL} ${ASK_URL_FROM_ENV ? '(ASK_BAYS_URL)' : '(built-in default — ASK_BAYS_URL is not set on this service)'}` : 'NOT configured — set ASK_BAYS_API_KEY'}`);
     console.log(`  inbound:  ${INBOUND_KEY ? 'DASHBOARD_INBOUND_KEY set' : 'NOT configured — set DASHBOARD_INBOUND_KEY so the engine can write'}`);
     /**
      * The write-back first, because when it is off nothing below it applies

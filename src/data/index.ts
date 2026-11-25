@@ -12,7 +12,6 @@
 
 import { api, ApiError } from './api';
 import type {
-  AskBaysData,
   BaysData,
   BaysRemindersData,
   DecisionWatchData,
@@ -34,12 +33,10 @@ import type {
   CandidateRegistered,
   PatternDraft,
   IncidentCloseResult,
-  AskReply,
   AuthSession,
   BuildPattern,
   BuildPatternDetail,
   BuildPatternsData,
-  ChatThread,
   CodexData,
   CodexEntry,
   CodexEntryDetail,
@@ -535,89 +532,6 @@ export function getCodexDetail(id: string): Promise<CodexEntryDetail> {
 /** Server-side search across every text field of every pattern. */
 export function searchPatterns(q: string): Promise<{ patterns: BuildPattern[] }> {
   return api<{ patterns: BuildPattern[] }>(`/api/build-patterns/search?q=${encodeURIComponent(q)}`);
-}
-
-/* -------------------------------------------------------------- ask bays */
-
-const CHATS_KEY = 'bha.chats';
-const CHATS_DELETED_KEY = 'bha.chats.deleted';
-
-function readDeleted(): string[] {
-  try {
-    const raw = localStorage.getItem(CHATS_DELETED_KEY);
-    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
-    return Array.isArray(parsed) ? (parsed as string[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-/** Remembers that a thread was deleted, so a seeded one does not come back. */
-export function forgetThread(id: string): void {
-  try {
-    const ids = new Set(readDeleted());
-    ids.add(id);
-    localStorage.setItem(CHATS_DELETED_KEY, JSON.stringify([...ids]));
-  } catch {
-    // Storage unavailable.
-  }
-}
-
-function readLocalThreads(): ChatThread[] {
-  try {
-    const raw = localStorage.getItem(CHATS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? (parsed as ChatThread[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-/** Threads typed in this dashboard persist in the browser only. */
-export function saveLocalThreads(threads: ChatThread[]): void {
-  try {
-    localStorage.setItem(CHATS_KEY, JSON.stringify(threads.filter((t) => t.local)));
-  } catch {
-    // Storage unavailable: the thread lives for this page only.
-  }
-}
-
-export async function getAskBays(q: Query): Promise<AskBaysData> {
-  const server = await api<AskBaysData>(withLane('/api/ask-bays', q));
-  const local = readLocalThreads();
-  const deleted = new Set(readDeleted());
-  const seeded = server.threads.filter((t) => !local.some((l) => l.id === t.id) && !deleted.has(t.id));
-  return {
-    ...server,
-    threads: [...local, ...seeded]
-      .filter((t) => !deleted.has(t.id))
-      .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || (a.updated_at < b.updated_at ? 1 : -1)),
-  };
-}
-
-/**
- * Sends one message to Bays through the server and waits for the answer. The
- * session_id is the thread's, stable for its life, which is what gives Bays
- * its memory of the conversation. Never throws: a failure comes back as an
- * ok:false reply whose answer says what happened and whose `error` says which
- * kind, so the screen can show a refusal as a refusal rather than as Bays.
- *
- * The server allows the agent five minutes; this waits a little longer so a
- * server-side timeout arrives as the server's own answer rather than as this
- * request giving up first and losing the reason.
- */
-export async function askBays(message: string, sessionId: string, builderId: string): Promise<AskReply> {
-  try {
-    return await api<AskReply>('/api/ask', { body: { message, session_id: sessionId, builder_id: builderId }, timeoutMs: 320_000 });
-  } catch (e) {
-    if (e instanceof ApiError) {
-      if (e.kind === 'timeout') return { ok: false, answer: 'Bays did not answer in time.', session_id: sessionId, steps: [], error: 'timeout' };
-      if (e.kind === 'network') return { ok: false, answer: 'Could not reach the dashboard server.', session_id: sessionId, steps: [], error: 'unreachable' };
-      return { ok: false, answer: e.message, session_id: sessionId, steps: [], error: 'bad_response' };
-    }
-    return { ok: false, answer: 'Something went wrong sending that.', session_id: sessionId, steps: [], error: 'bad_response' };
-  }
 }
 
 export { BUILDER_NAMES, LANE_LIST, LOOP_LANE_TAGS } from './names';

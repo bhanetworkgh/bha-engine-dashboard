@@ -11,7 +11,6 @@
  */
 import * as f from '../../src/data/fixtures';
 import type {
-  AskBaysData,
   BuildPatternsData,
   ClientLaneRow,
   ClientsData,
@@ -31,7 +30,6 @@ import type {
   RtData,
   SeriesPoint,
 } from '../../src/data/types';
-import { MODEL_LABEL, askConfigured } from './ask';
 import * as health from './health';
 import { CODEX_CHOICES, CODEX_TABLES, loopTable, questionNeedsHuman, requestIsOpen } from './sources';
 import * as store from './store';
@@ -418,20 +416,6 @@ export async function getOverview(_q: Query): Promise<OverviewData> {
     broke_24h: broke24,
     moved_24h: moved24,
     feeds_window: { since: new Date(feedNow - 24 * 3_600_000).toISOString(), until: new Date(feedNow).toISOString() },
-  };
-}
-
-/* -------------------------------------------------------------- ask bays */
-
-export function getAskBays(_q: Query): AskBaysData {
-  return {
-    // No seeded threads (2026-09-23): the history panel held phase 1 sample
-    // conversations beside the real ones. It shows only the threads this
-    // browser has actually had.
-    threads: [],
-    model_label: MODEL_LABEL,
-    connected: askConfigured(),
-    builders: f.BUILDERS.map((b) => ({ id: b.id, name: b.name })),
   };
 }
 

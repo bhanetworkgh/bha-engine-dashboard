@@ -787,10 +787,11 @@ upstream keeps a status-change history. A metric the data cannot support is
 null with a note, and the note is shown. A zero and an unknown must never look
 the same.
 
-**Ask Bays** goes `browser → POST /api/ask → server → dashboard-ask-bays
-workflow` with the key in `x-api-key` from the server's environment. The
-thread's `session_id` is stable for its life and is Bays's memory. The reply's
-`steps` are shown under the answer; empty means nothing is shown.
+**The Ask Bays panel is retired** (25 Nov 2026, Destiny — DW-1795208783665-DM7Y: one place to ask, which is
+Genie). The page, its sidebar link, the Overview's Ask Bays links, `POST /api/ask`, `GET /api/ask-bays` and
+`server/src/ask.ts` are gone; the Overview's button opens the Genie app (genie.bhanetwork.org/chat). n8n's
+`/webhook/dashboard-ask-bays` on Bays — Agent Delivery has no caller here any more, and its registry rows stay as
+history.
 
 **The incident ledger is the second external read path** (decision 2026-09-17,
 Destiny). Until it, Airtable was the only system this server called out to.
@@ -3539,7 +3540,6 @@ height.
 
 ```
 Home (the Overview)
-Ask Bays
 
 SYSTEMS
   Bays                   ← the ask ledger: Slack, scheduled runs, panel (2026-10-05)
@@ -3636,16 +3636,7 @@ Overview is a scrolling page: greeting, summary banner, systems, then cards.
 The first screen must carry the greeting, the banner and the systems row.
 
 ### Ask Bays
-A chat interface onto the existing Bays agent.
-
-Empty state: the BHA mark centred, large, with a slow subtle idle animation.
-Input bar pinned to the bottom. Nothing else on screen until the user types.
-On first send, the mark gives way to the thread.
-
-Right-hand panel: new chat, chat history list, search past chats.
-
-**Note:** Bays has no memory today. Build the history and new-chat UI fully
-against fixtures. It gets wired in a later phase.
+Retired 25 Nov 2026 (see section 4): the team asks Genie, in Slack or at genie.bhanetwork.org/chat.
 
 ### North Star
 **Two tabs**: Asks and Statistics. Asks is the working surface — five figures,

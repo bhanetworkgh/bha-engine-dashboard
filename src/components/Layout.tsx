@@ -10,7 +10,6 @@ const GROUPS: { group: string | null; items: { to: string; label: string; icon: 
     group: null,
     items: [
       { to: '/', label: 'Home', icon: 'overview' },
-      { to: '/ask-bays', label: 'Ask Bays', icon: 'chat' },
     ],
   },
   {
