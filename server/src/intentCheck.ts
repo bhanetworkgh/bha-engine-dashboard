@@ -27,6 +27,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { query } from './db';
 import * as slack from './slack';
+import { readThreadAsGenie } from './genieSlack';
 import * as bharag from './bharag';
 import * as mirror from './mirror';
 import * as events from './events';
@@ -302,7 +303,10 @@ async function readThread(channel: string, threadTs: string): Promise<{ ok: true
       last = e instanceof Error ? e.message : String(e);
     }
   }
-  return { ok: false, error: last || 'unreadable' };
+  // A thread only Genie is in (a person's DM with Genie): Genie reads it for us (25 Nov 2026).
+  const asGenie = await readThreadAsGenie(channel, threadTs);
+  if (asGenie.ok) return { ok: true, msgs: asGenie.messages as Msg[] };
+  return { ok: false, error: `${last || 'unreadable'}; ${asGenie.error}` };
 }
 
 const line = (m: Msg, n: number) => `${m.bot_id ? 'Bays or another bot' : NAMES[m.user ?? ''] || m.user || 'someone'}: ${clip(cleanText(m.text), n)}`;

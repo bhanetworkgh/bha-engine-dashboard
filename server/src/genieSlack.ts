@@ -23,3 +23,22 @@ export async function postAsGenie(channel: string, text: string, blocks: unknown
   }
 }
 
+
+/**
+ * Reading a thread as Genie (25 Nov 2026, Destiny): a person's DM with Genie is a thread only Genie is in, so the
+ * intent check could not read the ask with Bays' or North Star's token and refused every write Genie made from a
+ * DM (ask_not_found). Genie reads it for us on POST /api/genie/read-thread with the same inbound key. Read only.
+ */
+export async function readThreadAsGenie(channel: string, ts: string): Promise<{ ok: true; messages: unknown[] } | { ok: false; error: string }> {
+  const key = process.env.DASHBOARD_INBOUND_KEY?.trim();
+  if (!key) return { ok: false, error: 'DASHBOARD_INBOUND_KEY is not set, so Genie cannot be asked to read' };
+  const url = `${(process.env.GENIE_URL || 'https://genie-v3-migration-u82u.onrender.com').replace(/\/+$/, '')}/api/genie/read-thread`;
+  try {
+    const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-dashboard-key': key }, body: JSON.stringify({ channel, ts }), signal: AbortSignal.timeout(20_000) });
+    const j = (await res.json().catch(() => ({}))) as { ok?: boolean; messages?: unknown[]; error?: string };
+    if (res.ok && j.ok && Array.isArray(j.messages)) return { ok: true, messages: j.messages };
+    return { ok: false, error: `Genie could not read it (HTTP ${res.status}): ${String(j.error ?? 'no reason given')}` };
+  } catch (e) {
+    return { ok: false, error: `Genie could not be reached: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
