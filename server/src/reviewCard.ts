@@ -294,7 +294,7 @@ export async function refreshPay(b: Obj): Promise<Obj> {
 }
 
 /**
- * The card with its verdict line replaced and a completeness note put under the review's reason (26 Nov 2026,
+ * The card with its verdict line replaced and a completeness note put right under the verdict, above the review's reason (26 Nov 2026,
  * Destiny: a verdict corrected by hand says so on the card, so Jason reads a correction and not the reviewer's
  * own words). The reviewer's reason is kept as it was. Refuses a card with no verdict line. Pure.
  */
@@ -304,11 +304,10 @@ export function withVerdict(blocks: Block[], verdict: string, note: string): Blo
   if (at === -1) throw new CardError('no_verdict', 'The card has no verdict line, so the verdict cannot be corrected; nothing was sent.');
   const aligned = /^aligned/i.test(verdict);
   out[at] = section(`${aligned ? ':white_check_mark:' : ':warning:'} *Verdict: ${cap(verdict, 200)}*`);
-  if (note) {
-    const reasonAt = out.findIndex((k, i) => i > at && k.type === 'section' && typeof k.text?.text === 'string' && /^\*Reason\*/.test(k.text.text));
-    const insertAt = reasonAt === -1 ? at + 1 : reasonAt + 1;
-    out.splice(insertAt, 0, section(cap(`*Completeness note*\n${note}`, 2900)));
-  }
+  // A note from an earlier correction is replaced, never stacked.
+  const old = out.findIndex((k) => k.type === 'section' && typeof k.text?.text === 'string' && /^\*Completeness note\*/.test(k.text.text));
+  if (old !== -1) out.splice(old, 1);
+  if (note) out.splice(at + 1, 0, section(cap(`*Completeness note*\n${note}`, 2900)));
   return out;
 }
 
