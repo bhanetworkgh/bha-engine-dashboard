@@ -16328,3 +16328,10 @@ Files:      server/src/mcp/mediaPostsTools.ts, CLAUDE.md, BUILD_LOG.md
 Problem:    The built-in browser opened the dashboard at its sign-in page; a person's password is never typed in by Claude, so the page door was closed.
 Fix:        approve_media_post (write connection, Jason or Destiny, refused on agent tokens): calls mediaPosts.decide for each platform named, so the claim check runs again and Approve posts live, then rewrites each card (conversations.replies, actions blocks removed, an "Approved by" line added, chat.update as Bays).
 Decision:   One more door onto the same decide function, not a second approve path. Autopost stays paused (Jason, 24 Nov): this is a person's Approve, not the second reviewer.
+
+## 2026-11-25 18:55 — intent check: an agent never does a person's own work
+Intent:     Jason (C0AD3PM603T 1794344445.193729) asked Destiny to tighten the write rules after Genie tried to post Ahad's DK0O map for him.
+Files:      server/src/intentCheck.ts, server/test/intent-check.test.cjs, CLAUDE.md
+Problem:    IC-1795628498251-4772 and IC-1795628522959-79DF refused Genie's post_channel_message, but on side facts ("Fri 27 Nov" date; UUCT "escalated"), so a corrected retry would have passed. INC-BAYS.AGENT-137.
+Fix:        New rule in SYSTEM: work the message puts on a named person (their own A/B/C classification, summary, evidence, answer, log, decision) posted or drafted by the agent is a miss, even when every fact is right and the agent is tagged. Reading, reporting, flagging mismatches and checking proof once the person labels their items stay allowed where asked. Test line added.
+Decision:   Held in the check every agent write passes through, not in one agent's prompt, so it covers Bays, Genie and any later agent alike.

@@ -90,6 +90,7 @@ const ok = (m) => { n += 1; console.log('  ok  ' + m); };
   assert.match(withRec, /Records the action names, as the dashboard holds them/); assert.match(withRec, /burn-in cabinet/); ok('the model is given the records the action names (the 13 Nov audit 6314 refusal)');
   assert.doesNotMatch(ic.prompt({ key: 'k', source: 'slack', text: 'x', context: '', asker: null }, 'y', 'send_nudge'), /Records the action names/); ok('no records section when the action names none');
   assert.match(ic.SYSTEM, /A fact that matches a listed record/); assert.match(ic.SYSTEM, /neither the thread nor a listed record shows is a miss/); ok('a fact from a listed record is supported; an invented one is still a miss');
+  assert.match(ic.SYSTEM, /Work the message puts on a person/); assert.match(ic.SYSTEM, /even when every fact in it is right/); ok('work Jason put on a builder (a DK0O A/B/C map) is a miss when an agent posts it for them (INC-BAYS.AGENT-137)');
   assert.deepEqual('nudge LOOP-1793620799001-3NBE and loop-1793620799001-3nbe'.match(ic.LOOP_IN_ACTION), ['LOOP-1793620799001-3NBE']); ok('loop ids are read from the action');
   console.log(`intent-check: ${n} passed`);
 })().catch((e) => { console.error(e); process.exit(1); });
