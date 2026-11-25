@@ -10,6 +10,7 @@
  */
 import * as posts from '../mediaPosts';
 import * as review from '../mediaReview';
+import * as slack from '../slack';
 import { auditClose, auditOpen } from './writeTools';
 import type { ToolDefinition } from './tools';
 
@@ -227,5 +228,75 @@ export const setMediaAutopost: ToolDefinition = {
   },
 };
 
+
+/**
+ * `approve_media_post` (25 Nov 2026, Destiny: approve and post from the dashboard connection, then show it on the card).
+ * The same `posts.decide` the card's Approve reaches, so the claim rules run again at the click and Approve posts that
+ * platform live, its link landing in the card's thread. Then the card is rewritten without its buttons and says who
+ * approved it and when; a card Slack will not rewrite never undoes the approval and the answer says so.
+ */
+async function markCardApproved(channel: string | null, ts: string | null, byName: string): Promise<{ ok: boolean; error?: string }> {
+  if (!channel || !ts) return { ok: false, error: 'no_card' };
+  const read = await slack.botCall('conversations.replies', { channel, ts, limit: 1, inclusive: true }, 'form');
+  const msg = (read.ok && Array.isArray(read.messages) ? (read.messages as Array<Record<string, unknown>>)[0] : null) ?? null;
+  if (!msg || String(msg.ts) !== ts) return { ok: false, error: read.ok ? 'card_not_found' : String(read.error ?? 'read_failed') };
+  const at = new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+  const line = `:white_check_mark: *Approved by ${byName}*, ${at}. Posting now; the live link follows in this thread.`;
+  const blocks = (Array.isArray(msg.blocks) ? (msg.blocks as Array<Record<string, unknown>>) : []).filter((b) => b.type !== 'actions');
+  blocks.push({ type: 'section', text: { type: 'mrkdwn', text: line } });
+  const up = await slack.botCall('chat.update', { channel, ts, text: `${String(msg.text ?? '')}\n${line}`.trim(), blocks });
+  return up.ok ? { ok: true } : { ok: false, error: String(up.error ?? 'update_failed') };
+}
+
+export const approveMediaPost: ToolDefinition = {
+  name: 'approve_media_post',
+  description:
+    "Approve one or more platforms of a Media Twin draft, the same Approve the Slack card gives: the claim rules run again on the stored text, and an approved platform posts live (its link goes in that card's thread). Then each card is rewritten without its buttons, saying who approved it and when. HELD HERE: requester_user_id is Jason or Destiny (not_permitted); refused on any agent token; a blocked or uncleared target claim is refused. dry_run checks the draft and changes nothing. Audited on engine_mcp_writes.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      post_id: { type: 'string' },
+      platforms: { type: 'array', items: { type: 'string', enum: [...posts.PLATFORMS] }, description: 'The platforms to approve.' },
+      requester_user_id: { type: 'string' },
+      dry_run: { type: 'boolean' },
+    },
+    required: ['post_id', 'platforms', 'requester_user_id'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true, title: 'Approve and post a Media Twin draft' },
+  handler: async (args, deps) => {
+    if (deps.agent) return { ok: false, reason: 'agent_not_permitted', message: `An agent (${deps.agent}) may not approve a Media Twin draft.` };
+    const dry = args.dry_run === true;
+    const requester = str(args, 'requester_user_id');
+    const postId = str(args, 'post_id');
+    const list = Array.isArray(args.platforms) ? [...new Set((args.platforms as unknown[]).map(String))] : [];
+    if (!list.length) return { ok: false, reason: 'bad_value', message: 'Name at least one platform.' };
+    if (!posts.APPROVERS[requester]) return { ok: false, reason: 'not_permitted', message: 'Only Jason or Destiny approve a Media Twin post.' };
+    const audit = await auditOpen({ tool: 'approve_media_post', args, access: deps.access, kind: 'media_posts', requester, dry_run: dry });
+    if (dry) {
+      const read = await posts.read({ post_id: postId, status: null, include_test: true, limit: 1, search: null, slack_ts: null });
+      const post = (read.posts as Array<{ platforms: Record<string, { decision: string; claim_check_status: string }> }>)[0];
+      await auditClose(audit, { outcome: 'dry_run', natural_id: postId });
+      if (!post) return { ok: false, reason: 'not_found', message: `No Media Twin post ${postId}.`, audit_id: audit };
+      return { ok: true, dry_run: true, would_approve: list.map((p) => ({ platform: p, decision_now: post.platforms[p]?.decision ?? 'missing', claim_check: post.platforms[p]?.claim_check_status ?? null })), audit_id: audit };
+    }
+    const results: Array<Record<string, unknown>> = [];
+    for (const platform of list) {
+      try {
+        const out = await posts.decide(postId, { platform, decision: 'approve', by: requester, via: 'mcp:approve_media_post' });
+        const p = out.post.platforms[platform as posts.Platform];
+        const card = await markCardApproved(out.post.slack_channel, p?.slack_ts ?? null, posts.APPROVERS[requester]);
+        results.push({ platform, approved: true, auto_post: out.auto_post, card_updated: card.ok, ...(card.ok ? {} : { card_error: card.error }) });
+      } catch (e) {
+        if (e instanceof posts.MediaPostError) results.push({ platform, approved: false, reason: e.reason, message: e.message });
+        else results.push({ platform, approved: false, reason: 'failed', message: String(e) });
+      }
+    }
+    const ok = results.every((r) => r.approved === true);
+    await auditClose(audit, { outcome: ok ? 'written' : results.some((r) => r.approved) ? 'partial' : 'refused', natural_id: postId, detail: JSON.stringify(results).slice(0, 2000) });
+    return { ok, results, note: 'Approve posts in the background; each live link lands in its card\'s thread. Read the draft with read_media_posts to see posted_url.', audit_id: audit };
+  },
+};
+
 export const MEDIA_POSTS_READ_TOOLS: ToolDefinition[] = [readMediaPosts];
-export const MEDIA_POSTS_WRITE_TOOLS: ToolDefinition[] = [editMediaPost, recordMediaPostLink, markMediaPattern, setMediaPostPattern, setMediaAutopost];
+export const MEDIA_POSTS_WRITE_TOOLS: ToolDefinition[] = [editMediaPost, approveMediaPost, recordMediaPostLink, markMediaPattern, setMediaPostPattern, setMediaAutopost];
