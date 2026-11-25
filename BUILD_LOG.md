@@ -16369,3 +16369,10 @@ Intent:     intent-check views read "<@U0AF011R821> (Jegan) (Jegan)" (IC-1795615
 Files:      server/src/intentCheck.ts
 Fix:        named() is idempotent: a tag already followed by its own name is left alone; a tag followed by something else still gets the name right after it
 Decision:   cosmetic for the model, but a doubled name is noise the check has to read past; checked in node on both shapes
+
+## 2026-11-26 00:20 — refresh_review_card: verdict correction on a Pending card
+Intent:     Destiny's 25 Nov log (U0AEW3TBYH1_1795647744326) landed Partially Aligned for the PreciseFP window that was fixed in the same session, and its card showed both held 5% shares as not addressed because the Releases field named them "23 Nov log" and "24 Nov log" instead of their Codex ids. Correct the card and the row, saying on both that Destiny corrected them.
+Files:      server/src/reviewCard.ts (withVerdict, verdict and verdict_note on refreshPay), server/src/mcp/reviewCardTools.ts (refresh_review_card), CLAUDE.md
+Problem:    No tool could rewrite a Pending card; refreshPay was reachable only on the inbound key. matchReleases matches a claim to a hold by the hold's Codex or Submission id inside the claim's log field, so "23 Nov log" matched neither.
+Fix:        refresh_review_card on the write connection; the Codex row's Releases rewritten with the two Codex ids so the Pay Suggestion is worked out again on the write.
+Decision:   The reviewer's reason stays on the card and the row; the correction is a separate Completeness note naming Destiny, so Jason reads it as a correction.

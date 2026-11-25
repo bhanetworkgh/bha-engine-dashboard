@@ -281,6 +281,8 @@ export async function refreshPay(b: Obj): Promise<Obj> {
   if (b.dry_run === true && b.shape === true) return { ok: true, dry_run: true, submission_id: id, size: JSON.stringify(m.blocks).length, shape: shape(m.blocks), rebuilt: shape(rebuild(m.blocks, sug, why)) };
   let blocks = fitCard(m.blocks, sug, why, id);
   if (!blocks) throw new CardError('too_long', 'The rewritten card would be past Slack\'s size limit even with the shortest pay part; nothing was sent.');
+  const verdict = String(b.verdict ?? '').trim();
+  if (verdict) blocks = withVerdict(blocks, verdict, String(b.verdict_note ?? '').trim());
   const line = sug && !sug.none ? paySuggest.lineFor(sug) : null;
   if (b.dry_run === true) return { ok: true, dry_run: true, submission_id: id, channel, ts, line, blocks_before: m.blocks.length, blocks_after: blocks.length };
   // The fallback text read back from Slack is rebuilt from the blocks and can pass Slack's limit (msg_too_long on
@@ -289,6 +291,25 @@ export async function refreshPay(b: Obj): Promise<Obj> {
   const u = await slack.botCall('chat.update', { channel, ts, text: fallback, blocks });
   if (!u.ok) throw new CardError('slack_refused', `Slack refused the update: ${u.error}.`, 502);
   return { ok: true, updated: true, submission_id: id, channel, ts, line, link: `https://bayshorizonnetwork.slack.com/archives/${channel}/p${ts.replace('.', '')}` };
+}
+
+/**
+ * The card with its verdict line replaced and a completeness note put under the review's reason (26 Nov 2026,
+ * Destiny: a verdict corrected by hand says so on the card, so Jason reads a correction and not the reviewer's
+ * own words). The reviewer's reason is kept as it was. Refuses a card with no verdict line. Pure.
+ */
+export function withVerdict(blocks: Block[], verdict: string, note: string): Block[] {
+  const out = blocks.map((k) => JSON.parse(JSON.stringify(k)) as Block);
+  const at = out.findIndex((k) => k.type === 'section' && typeof k.text?.text === 'string' && /\*Verdict:/.test(k.text.text));
+  if (at === -1) throw new CardError('no_verdict', 'The card has no verdict line, so the verdict cannot be corrected; nothing was sent.');
+  const aligned = /^aligned/i.test(verdict);
+  out[at] = section(`${aligned ? ':white_check_mark:' : ':warning:'} *Verdict: ${cap(verdict, 200)}*`);
+  if (note) {
+    const reasonAt = out.findIndex((k, i) => i > at && k.type === 'section' && typeof k.text?.text === 'string' && /^\*Reason\*/.test(k.text.text));
+    const insertAt = reasonAt === -1 ? at + 1 : reasonAt + 1;
+    out.splice(insertAt, 0, section(cap(`*Completeness note*\n${note}`, 2900)));
+  }
+  return out;
 }
 
 /**

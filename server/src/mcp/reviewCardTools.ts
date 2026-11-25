@@ -89,4 +89,49 @@ export const completeParkedLog: ToolDefinition = {
   },
 };
 
-export const REVIEW_CARD_WRITE_TOOLS: ToolDefinition[] = [rewriteApprovedCard, completeParkedLog];
+
+/**
+ * `refresh_review_card` (26 Nov 2026, Destiny): a Pending log's review card rewritten from its Codex row, the pay
+ * part and the held pay it releases (../reviewCard.ts refreshPay, the same function /api/engine/review-card/refresh-pay
+ * runs), and, when `verdict` is given, the verdict line corrected with a completeness note under the reason.
+ */
+export const refreshReviewCard: ToolDefinition = {
+  name: 'refresh_review_card',
+  description: "Rewrite a Pending log's review card in place from its Codex row: the Suggested pay part, the held pay on earlier logs it releases, and the buttons' pop-up suggestion. With verdict, the verdict line is replaced and verdict_note is shown under the reviewer's reason as a Completeness note (the reason itself is kept). why is the line saying why it was rewritten. dry_run builds it and sends nothing. HELD HERE: Destiny or Jason; refused on any agent token. Audited.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      submission_id: { type: 'string' },
+      why: { type: 'string' },
+      verdict: { type: 'string' },
+      verdict_note: { type: 'string' },
+      requester_user_id: { type: 'string' },
+      dry_run: { type: 'boolean' },
+    },
+    required: ['submission_id', 'requester_user_id', 'why'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true, title: "Rewrite a Pending log's review card" },
+  handler: async (args, deps) => {
+    const requester = str(args, 'requester_user_id');
+    const dry = args.dry_run === true;
+    const audit = await auditOpen({ tool: 'refresh_review_card', args, access: deps.access, kind: 'codex', requester: requester || null, dry_run: dry });
+    const refuse = async (reason: string, message: string) => {
+      await auditClose(audit, { outcome: 'refused', detail: `${reason}: ${message}`, guard_result: { reason } });
+      return { ok: false, reason, message: `${message} Nothing was changed.`, audit_id: audit };
+    };
+    if (deps.agent) return refuse('agent_not_permitted', `An agent (${deps.agent}) may not rewrite a review card.`);
+    if (!ADMINS.has(requester)) return refuse('not_permitted', 'Only Destiny or Jason may rewrite a review card.');
+    try {
+      const r = await reviewCard.refreshPay({ submission_id: args.submission_id, why: args.why, verdict: args.verdict, verdict_note: args.verdict_note, dry_run: dry });
+      await auditClose(audit, { outcome: dry ? 'dry_run' : 'updated', detail: `${r.submission_id}: ${dry ? 'would rewrite' : 'rewrote'} its review card${args.verdict ? ` (verdict ${String(args.verdict)})` : ''}`, natural_id: String(r.submission_id) });
+      return { ...r, audit_id: audit };
+    } catch (e) {
+      if (e instanceof reviewCard.CardError) return refuse(e.reason, e.message);
+      await auditClose(audit, { outcome: 'error', detail: e instanceof Error ? e.message : String(e) });
+      throw e;
+    }
+  },
+};
+
+export const REVIEW_CARD_WRITE_TOOLS: ToolDefinition[] = [rewriteApprovedCard, completeParkedLog, refreshReviewCard];
