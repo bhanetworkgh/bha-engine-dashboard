@@ -418,6 +418,84 @@ export async function release(b: Obj, opts: { dry_run?: boolean } = {}): Promise
   return { written: true, dry_run: false, note: r.after, message: `Released. ${msg(r.after, r.share)}` };
 }
 
+/**
+ * Put an unpaid release back to held (25 Nov 2026, Destiny: a held 5% was released by the release box on Jason's
+ * Approve click of a later log, and Jason never looked at the proof or paid it, so it goes back to held to be released
+ * on proof he reads). Destiny or Jason, with a reason. Only the newest release on the note, and only while no card that
+ * carries it is paid: a paid release stays paid and is corrected forward. The history is frozen, so the undo is its own
+ * 'unrelease' row naming the release it undoes; the pay card stops counting that release, its claim is let go, and the
+ * builder's unpaid cards are redrawn.
+ */
+export async function unrelease(b: Obj, opts: { dry_run?: boolean } = {}): Promise<{ written: boolean; dry_run: boolean; note: PayNote; share: number; message: string }> {
+  const by = s(b.unreleased_by, 40);
+  if (!DECIDERS[by]) throw new PayNoteError('not_permitted', `Only Destiny or Jason put a release back to held (unreleased_by is their Slack id); ${by || 'nobody'} was given.`, 403);
+  const reason = s(b.reason, 600);
+  if (reason.length < 8) throw new PayNoteError('missing_reason', 'Putting a release back to held needs a reason of 8 characters or more.');
+  const run = async (db: Queryable) => {
+    const log = await findLog(db, { submission_id: s(b.submission_id, 200), codex_entry_id: s(b.codex_entry_id, 200) });
+    const row = (await db.query<Obj>(`SELECT ${COLS} FROM engine_pay_notes WHERE submission_id = $1 FOR UPDATE`, [log.submission_id])).rows[0];
+    if (!row) throw new PayNoteError('no_pay_note', `${log.codex_entry_id ?? log.submission_id} has no pay note.`, 404);
+    const prior = shape(row);
+    if (!(prior.released_share > 0)) throw new PayNoteError('nothing_released', `${log.codex_entry_id ?? log.submission_id} has nothing released.`, 409);
+    const rel = (await db.query<{ id: string; before: Obj; after: Obj }>(
+      `SELECT h.id::text, h.before, h.after FROM engine_pay_note_history h
+        WHERE h.submission_id = $1 AND h.action = 'release'
+          AND NOT EXISTS (SELECT 1 FROM engine_pay_note_history u WHERE u.action = 'unrelease' AND (u.after->>'undoes_history_id')::bigint = h.id)
+        ORDER BY h.id DESC LIMIT 1`, [log.submission_id])).rows[0];
+    if (!rel) throw new PayNoteError('no_release_row', `${log.codex_entry_id ?? log.submission_id} shows a released share but no release in its history to undo.`, 409);
+    const share = round3(Number(rel.after?.released_share ?? 0) - Number(rel.before?.released_share ?? 0));
+    if (!(share > 0)) throw new PayNoteError('no_release_row', 'The newest release on this note released nothing.', 409);
+    const claim = (await db.query<{ card: string }>(`SELECT card_submission_id AS card FROM engine_pay_card_claims WHERE history_id = $1`, [rel.id])).rows[0];
+    if (claim) {
+      const card = (await db.query<{ cid: string | null }>(`SELECT fields->>'Codex Entry ID' AS cid FROM engine_codex_submissions WHERE fields->>'Submission ID' = $1 ORDER BY id DESC LIMIT 1`, [claim.card])).rows[0];
+      const paid = card?.cid
+        ? (await db.query<{ n: string }>(`SELECT count(*)::text AS n FROM engine_pay_sessions WHERE fields->>'Codex Entry ID' = $1 AND fields->>'Paid' = 'true'`, [card.cid])).rows[0]?.n
+        : '0';
+      if (Number(paid) > 0) throw new PayNoteError('already_paid', `That release was paid on ${card?.cid ?? claim.card}'s card. A paid release stays paid; correct it forward on a new log.`, 409);
+    }
+    const added = Array.isArray(rel.after?.released_parts) ? (rel.after.released_parts as unknown[]).map(String) : [];
+    const had = Array.isArray(rel.before?.released_parts) ? (rel.before.released_parts as unknown[]).map(String) : [];
+    const undoneParts = added.filter((p) => !had.includes(p));
+    const leftReleased = round3(prior.released_share - share);
+    const condition = s(rel.before?.release_condition, 600) || prior.release_condition;
+    await db.query(
+      `UPDATE engine_pay_notes SET held_share = held_share + $2::numeric, released_share = $3::numeric,
+              released_parts = coalesce((SELECT jsonb_agg(x) FROM jsonb_array_elements(coalesce(released_parts, '[]'::jsonb)) x WHERE NOT (x #>> '{}' = ANY($4::text[]))), '[]'::jsonb),
+              released_by = CASE WHEN $3::numeric > 0 THEN released_by ELSE NULL END,
+              released_at = CASE WHEN $3::numeric > 0 THEN released_at ELSE NULL END,
+              proof_link = CASE WHEN $3::numeric > 0 THEN proof_link ELSE NULL END,
+              release_month = CASE WHEN $3::numeric > 0 THEN release_month ELSE NULL END,
+              release_condition = $5, updated_at = now()
+        WHERE submission_id = $1`,
+      [log.submission_id, share, leftReleased < 0.0005 ? 0 : leftReleased, undoneParts, condition],
+    );
+    const after = shape((await db.query<Obj>(`SELECT ${COLS} FROM engine_pay_notes WHERE submission_id = $1`, [log.submission_id])).rows[0]);
+    if (claim) await db.query(`DELETE FROM engine_pay_card_claims WHERE history_id = $1`, [rel.id]);
+    await db.query(
+      `INSERT INTO engine_pay_note_history (submission_id, codex_entry_id, action, before, after, by_slack_id, via, note) VALUES ($1,$2,'unrelease',$3,$4,$5,$6,$7)`,
+      [log.submission_id, after.codex_entry_id, JSON.stringify(prior), JSON.stringify({ ...after, undoes_history_id: Number(rel.id), unreleased_share: share, was_on_card: claim?.card ?? null }), by, s(b.via, 40) || 'engine', reason],
+    );
+    await mirrorToLedger(db, after);
+    await engineEvents.record({ event_type: 'pay_note_unreleased', subject_id: after.codex_entry_id ?? log.submission_id, actor: DECIDERS[by], detail: { share, undoes_history_id: Number(rel.id), was_on_card: claim?.card ?? null, held_now: after.held_share, reason } }, db);
+    return { after, share };
+  };
+  const msg = (n: PayNote, share: number) => `${n.codex_entry_id ?? n.submission_id}: ${pct(share)} of a day back to held (${pct(n.held_share)} held now), until: ${n.release_condition ?? 'its release condition'}.`;
+  if (opts.dry_run) {
+    try {
+      await withTransaction(async (db) => {
+        const r = await run(db);
+        throw new DryRunRelease(r.after, r.share);
+      });
+    } catch (e) {
+      if (e instanceof DryRunRelease) return { written: false, dry_run: true, note: e.note, share: e.share, message: `Dry run, nothing written. Would put back: ${msg(e.note, e.share)}` };
+      throw e;
+    }
+  }
+  const r = await withTransaction(run);
+  if (r.after.builder_slack_id) void import('./payCard').then((pc) => pc.refreshUnpaidSoon(String(r.after.builder_slack_id))).catch(() => undefined);
+  return { written: true, dry_run: false, note: r.after, share: r.share, message: `Put back to held. ${msg(r.after, r.share)}` };
+}
+
 class DryRunRelease extends Error {
   note: PayNote;
   share: number;

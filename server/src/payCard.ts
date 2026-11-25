@@ -143,6 +143,7 @@ async function releasesFor(db: Queryable, log: LogRow, claim: boolean, upto: str
        JOIN engine_pay_notes n ON n.submission_id = h.submission_id
        LEFT JOIN engine_pay_card_claims c ON c.history_id = h.id
       WHERE h.action = 'release' AND n.builder_slack_id = $1 AND h.submission_id <> $2
+        AND NOT EXISTS (SELECT 1 FROM engine_pay_note_history u WHERE u.action = 'unrelease' AND (u.after->>'undoes_history_id')::bigint = h.id)
         AND (c.card_submission_id = $2 OR (c.history_id IS NULL AND ($3::timestamptz IS NULL OR h.at <= $3::timestamptz)))
       ORDER BY h.id`,
     [log.builder_slack_id, log.submission_id, upto],
@@ -282,7 +283,7 @@ export async function figures(b: Obj, db?: Queryable): Promise<Figures> {
 async function claimedUsd(q: Queryable, builder: string, cardSub: string): Promise<number | null> {
   const r = await q.query<{ share: string; cid: string }>(
     `SELECT ((h.after->>'released_share')::numeric - coalesce((h.before->>'released_share')::numeric, 0))::text AS share, coalesce(h.codex_entry_id, h.submission_id) AS cid
-       FROM engine_pay_card_claims c JOIN engine_pay_note_history h ON h.id = c.history_id WHERE c.card_submission_id = $1`,
+       FROM engine_pay_card_claims c JOIN engine_pay_note_history h ON h.id = c.history_id WHERE c.card_submission_id = $1 AND NOT EXISTS (SELECT 1 FROM engine_pay_note_history u WHERE u.action = 'unrelease' AND (u.after->>'undoes_history_id')::bigint = h.id)`,
     [cardSub],
   );
   let total = 0;

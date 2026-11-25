@@ -16356,3 +16356,10 @@ Files:      server/src/genieBuilder.ts, server/src/mcp/genieBuilderTools.ts, ser
 Problem:    read_genie_builder read only engine_genie_builder_interactions (3 rows) while the build trail of 17 Genie builds lives in engine_genie_approvals; a filtered empty read answered "No Genie Builder interaction has arrived yet ... once Kaiqi wires the rail"; the scorecard's fixed_by_engine_share adds faults that cleared on their own to the engine's fixes
 Fix:        read_genie_builder now carries build_trail (builds, ratings, reuse ran / matched) and reuse_check (Codex logs checked and matched, pattern-trust ranking state, which says when there is no trust data yet), a filter_note when a filtered read is empty, and how_to_answer; the Kaiqi note is gone. read_self_healing totals carry healer_closed, cleared_on_its_own, closed_by_a_person, healer_closed_share and in_plain, and the definition says fixed_by_engine_share is not a count of healer fixes. Genie's instructions gained the matching rule (genie repo).
 Decision:   nothing that was true is renamed: fixed_by_engine_share stays for the page and the weekly report; the new fields sit beside it
+
+## 2026-11-25 23:00 — An unpaid release can be put back to held
+Intent:     Destiny's held 5% on CODEX-20261123-destiny-arupi-income-board-v2 was released at 00:14 UTC on 25 Nov by the release box on Jason's Approve of the 24 Nov log, and claimed on the 24 Nov card, which is unpaid; Jason never read the proof or paid it, so put it back to held for a release on proof
+Files:      server/src/payNote.ts, server/src/payCard.ts, server/src/mcp/payNoteTools.ts, server/src/migrations.ts, CLAUDE.md
+Problem:    payNote.set refuses any change once a share is released ("already released and paid"), and the history is frozen, so there was no way back for a release no card had paid
+Fix:        payNote.unrelease and the tool unrelease_pay_note; migration 160 allows the unrelease action; payCard.releasesFor and claimedUsd skip a release an unrelease row undoes
+Decision:   a release a paid card carries is refused, never undone; the undo is its own history row, not an edit

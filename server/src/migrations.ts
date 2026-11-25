@@ -5328,6 +5328,16 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
           AND (intake_2_invite->'site_prefill') IS NULL`,
     ],
   },
+  {
+    // 25 Nov 2026 (Destiny): a release made on an Approve click with the release box ticked, and not yet paid on any
+    // card, can be put back to held with a reason (payNote.unrelease). The history stays frozen: the undo is its own row.
+    id: 160,
+    name: 'pay note history: an unpaid release can be put back to held (unrelease)',
+    statements: [
+      `ALTER TABLE engine_pay_note_history DROP CONSTRAINT IF EXISTS engine_pay_note_history_action_check`,
+      `ALTER TABLE engine_pay_note_history ADD CONSTRAINT engine_pay_note_history_action_check CHECK (action IN ('set', 'correct', 'release', 'remove', 'unrelease'))`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

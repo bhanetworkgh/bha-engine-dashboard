@@ -111,6 +111,19 @@ export const releasePayNote: ToolDefinition = {
   handler: (args, deps) => guarded('release_pay_note', args, deps, (dry) => (Array.isArray(args.submission_ids) || Array.isArray(args.codex_entry_ids) ? payNote.releaseMany({ ...args, released_by: str(args, 'requester_user_id'), via: 'mcp' }, { dry_run: dry }) : payNote.release({ ...args, released_by: str(args, 'requester_user_id'), via: 'mcp' }, { dry_run: dry })) as unknown as Promise<Record<string, unknown>>),
 };
 
+export const unreleasePayNote: ToolDefinition = {
+  name: 'unrelease_pay_note',
+  description: 'Put the newest release on one log back to held (25 Nov 2026), for a release that was made without its proof being read, such as the release box on an Approve click, and that no paid card has paid yet. The share goes back to held with its release condition, the card that carried it stops counting it, and the unpaid cards are redrawn. A paid release is refused (already_paid) and is corrected forward. reason required; requester_user_id Destiny or Jason. The frozen pay history gets an unrelease line naming the release it undoes. dry_run writes nothing. Refused on any agent token.',
+  inputSchema: {
+    type: 'object',
+    properties: { ...LOG, reason: { type: 'string' }, requester_user_id: { type: 'string' }, dry_run: { type: 'boolean' } },
+    required: ['reason', 'requester_user_id'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false, title: 'Put an unpaid release back to held' },
+  handler: (args, deps) => guarded('unrelease_pay_note', args, deps, (dry) => payNote.unrelease({ ...args, unreleased_by: str(args, 'requester_user_id'), via: 'mcp' }, { dry_run: dry }) as unknown as Promise<Record<string, unknown>>),
+};
+
 export const deletePayNote: ToolDefinition = {
   name: 'delete_pay_note',
   description: 'Remove the pay note of a log that has been deleted (a test or duplicate log whose note stayed on the Held tab and in the statement). Refused while any Codex row still carries the Submission ID (delete_codex_log removes the log and its note together), and refused when any share was released. confirm must be exactly "DELETE <submission_id>"; reason required; requester_user_id Destiny or Jason. The whole note is copied to record_deletions and a remove line is added to the frozen pay history first. dry_run says what would go. Refused on any agent token.',
@@ -130,4 +143,4 @@ export const deletePayNote: ToolDefinition = {
     }),
 };
 
-export const PAY_NOTE_WRITE_TOOLS: ToolDefinition[] = [readPayNotes, setPayNote, releasePayNote, deletePayNote];
+export const PAY_NOTE_WRITE_TOOLS: ToolDefinition[] = [readPayNotes, setPayNote, releasePayNote, unreleasePayNote, deletePayNote];
