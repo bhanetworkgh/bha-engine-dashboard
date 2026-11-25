@@ -180,7 +180,10 @@ export async function findRecords(input: Record<string, unknown>): Promise<Recor
   const args: Record<string, unknown> = { ...input };
   for (const k of ['filters', 'filters_gte', 'filters_lte']) if (args[k] !== undefined) args[k] = objectArg(args[k]);
   const kind = typeof args.kind === 'string' ? args.kind.trim() : '';
-  if (!READABLE_KINDS.includes(kind)) throw new McpError('bad_argument', `"kind" must be one of: ${READABLE_KINDS.join(', ')}.`);
+  // A Decision Watch is not a record kind (25 Nov 2026, Destiny: Genie asked find_records for kind
+  // "decision_watch" and reported the watches as unread). The refusal names the tool that reads them.
+  if (/decision.?watch|^watch(es)?$|^dw$/i.test(kind)) throw new McpError('bad_argument', `Decision Watches are read with list_decision_watches, not find_records: pass watch_id ("DW-...") for one watch whole, or owner_user_id, open_only or search for a list.`);
+  if (!READABLE_KINDS.includes(kind)) throw new McpError('bad_argument', `"kind" must be one of: ${READABLE_KINDS.join(', ')}. A Decision Watch (DW-...) is read with list_decision_watches.`);
   const mk = kind as mirror.MirrorKind;
   const spec = mirror.KINDS[mk];
   const shape = SHAPE[kind];
