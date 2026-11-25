@@ -475,6 +475,60 @@ export function summarise(rows: Interaction[]) {
   return { all: pick(null), live_natural: pick('live_natural'), test_forced: pick('test_forced') };
 }
 
+/**
+ * The two records Genie answers "how much has the Builder done?" from (25 Nov 2026, Destiny: Genie told Jason 0 and
+ * 3 builds when the build trail held 17, and called the live reuse check design only, because it read this table alone).
+ * The build trail is every change Genie asked to make behind an Approve card (engine_genie_approvals with a plan): its
+ * plan, decision, what it built and the asker's rating. The reuse check is the one that runs on those builds and on every
+ * submitted Codex log. Both are read here so one call answers both, with the counts the records hold.
+ */
+export async function buildTrail() {
+  const r = await query<{ builds: string; done: string; useful: string; partly: string; not_useful: string; not_rated: string; unrated: string; reuse_ran: string; reuse_matched: string; first_at: string | null; last_at: string | null }>(
+    `SELECT count(*)::text AS builds,
+            count(*) FILTER (WHERE status = 'done')::text AS done,
+            count(*) FILTER (WHERE rating = 'useful')::text AS useful,
+            count(*) FILTER (WHERE rating = 'partly')::text AS partly,
+            count(*) FILTER (WHERE rating LIKE 'not_useful%')::text AS not_useful,
+            count(*) FILTER (WHERE rating = 'not_rated')::text AS not_rated,
+            count(*) FILTER (WHERE rating IS NULL)::text AS unrated,
+            count(*) FILTER (WHERE plan->'reuse'->>'ran' = 'true')::text AS reuse_ran,
+            count(*) FILTER (WHERE jsonb_array_length(coalesce(plan->'reuse'->'matches','[]'::jsonb)) > 0)::text AS reuse_matched,
+            to_char(min(created_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS first_at,
+            to_char(max(created_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS last_at
+       FROM engine_genie_approvals WHERE plan IS NOT NULL`,
+  );
+  const x = r.rows[0];
+  const n = (k: keyof typeof x) => Number(x?.[k] ?? 0);
+  return {
+    what: 'Every change Genie made behind an Approve card: plan, decision, what it built and the asker\'s usefulness rating (engine_genie_approvals, since 19 Nov 2026). This is the count of Genie builds; the interactions below are a separate, smaller record that a build is reported into.',
+    builds: n('builds'), finished: n('done'),
+    ratings: { useful: n('useful'), partly: n('partly'), not_useful: n('not_useful'), not_rated_in_48h: n('not_rated'), awaiting: n('unrated') },
+    reuse_check_ran: n('reuse_ran'), reuse_check_found_a_match: n('reuse_matched'),
+    first_at: x?.first_at ?? null, last_at: x?.last_at ?? null,
+  };
+}
+
+export async function reuseCheckRecord() {
+  const logs = await query<{ checked: string; matched: string }>(
+    `SELECT count(*)::text AS checked,
+            count(*) FILTER (WHERE (fields->>'Reuse Check') LIKE '%"summary":"Reuse check: this work matches%')::text AS matched
+       FROM engine_codex_submissions WHERE fields ? 'Reuse Check'`,
+  );
+  const trust = await query<{ n: string; patterns: string }>(`SELECT count(*)::text AS n, count(DISTINCT pattern_id)::text AS patterns FROM engine_pattern_trust`);
+  const l = logs.rows[0]; const t = trust.rows[0];
+  return {
+    what: 'The reuse check is live: it runs before every Genie build and on every submitted Codex log, cheapest first (ids named, then word overlap with patterns, open candidates, open loops and the backlog, then approved Codex logs), and shows what already exists before anything is rebuilt. It never blocks and never changes pay.',
+    codex_logs_checked: Number(l?.checked ?? 0),
+    codex_logs_with_a_match: Number(l?.matched ?? 0),
+    ranking: {
+      how: 'Matches are ordered by pattern trust score (ups minus downs over 90 days), then trust level, then word overlap; retired patterns are skipped.',
+      trust_events: Number(t?.n ?? 0),
+      patterns_with_trust: Number(t?.patterns ?? 0),
+      state: Number(t?.n ?? 0) === 0 ? 'No trust data yet: no build pattern has been shown, reused or overridden through the check, so ranking falls back to word overlap.' : 'Trust data held; ranking uses it.',
+    },
+  };
+}
+
 export async function read(opts: { rail_id?: string | null; interaction_id?: string | null; surface?: string | null; used_genie?: boolean | null; requester_id?: string | null; search?: string | null; limit?: number } = {}) {
   const where: string[] = [];
   const params: unknown[] = [];
@@ -494,8 +548,15 @@ export async function read(opts: { rail_id?: string | null; interaction_id?: str
   const now = Date.now();
   const all = r.rows.map((x) => derive({ ...x, approvals_required: x.approvals_required === null ? null : Number(x.approvals_required), usefulness_rating: x.usefulness_rating === null ? null : Number(x.usefulness_rating) }, now));
   const limit = Math.max(1, Math.min(500, opts.limit ?? 200));
+  const filtered = where.length > 0;
+  const total = filtered ? Number((await query<{ n: string }>(`SELECT count(*)::text AS n FROM engine_genie_builder_interactions`)).rows[0]?.n ?? 0) : all.length;
   return {
     schema: SCHEMA,
+    build_trail: await buildTrail(),
+    reuse_check: await reuseCheckRecord(),
+    filter_note: filtered && all.length === 0
+      ? `Nothing in this record matches that filter; ${total} interaction(s) are held in all. An empty filtered read is not "no builds": the build trail below counts every Genie build.`
+      : null,
     summary: summarise(all),
     interactions: all.slice(0, limit),
     returned: Math.min(limit, all.length),

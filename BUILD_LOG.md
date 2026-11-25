@@ -16349,3 +16349,10 @@ Files:      src/data/fixtures/index.ts, server/src/engine.ts
 Problem:    dep-dc3ksalbedkc73cglu40 failed: "src/data/fixtures/index.ts(17,15): error TS2307: Cannot find module './chat'". After that fix, dep-dc3ktdl9el5s73adtqkg failed: "server/src/engine.ts(12,1): error TS6133: 'f' is declared but its value is never read."
 Fix:        dropped the re-export of the deleted chat fixture (1af4c1f) and the fixtures import only getAskBays used (8507498). Live as dep-dc3kua8jo6nc73ai0go0; /ask-bays is gone from the route list.
 Decision:   the local typecheck cannot run without node_modules, so Render's build is the check; DW-1795208783665-DM7Y closed on the live deploy.
+
+## 2026-11-25 22:45 — Genie reads the right record when it checks a claim
+Intent:     Genie told Jason the debrief's claims were thin (0 or 3 Genie builds, the reuse check "design only", healer 32 vs 1,135 unreconciled) because it read the wrong records; make one read answer each question with the counts the records hold
+Files:      server/src/genieBuilder.ts, server/src/mcp/genieBuilderTools.ts, server/src/selfHealing.ts
+Problem:    read_genie_builder read only engine_genie_builder_interactions (3 rows) while the build trail of 17 Genie builds lives in engine_genie_approvals; a filtered empty read answered "No Genie Builder interaction has arrived yet ... once Kaiqi wires the rail"; the scorecard's fixed_by_engine_share adds faults that cleared on their own to the engine's fixes
+Fix:        read_genie_builder now carries build_trail (builds, ratings, reuse ran / matched) and reuse_check (Codex logs checked and matched, pattern-trust ranking state, which says when there is no trust data yet), a filter_note when a filtered read is empty, and how_to_answer; the Kaiqi note is gone. read_self_healing totals carry healer_closed, cleared_on_its_own, closed_by_a_person, healer_closed_share and in_plain, and the definition says fixed_by_engine_share is not a count of healer fixes. Genie's instructions gained the matching rule (genie repo).
+Decision:   nothing that was true is renamed: fixed_by_engine_share stays for the page and the weekly report; the new fields sit beside it

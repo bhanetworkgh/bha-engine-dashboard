@@ -261,6 +261,12 @@ export async function scorecard(opts: { weeks?: number } = {}) {
       automatic_fixes_counted_apart: fixesApart.filter((f) => weekStart(f.at) >= from).length,
       closed_real_faults: closedW,
       fixed_by_engine_share: pct(closedW.engine + closedW.cleared_itself, decided),
+      // The clean split Jason asked for (25 Nov 2026): a change the engine made, kept apart from a fault that went away.
+      healer_closed: closedW.engine,
+      cleared_on_its_own: closedW.cleared_itself,
+      closed_by_a_person: closedW.person,
+      healer_closed_share: pct(closedW.engine, decided),
+      in_plain: `Of ${closedW.engine + closedW.cleared_itself + closedW.person + closedW.policy + closedW.not_recorded} closed real faults since ${from}: ${closedW.engine} were closed by the engine (a retry, repair or re-run recorded against them), ${closedW.cleared_itself} cleared on their own, ${closedW.person} were closed by a person, ${closedW.policy} by policy and ${closedW.not_recorded} have no close recorded (before 2 Oct 2026). Quote healer_closed for what the healer did; fixed_by_engine_share adds the ones that cleared on their own and is not a count of healer fixes.`,
       still_open: realW.filter((i) => i.open_now).length,
       time_to_fix: { engine: percentiles([...minutes('engine'), ...minutes('cleared_itself')]), person: percentiles(minutes('person')) },
     },
@@ -272,7 +278,7 @@ export async function scorecard(opts: { weeks?: number } = {}) {
       'Runs are production runs: webhook, trigger and sub-workflow runs. Manual test runs, the healer’s own retries and the error handlers’ runs are left out. Failed means error or crashed.',
       'A real fault is an incident that is not a test, not the simulator, not a guard refusing a request on purpose, and not marked a test by a person with a reason (mark_incidents_test, or close_incidents with test true); those are counted apart. A fault raised by an alarm step (Raise, Assert, Stop On) is a real fault: the alarm is reporting something that failed upstream.',
       'An automatic fix is a healer retry that recovered (including runs that never opened an incident), a Claude Code repair still standing, a recovery-watcher re-run, a polling one-off the watcher closed, or a Bays intent-check incident whose same ask, tool and record then passed the check and landed. Each incident counts once, in the week of its first fix. A fix on a test, the simulator, a guard refusal or an incident marked a test is counted apart (automatic_fixes_counted_apart), never as a real fix.',
-      'Fixed by the engine share = (closed by the engine + cleared on its own) ÷ (those + closed by a person). Closed by policy (a chat not re-run hours late) and closes not recorded (before 2 Oct 2026) are left out of it, and named.',
+      'Fixed by the engine share = (closed by the engine + cleared on its own) ÷ (those + closed by a person). Closed by policy (a chat not re-run hours late) and closes not recorded (before 2 Oct 2026) are left out of it, and named. It is not a count of healer fixes: healer_closed is the faults the engine closed with a retry, repair or re-run recorded against them, and cleared_on_its_own is the faults that went away with no change. in_plain says both.',
       'Time to fix is p50 and p95 from the fault to its close, only for closes on or after 2 Oct 2026; never a mean.',
     ],
   };

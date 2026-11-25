@@ -14,7 +14,7 @@ import { FeedError } from '../systemFeeds';
 export const readGenieBuilder: ToolDefinition = {
   name: 'read_genie_builder',
   description:
-    'Genie Builder interactions as Genie reported them (rail genie-slack-n8n first): one row per interaction_id with what was asked and by whom, whether it touched anything live and why, who approved and the two-builder check, what n8n built and its debrief, live_effect, and the builder\'s decision and 1 to 5 rating; plus the summary the proof is read from (accepted / modified / rejected, average rating, awaiting review, failed feedback loops), split into live_natural and test_forced. Only a reviewed interaction counts toward the proof, and a test_forced one is never real use. Since 22 Nov 2026 every build is a record, with Genie or without: surface (slack, web_chat, claude_code), tools invoked, the reuse check (reused / extended / forked / built_new and what was found), a not_used record with its reason when Genie was not used, and whether it is marked production. Read this before planning a build and cite a past one by its interaction_id. Filter by rail_id, interaction_id, surface, used_genie, requester_id or words (search). Read only.',
+    'How much the Genie Builder has done, in one read: build_trail (every change Genie made behind an Approve card, with plan, decision, what it built and the asker\'s rating; this is the count of Genie builds), reuse_check (live on every Genie build and every submitted Codex log, with how many found a match and whether pattern-trust ranking has data yet), and the Genie Builder interactions as Genie reported them (rail genie-slack-n8n first): one row per interaction_id with what was asked and by whom, whether it touched anything live and why, who approved and the two-builder check, what n8n built and its debrief, live_effect, and the builder\'s decision and 1 to 5 rating; plus the summary the proof is read from (accepted / modified / rejected, average rating, awaiting review, failed feedback loops), split into live_natural and test_forced. Only a reviewed interaction counts toward the proof, and a test_forced one is never real use. Since 22 Nov 2026 every build is a record, with Genie or without: surface (slack, web_chat, claude_code), tools invoked, the reuse check (reused / extended / forked / built_new and what was found), a not_used record with its reason when Genie was not used, and whether it is marked production. Read this before planning a build and cite a past one by its interaction_id. Filter by rail_id, interaction_id, surface, used_genie, requester_id or words (search). Read only.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -49,7 +49,7 @@ export const readGenieBuilder: ToolDefinition = {
     return {
       ok: true,
       ...r,
-      ...(r.held === 0 ? { note: 'No Genie Builder interaction has arrived yet. Genie sends them to POST /api/engine/genie-builder once Kaiqi wires the rail (due Wed 18 Nov); nothing here is a guess.' } : {}),
+      how_to_answer: 'To say how many builds Genie has done, quote build_trail.builds and its ratings. To say whether the reuse check runs, quote reuse_check. interactions and summary are the separate Genie Builder record; an empty or filtered read of them never means no builds.',
     };
   },
 };
