@@ -59,14 +59,16 @@ assert.deepEqual(wp.takeOff(0, 0, 0.25), { credited: 0, held: 0, taken: 0 });
 ok('the penalty comes off the credited share first, then the held share, never below nought');
 
 assert.equal(wp.inScopeLane('cst'), true);
-assert.equal(wp.inScopeLane('VFARM_HARDWARE'), true);
+assert.equal(wp.inScopeLane('VFARM'), true);
+assert.equal(wp.inScopeLane('KIOSK'), true);
+for (const l of ['VFARM_HARDWARE', 'CAPITAL', 'BAYS', 'ENGINE', 'NS', 'RT', 'GENIE', 'MEDIA']) assert.equal(wp.inScopeLane(l), false);
 assert.equal(wp.inScopeLane('CAD_API'), false);
 assert.equal(wp.inScopeLane(null), false);
 assert.equal(wp.pushGroup('BAYS', 'Stripe 2KG0 live checkout'), 'Stripe 2KG0 / V52V and charge gate');
 assert.equal(wp.pushGroup('VFARM_HARDWARE', 'rover pass on the rack'), 'Pilot 1 racks and hardware');
 assert.equal(wp.pushGroup('CST', 'Monitoring Twin checklist'), 'Monitoring Twin');
 assert.equal(wp.pushGroup('CST', 'Content-Type check'), 'CST');
-ok('scope is the lanes Jason named; the 30-day push groups watches by what they block');
+ok('scope is vFarm, KIOSK and CST only (25 Nov); the 30-day push groups watches by what they block');
 
 assert.match(wp.cardFlag({ watch_id: 'DW-1-ABCD', share: 0.1, penalty_id: 'WP-1-ABCD', level: 1 }), /^Watch penalty: DW-1-ABCD 10%/);
 ok('the review card names the penalty by watch id');

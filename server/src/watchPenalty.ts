@@ -27,7 +27,11 @@ import * as timers from './timers';
 import { ADMIN_IDS } from './writeGuards';
 
 export const RULE = {
-  lanes: ['CST', 'KIOSK', 'VFARM_HARDWARE', 'VFARM', 'CAPITAL', 'BAYS', 'ENGINE', 'NS', 'RT', 'GENIE', 'MEDIA'] as readonly string[],
+  /**
+   * 25 Nov 2026 (Jason, C0ASMPYQLG3 1793891836.825299; SOP a4ed8707): vFarm, KIOSK and CST watches only.
+   * VFARM_HARDWARE, CAPITAL and the engine lanes came off; any widening needs Jason's separate explicit approval.
+   */
+  lanes: ['VFARM', 'KIOSK', 'CST'] as readonly string[],
   /** Share of a day taken off, by escalation number (1st, 2nd, 3rd and after). */
   shares: [0.1, 0.25, 0.5] as readonly number[],
   reset_days: 30,

@@ -16292,3 +16292,10 @@ Files:      server/src/intentCheck.ts, server/test/intent-check.test.cjs, CLAUDE
 Problem:    audit 8175: "the post addresses user U0AEW3TBYH1, which is not Destiny"; 8176 repeated it and opened INC-BAYS.AGENT-134; 8177 (send_nudge) was refused as targeting "the id the dashboard had just blocked as not matching Destiny"; 8178/8179: "nothing in the records shows that ID is Jegan's" (INC-BAYS.AGENT-135). The recipients line named people, but the message text the check reads still said <@U0AEW3TBYH1> with no name.
 Fix:        named() puts the person's name after every <@id> in any text the check is shown (clip and shown), from NAMES: the roster in northStarTools.PEOPLE plus Bays and Genie.
 Decision:   Kept the raw id beside the name, so the check can still see exactly who is tagged.
+
+## 2026-11-25 09:05 — Decision Watch pay penalty narrowed to vFarm, KIOSK and CST
+Intent:     Jason (C0ASMPYQLG3 1793891836.825299) approved the penalty only for vFarm, KIOSK and CST watches; the live rule covered eleven lanes.
+Files:      server/src/watchPenalty.ts (RULE.lanes), server/test/watch-penalty.test.cjs, CLAUDE.md
+Problem:    The 22 Nov DM approval had named the wider scope; Jason's ruling today is the narrow one, and SOP a4ed8707 now says so.
+Fix:        RULE.lanes is ['VFARM', 'KIOSK', 'CST']. Escalation logic, shares and the 30-day reset are unchanged. No penalty had been recorded.
+Decision:   VFARM_HARDWARE is out, as Jason listed it by name. Any widening needs his separate explicit approval.
