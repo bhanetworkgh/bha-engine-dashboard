@@ -93,7 +93,7 @@ export const askGenie: ToolDefinition = {
     }
     await engineEvents.record({
       event_type: 'genie_handoff_requested', subject_id: `${a.channel_id}/${a.thread_ts}`, lane: 'GENIE', actor: 'bays',
-      detail: { from: 'bays', asked_by: a.asked_by, channel_id: a.channel_id, thread_ts: a.thread_ts, question: a.question.slice(0, 600), deep, audit_id: audit },
+      detail: { from: 'bays', asked_by: a.asked_by, channel_id: a.channel_id, thread_ts: a.thread_ts, question: a.question.slice(0, 5000), deep, audit_id: audit },
     }).catch(() => undefined);
     await auditClose(audit, { outcome: 'applied', detail: `handed to Genie${deep ? ' (deep, Opus 5.5)' : ''} in ${a.channel_id}/${a.thread_ts}` });
     return { ok: true, handed_over: true, message: 'Handed to Genie. Genie answers in this thread; tell the person so in one line and do not answer it yourself.', audit_id: audit };

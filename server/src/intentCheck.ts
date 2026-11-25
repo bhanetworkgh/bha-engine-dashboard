@@ -271,7 +271,7 @@ export const CHECKED: ReadonlyArray<string> = [
 
 export interface Ask {
   key: string;
-  source: 'slack' | 'slack_thread_newest' | 'scheduled' | 'agent_stated';
+  source: 'slack' | 'slack_thread_newest' | 'scheduled' | 'agent_stated' | 'handoff';
   text: string;
   context: string;
   asker: string | null;
@@ -330,7 +330,7 @@ export function matchTask(tasks: string[], said: string): string | null {
   return hits.length === 1 ? hits[0] : null;
 }
 
-export async function resolveAsk(tool: string, args: Args): Promise<AskResult> {
+export async function resolveAsk(tool: string, args: Args, agent = ''): Promise<AskResult> {
   const a = (args.ask && typeof args.ask === 'object' ? args.ask : {}) as Args;
   const sched = str(a.scheduled_task);
   if (sched) {
@@ -354,6 +354,35 @@ export async function resolveAsk(tool: string, args: Args): Promise<AskResult> {
       for (let i = msgs.length - 1; i >= 0; i--) if (!msgs[i].bot_id && msgs[i].user) { idx = i; break; }
       if (idx < 0) return { ok: false, reason: 'ask_not_found', message: `Thread ${channel} / ${thread} has no message from a person to check this against.` };
       source = 'slack_thread_newest';
+    }
+    // 25 Nov 2026 (Destiny; INC-BAYS.AGENT-136): a question handed to Genie with ask_genie is not a Slack message,
+    // so Genie's context names the thread root as the message that asked, and its write was checked against the
+    // thread's opening post (a marketing plan) instead of the hand-off (record Jegan's WFJO update). When a hand-off
+    // into this thread is newer than the message named, the hand-off is the ask, with the thread's newest messages
+    // as its context.
+    if (agent === 'genie') {
+      const named = Number(msgs[idx].ts || 0);
+      const h = await query<{ detail: { question?: string; asked_by?: string; audit_id?: number }; at: string }>(
+        `SELECT detail, at FROM engine_events WHERE event_type = 'genie_handoff_requested'
+           AND detail->>'channel_id' = $1 AND detail->>'thread_ts' = $2 AND at > now() - interval '30 minutes'
+         ORDER BY at DESC LIMIT 1`,
+        [channel, thread],
+      ).catch(() => ({ rows: [] as { detail: { question?: string; asked_by?: string; audit_id?: number }; at: string }[] }));
+      const hand = h.rows[0];
+      if (hand?.detail?.question && Date.parse(hand.at) / 1000 > named) {
+        const recent = msgs.slice(Math.max(0, msgs.length - CONTEXT_MESSAGES));
+        const who = NAMES[hand.detail.asked_by ?? ''] || hand.detail.asked_by || 'someone';
+        return {
+          ok: true,
+          ask: {
+            key: `handoff:${channel}:${thread}:${hand.detail.audit_id ?? hand.at}`,
+            source: 'handoff',
+            text: `${who} (handed to Genie by Bays): ${clip(cleanText(hand.detail.question), 5000)}`,
+            context: recent.map((m) => '- ' + line(m, 700)).join('\n'),
+            asker: hand.detail.asked_by ?? null,
+          },
+        };
+      }
     }
     const ask = msgs[idx];
     const before = msgs.slice(Math.max(0, idx - CONTEXT_MESSAGES), idx);
@@ -464,7 +493,7 @@ async function askModel(user: string): Promise<Verdict> {
 
 export function prompt(ask: Ask, action: string, tool: string, records = ''): string {
   return [
-    ask.source === 'scheduled' ? 'The run:' : ask.source === 'agent_stated' ? 'The question, as Bays reports it (no Slack message exists):' : ask.source === 'slack_thread_newest' ? 'The newest message a person posted in the thread (Bays did not name which message asked):' : 'The message that asked:',
+    ask.source === 'scheduled' ? 'The run:' : ask.source === 'agent_stated' ? 'The question, as Bays reports it (no Slack message exists):' : ask.source === 'slack_thread_newest' ? 'The newest message a person posted in the thread (Bays did not name which message asked):' : ask.source === 'handoff' ? 'The question handed to Genie (the thread\'s newest messages are below it):' : 'The message that asked:',
     ask.text,
     ask.context ? `\nEarlier in the thread, for context only (oldest first):\n${ask.context}` : '',
     records ? `\nRecords the action names, as the dashboard holds them (facts that match these are supported):\n${records}` : '',
@@ -632,7 +661,7 @@ export async function gate(agent: string, tool: string, rawArgs: Args): Promise<
   const action = await describe(tool, args);
   if (!action) return { refusal: null, args };
 
-  const resolved = await resolveAsk(tool, rawArgs);
+  const resolved = await resolveAsk(tool, rawArgs, agent);
   if (!resolved.ok) {
     await record({ agent, tool, ask_key: null, ask_source: null, ask_excerpt: null, action, verdict: resolved.reason, reason: resolved.message, asked: null, provider: null, attempt: 0 });
     return { refusal: { ok: false, reason: resolved.reason, message: resolved.message, written: false }, args };

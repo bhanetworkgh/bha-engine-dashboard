@@ -16307,3 +16307,10 @@ Problem:    The version history said what changed but not who or which run; that
 Fix:        Each door sets a change context; pg.ts writes it as bha.* settings; events and engine_record_history take them as column defaults; the history keeps after_values. read_change_record, the engine route and a Logstream tab read one union of status changes, incidents and approval cards. A vfarm lane on Engine health, read once BHARAG_VFARM_INCIDENTS is set.
 Decision:   The approver is a named person only, never self. Nothing is backfilled: before 25 Nov who made a change reads null. Migration and trigger tested on local Postgres 16; the union run read-only against production (938 incidents, 281 loop and 66 Codex changes in 7 days, 313 ms).
 Proof:      Not yet: the deploy, then a real change read back with its actor and run.
+
+## 2026-11-25 11:20 — A hand-off to Genie is the ask its writes are checked against
+Intent:     Genie should record Jegan's WFJO update (C0AFR4BH9UH 1795356606.586909) on the loop and reply with the audit id.
+Files:      server/src/intentCheck.ts, server/src/mcp/genieAskTools.ts, CLAUDE.md
+Problem:    Handed the ask with ask_genie (audit 8187), Genie's update_record was refused twice (IC-1795601458090-2446, IC-1795601469932-A17E; INC-BAYS.AGENT-136): "The message is a marketing plan asking Jason for two OKs". A hand-off has no Slack message, so Genie named the thread root as the asking message and the check read the opening post.
+Fix:        On Genie's token, a genie_handoff_requested event for the same channel and thread within 30 minutes that is newer than the message named becomes the ask (source handoff), with the thread's newest 12 messages as context. The event now keeps 5,000 characters of the question (was 600).
+Decision:   Keyed on the hand-off being newer than the named message, so a real tag posted after a hand-off is still checked against itself.
