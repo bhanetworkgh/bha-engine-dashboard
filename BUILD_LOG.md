@@ -16342,3 +16342,10 @@ Files:      src/App.tsx, src/components/Layout.tsx, src/screens/Overview.tsx, sr
 Problem:    The /ask-bays page, its sidebar link, two Overview links and the /api/ask proxy to Bays — Agent Delivery were all still live on main (8a080a5).
 Fix:        Removed the page, route, sidebar link, the Overview quick action, the /api/ask and /api/ask-bays routes, the Ask Bays rows on Settings and the ask.ts proxy. The Overview's "Ask Bays about today" button is now "Ask Genie about today" and opens genie.bhanetwork.org/chat.
 Decision:   n8n's dashboard-ask-bays webhook is left as it is (it is a path on Bays — Agent Delivery, which still serves Slack); its registry rows stay as history. The ChatThread and AskReply types stay in types.ts, unused, rather than chase every reference.
+
+## 2026-11-25 22:15 — Two build failures after the Ask Bays retirement
+Intent:     ship 72095ab (Ask Bays retired) to Render
+Files:      src/data/fixtures/index.ts, server/src/engine.ts
+Problem:    dep-dc3ksalbedkc73cglu40 failed: "src/data/fixtures/index.ts(17,15): error TS2307: Cannot find module './chat'". After that fix, dep-dc3ktdl9el5s73adtqkg failed: "server/src/engine.ts(12,1): error TS6133: 'f' is declared but its value is never read."
+Fix:        dropped the re-export of the deleted chat fixture (1af4c1f) and the fixtures import only getAskBays used (8507498). Live as dep-dc3kua8jo6nc73ai0go0; /ask-bays is gone from the route list.
+Decision:   the local typecheck cannot run without node_modules, so Render's build is the check; DW-1795208783665-DM7Y closed on the live deploy.
