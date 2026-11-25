@@ -16363,3 +16363,9 @@ Files:      server/src/payNote.ts, server/src/payCard.ts, server/src/mcp/payNote
 Problem:    payNote.set refuses any change once a share is released ("already released and paid"), and the history is frozen, so there was no way back for a release no card had paid
 Fix:        payNote.unrelease and the tool unrelease_pay_note; migration 160 allows the unrelease action; payCard.releasesFor and claimedUsd skip a release an unrelease row undoes
 Decision:   a release a paid card carries is refused, never undone; the undo is its own history row, not an edit
+
+## 2026-11-25 23:20 — A tagged id is named once, not twice
+Intent:     intent-check views read "<@U0AF011R821> (Jegan) (Jegan)" (IC-1795615056404-9BB8) and "(Destiny Arupi) (Destiny Arupi)" (IC-1795625504970-B197), because named() runs in clip() and again on texts already clipped
+Files:      server/src/intentCheck.ts
+Fix:        named() is idempotent: a tag already followed by its own name is left alone; a tag followed by something else still gets the name right after it
+Decision:   cosmetic for the model, but a doubled name is noise the check has to read past; checked in node on both shapes

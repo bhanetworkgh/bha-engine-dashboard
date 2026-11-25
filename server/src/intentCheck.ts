@@ -84,8 +84,10 @@ const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
  * the person's name beside it.
  */
 export const NAMES: Record<string, string> = { ...PEOPLE, U0BD5EA1F71: 'Bays (the bot)', U0ADAEB9JTH: 'Genie (the bot)' };
+// Idempotent (25 Nov 2026): a text named twice (clip, then shown) read "<@U..> (Jegan) (Jegan)"; a tag already followed by its name is left as it is.
 export const named = (s: string): string =>
-  s.replace(/<@([UW][A-Z0-9]+)(\|[^>]*)?>/g, (m, id: string) => (NAMES[id] ? `${m} (${NAMES[id]})` : m));
+  s.replace(/<@([UW][A-Z0-9]+)(\|[^>]*)?>( \(([^)]*)\))?/g, (m, id: string, _alias: string | undefined, tail: string | undefined, given: string | undefined) =>
+    NAMES[id] && !(tail && given === NAMES[id]) ? `${m.slice(0, m.length - (tail ?? '').length)} (${NAMES[id]})${tail ?? ''}` : m);
 const clip = (v: unknown, n: number): string => {
   const s = named(typeof v === 'string' ? v : v === undefined || v === null ? '' : JSON.stringify(v));
   return s.length > n ? s.slice(0, n - 1) + '…' : s;
