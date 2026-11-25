@@ -14,4 +14,3 @@ export * from './incidents';
 export * from './twins';
 export * from './vfarm';
 export * from './builders';
-export * from './chat';
