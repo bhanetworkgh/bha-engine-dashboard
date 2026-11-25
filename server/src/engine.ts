@@ -9,7 +9,6 @@
  * engine endpoint lands, the fixture reads here become fetches and the shapes
  * stay the same.
  */
-import * as f from '../../src/data/fixtures';
 import type {
   BuildPatternsData,
   ClientLaneRow,
