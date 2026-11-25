@@ -1,9 +1,9 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useData } from '../app/useData';
-import { getLogstream, getWatchPenalties, type WatchPenaltyData } from '../data';
+import { getChangeRecord, getLogstream, getWatchPenalties, type ChangeRecordData, type WatchPenaltyData } from '../data';
 import type { LogstreamData, LogstreamRow, LogstreamSignature, LogstreamTrigger, ResearchSignal } from '../data/types';
-import { EmptyState, LoadFailed, Loading, PageHeader, Pagination, Pill, Stat, StatCell, StatStrip, TableFrame, Tabs, Th, usePaged } from '../components/ui';
+import { EmptyState, LoadFailed, Loading, PageHeader, Pagination, Pill, Segmented, Stat, StatCell, StatStrip, TableFrame, Tabs, Th, usePaged } from '../components/ui';
 
 /**
  * Logstream (2026-10-10, Destiny. Jason's go-ahead of 9 Oct).
@@ -16,9 +16,9 @@ import { EmptyState, LoadFailed, Loading, PageHeader, Pagination, Pill, Stat, St
  * that calls a person. A research job opened is the rule doing its job and is the accent, not green.
  */
 
-const TABS = ['Crossings', 'Faults', 'Rows', 'Patterns', 'Research signals', 'Watch penalties'] as const;
+const TABS = ['Crossings', 'Faults', 'Rows', 'Patterns', 'Research signals', 'Watch penalties', 'Change record'] as const;
 type Tab = (typeof TABS)[number];
-const SLUG: Record<Tab, string> = { Crossings: 'crossings', Faults: 'faults', Rows: 'rows', Patterns: 'patterns', 'Research signals': 'signals', 'Watch penalties': 'watch-penalties' };
+const SLUG: Record<Tab, string> = { Crossings: 'crossings', Faults: 'faults', Rows: 'rows', Patterns: 'patterns', 'Research signals': 'signals', 'Watch penalties': 'watch-penalties', 'Change record': 'changes' };
 
 const when = (iso: string | null) => (iso ? iso.slice(0, 16).replace('T', ' ') : '—');
 
@@ -349,6 +349,125 @@ function Signals({ data }: { data: LogstreamData }) {
 }
 
 /** The Decision Watch pay penalty (23 Nov 2026, Jason's approved rule): who is in penalty, and what the rule covers. */
+const KINDS = [
+  { value: '', label: 'Everything' },
+  { value: 'loops', label: 'Loops' },
+  { value: 'codex', label: 'Codex' },
+  { value: 'incidents', label: 'Incidents' },
+  { value: 'approvals', label: 'Approvals' },
+] as const;
+type KindFilter = (typeof KINDS)[number]['value'];
+const DAYS = [
+  { value: '1', label: '24 hours' },
+  { value: '7', label: '7 days' },
+  { value: '30', label: '30 days' },
+] as const;
+
+/**
+ * The change record (25 Nov 2026, PT9J / MPMD Part A): every state change with Jason's six change
+ * fields and the two approver fields, read from the records that keep them. Neutral throughout: a
+ * change nobody approved is a fact about the record, not a fault.
+ */
+function ChangeRecord() {
+  const [days, setDays] = useState<'1' | '7' | '30'>('7');
+  const [kind, setKind] = useState<KindFilter>('');
+  const [lane, setLane] = useState('');
+  const [offset, setOffset] = useState(0);
+  const { status, data, error } = useData<ChangeRecordData>(() => getChangeRecord({ days: Number(days), lane: lane.trim(), kind, offset }), [days, kind, lane, offset], { kinds: ['loops', 'codex', 'incidents'] });
+  const reset = <T,>(set: (v: T) => void) => (v: T) => {
+    set(v);
+    setOffset(0);
+  };
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-3 px-6 pb-2 pt-4 md:px-8">
+        <Segmented options={DAYS} value={days} onChange={reset(setDays)} ariaLabel="Window" />
+        <Segmented options={KINDS} value={kind} onChange={reset(setKind)} ariaLabel="Kind" />
+        <input
+          className="h-8 w-40 rounded-lg border border-line bg-panel px-2.5 text-[13px] text-ink placeholder:text-faint"
+          placeholder="Lane, e.g. CST"
+          value={lane}
+          onChange={(e) => reset(setLane)(e.target.value)}
+          aria-label="Lane"
+        />
+      </div>
+      {!data ? (
+        status === 'error' ? <LoadFailed error={error} /> : <Loading />
+      ) : (
+        <>
+          <p className="px-6 pb-2 text-[12px] text-faint md:px-8">
+            {data.total} changes in the window.{' '}
+            {data.by_kind.map((k) => `${k.kind} ${k.changes} (who recorded on ${k.who_recorded}, approver named on ${k.approver_named})`).join(' · ')}
+          </p>
+          {data.changes.length === 0 ? (
+            <EmptyState>No change in this window matches.</EmptyState>
+          ) : (
+            <TableFrame grow={false} label="Change record">
+              <thead>
+                <tr>
+                  <Th>When (UTC)</Th>
+                  <Th>Record</Th>
+                  <Th>From → to</Th>
+                  <Th>Lane</Th>
+                  <Th>Who and run</Th>
+                  <Th>Handled by</Th>
+                  <Th>Approved</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.changes.map((c) => (
+                  <tr key={c.change_id} className="border-b border-line align-top">
+                    <td className="tabular px-3 py-2 text-dim">{when(c.at)}</td>
+                    <td className="px-3 py-2 text-ink">
+                      {c.record_id ?? '—'}
+                      <div className="text-[11.5px] text-faint">{c.kind}{c.incident_id && c.incident_id !== c.record_id ? ` · ${c.incident_id}` : ''}</div>
+                    </td>
+                    <td className="px-3 py-2 text-dim">{c.from_state ?? 'new'} → {c.to_state ?? '—'}</td>
+                    <td className="px-3 py-2 text-dim">{c.lane_id ?? '—'}</td>
+                    <td className="px-3 py-2 text-[12px] text-dim">
+                      {c.actor ?? 'not recorded'}
+                      <div className="break-all text-[11.5px] text-faint">{c.run_id ?? 'no run recorded'}{c.via ? ` · ${c.via}` : ''}</div>
+                    </td>
+                    <td className="px-3 py-2 text-[12px] text-dim">{c.handler_id ?? '—'}</td>
+                    <td className="px-3 py-2 text-[12px] text-dim">
+                      {c.approval === 'approved' ? (
+                        <>
+                          {c.approver_id}
+                          <div className="text-[11.5px] text-faint">{when(c.approved_at)}</div>
+                        </>
+                      ) : c.approval === 'self' ? (
+                        'self, not counted'
+                      ) : (
+                        'not approved'
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </TableFrame>
+          )}
+          <div className="flex items-center gap-3 px-6 pt-3 text-[12.5px] md:px-8">
+            <button type="button" className="text-accent disabled:text-faint" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - data.page.limit))}>
+              Newer
+            </button>
+            <span className="tabular text-faint">
+              {data.total ? `${offset + 1} to ${offset + data.changes.length} of ${data.total}` : '0'}
+            </span>
+            <button type="button" className="text-accent disabled:text-faint" disabled={!data.page.more} onClick={() => setOffset(offset + data.page.limit)}>
+              Older
+            </button>
+          </div>
+          <div className="space-y-1 px-6 pt-3 text-[11.5px] leading-relaxed text-faint md:px-8">
+            {data.rule.map((r) => (
+              <p key={r}>{r}</p>
+            ))}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
 function WatchPenalties() {
   const { status, data, error } = useData<WatchPenaltyData>(getWatchPenalties, [], { kinds: ['decision_watch', 'codex'] });
   if (!data) return status === 'error' ? <LoadFailed error={error} /> : <Loading />;
@@ -441,7 +560,7 @@ export default function Logstream() {
               <Stat label="Actions that did not land" value={notLanded} hint="A job, an alert or a guidance request that failed and is being retried" tone={notLanded ? 'failing' : 'default'} />
             </StatCell>
           </StatStrip>
-          {tab === 'Crossings' ? <Crossings data={data} /> : tab === 'Faults' ? <Faults data={data} /> : tab === 'Rows' ? <Rows data={data} short={short} /> : tab === 'Patterns' ? <Patterns data={data} short={short} /> : tab === 'Watch penalties' ? <WatchPenalties /> : <Signals data={data} />}
+          {tab === 'Crossings' ? <Crossings data={data} /> : tab === 'Faults' ? <Faults data={data} /> : tab === 'Rows' ? <Rows data={data} short={short} /> : tab === 'Patterns' ? <Patterns data={data} short={short} /> : tab === 'Watch penalties' ? <WatchPenalties /> : tab === 'Change record' ? <ChangeRecord /> : <Signals data={data} />}
           <div className="mt-4 space-y-1 px-6 text-[11.5px] leading-relaxed text-faint md:px-8">
             {data.rule.words.map((w) => (
               <p key={w}>{w}</p>

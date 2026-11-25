@@ -26,6 +26,7 @@ import * as logstream from '../logstream';
 import * as researchSignals from '../researchSignals';
 import * as vfarmCustomers from '../vfarmCustomerEvents';
 import * as selfHealing from '../selfHealing';
+import * as changeRecord from '../changeRecord';
 import type { ToolDefinition } from './tools';
 
 const DEFAULT_CHARS = 20_000;
@@ -276,4 +277,43 @@ export const readSelfHealing: ToolDefinition = {
   },
 };
 
-export const LOGSTREAM_READ_TOOLS: ToolDefinition[] = [readLogstream, readEngineEvents, readSelfHealing];
+/**
+ * The change record over MCP (25 Nov 2026, Destiny — PT9J / MPMD Part A). changeRecord.read, cut to
+ * the size budget. Read only, both connections.
+ */
+export const readChangeRecord: ToolDefinition = {
+  name: 'read_change_record',
+  description:
+    'The change record: every state change the engine holds, one row each, with Jason\u2019s six change fields (from_state, to_state, run_id, incident_id, lane_id, handler_id) and the two approver fields (approver_id, approved_at), plus actor (who asked for it) and via (the door it came through). Covers status changes on loops, Codex logs, patterns, commercial cards, North Star and Research Twin asks, research jobs and client questions; incidents opened and closed; and approval cards decided. "What changed since last week" is one call: since (default 7 days ago), until, lane (part of a lane id), kind (loops, codex, incidents, approvals, ns, rt, rt_jobs, patterns, commercial, client_questions), record_id (a LOOP-, Submission ID, INC- or APR- id). approver_id is only a named person who decided: the pay decision on a Codex log, or the person who answered an approval card; a machine is never an approver, a change approved by its own maker reads self, anything else not_approved. Who made a change, which run and which door are recorded from 25 Nov 2026 and are null before it: not recorded, never a guess. Read only.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      since: { type: 'string', description: 'Start of the window, a date or time (UTC). Default 7 days before until.' },
+      until: { type: 'string', description: 'End of the window. Default now.' },
+      lane: { type: 'string', description: 'Only changes whose lane contains this, e.g. CST, VFARM, BAYS.' },
+      kind: { type: 'string', description: 'One kind: loops, codex, incidents, approvals, ns, rt, rt_jobs, patterns, commercial, client_questions.' },
+      record_id: { type: 'string', description: 'One record: a loop id, a Submission ID, an incident id or an approval id.' },
+      limit: { type: 'number', description: 'Rows, newest first. Default 100, at most 500.' },
+      offset: { type: 'number', description: 'Rows to skip, for the next page.' },
+      max_chars: { type: 'number', description: `Size budget for the answer. Default ${DEFAULT_CHARS}, at most ${MAX_CHARS}.` },
+    },
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false, title: 'Change record: who changed what, and who approved it' },
+  handler: async (args, deps) => {
+    const t0 = Date.now();
+    const maxChars = Math.max(MIN_CHARS, Math.min(MAX_CHARS, Number(args.max_chars) || DEFAULT_CHARS));
+    const s = (k: string) => (typeof args[k] === 'string' && (args[k] as string).trim() ? (args[k] as string).trim() : null);
+    let r: Awaited<ReturnType<typeof changeRecord.read>>;
+    try {
+      r = await changeRecord.read({ since: s('since'), until: s('until'), lane: s('lane'), kind: s('kind'), record_id: s('record_id'), limit: Number(args.limit) || undefined, offset: Number(args.offset) || undefined });
+    } catch (e) {
+      return { ok: false, reason: 'bad_window', message: e instanceof Error ? e.message : String(e) };
+    }
+    const out = fit({ ...r } as unknown as Dict, ['changes'], maxChars);
+    await mirror.logWrite({ endpoint: 'mcp:read_change_record', kind: 'change_record', method: 'MCP', key_label: deps.access === 'write' ? 'MCP_WRITE_TOKEN' : 'MCP_SECRET', outcome: 'read', detail: `${r.total} change(s), ${list(out.changes).length} returned, ${out.result_chars} chars`, ms: Date.now() - t0 });
+    return out;
+  },
+};
+
+export const LOGSTREAM_READ_TOOLS: ToolDefinition[] = [readLogstream, readEngineEvents, readSelfHealing, readChangeRecord];

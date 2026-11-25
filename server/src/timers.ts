@@ -7,6 +7,8 @@
  * process started. It is held in memory, so a deploy or a restart starts the
  * counts again, and the page says since when.
  */
+import * as changeContext from './changeContext';
+
 export interface TimerInfo {
   name: string;
   what: string;
@@ -130,6 +132,8 @@ if (process.env.NODE_ENV !== 'test') {
 
 /** Called at the top of a timer's tick. Never throws. */
 export function beat(name: string): void {
+  // 25 Nov 2026 (PT9J): everything this tick changes records the timer as who did it, and the tick as the run.
+  changeContext.enter({ actor: `timer:${name}`, run_id: changeContext.newRunId('tick'), via: `timer:${name}`, handler: 'dashboard process' });
   const s = state.get(name);
   const now = new Date().toISOString();
   if (s) {

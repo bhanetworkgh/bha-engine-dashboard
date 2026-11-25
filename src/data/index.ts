@@ -755,6 +755,15 @@ export const getIncomeBoard = () => api<IncomeBoard>('/api/income-board');
 export interface WatchPenaltyRow { penalty_id: string; watch_id: string; owner_user_id: string; lane: string; escalated_at: string; level: number; share: number | string; status: 'pending' | 'applied' | 'overridden'; applied_submission_id: string | null; override_reason: string | null; finding: string }
 export interface WatchPenaltyData { on: boolean; enabled_at: string | null; rule: string; in_penalty: WatchPenaltyRow[]; overridden: WatchPenaltyRow[]; in_scope: { groups: { group: string; watches: { watch_id: string; lane: string; owner_user_id: string; decision: string; link: string | null }[] }[]; total: number; no_lane: number; other_lane: number } }
 export const getWatchPenalties = () => api<WatchPenaltyData>('/api/watch-penalties');
+/** The change record (25 Nov 2026, PT9J): every state change with who, which run and who approved. */
+export interface ChangeRecordRow { change_id: string; at: string; kind: string; record_id: string | null; from_state: string | null; to_state: string | null; run_id: string | null; incident_id: string | null; lane_id: string | null; handler_id: string | null; actor: string | null; via: string | null; approver_id: string | null; approved_at: string | null; approval: 'approved' | 'not_approved' | 'self' }
+export interface ChangeRecordData { ok: true; window: { since: string; until: string; lane: string | null; kind: string | null; record_id: string | null }; total: number; by_kind: { kind: string; changes: number; who_recorded: number; approver_named: number }[]; changes: ChangeRecordRow[]; page: { limit: number; offset: number; returned: number; more: boolean }; rule: string[] }
+export const getChangeRecord = (q: { days: number; lane: string; kind: string; offset: number }) => {
+  const p = new URLSearchParams({ since: new Date(Date.now() - q.days * 86_400_000).toISOString(), limit: '50', offset: String(q.offset) });
+  if (q.lane) p.set('lane', q.lane);
+  if (q.kind) p.set('kind', q.kind);
+  return api<ChangeRecordData>(`/api/change-record?${p.toString()}`);
+};
 /** The blockers page (23 Nov 2026): every open loop with "Blocked By" set. */
 export interface BlockedLoop { loop_id: string; title: string; status: string; blocked_by: string; unblock_date: string | null; late: boolean; days_late: number | null; lane: string | null; tag: string | null; why: string | null; owner: string | null; link: string }
 export interface BlockersData { rows: BlockedLoop[]; late: number; no_date: number; read_at: string; rule: string }

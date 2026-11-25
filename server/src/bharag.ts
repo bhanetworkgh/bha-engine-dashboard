@@ -51,6 +51,7 @@ export const LANE_KEY_VARS: Record<string, string> = {
   north_star: 'BHARAG_NS_INCIDENTS',
   research_twin: 'BHARAG_RT_INCIDENTS',
   genie: 'BHARAG_GENIE_INCIDENTS',
+  vfarm: 'BHARAG_VFARM_INCIDENTS',
 };
 
 function keyFor(lane: string): string | null {

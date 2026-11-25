@@ -71,6 +71,7 @@
  * any other write tool no matter what it asks for, because the transport
  * never registers them for that connection.
  */
+import * as changeContext from '../changeContext';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { McpError } from './source';
@@ -183,7 +184,7 @@ const BAYS_TOOLS: ReadonlySet<string> = new Set([
         // 2026-10-10: the way back from share_doc. Behind the same approval card.
         'unshare_doc',
         // 2026-10-10: Jason's go-time notice: every agent reads Logstream and engine.event.v1.
-        'read_logstream', 'read_engine_events',
+        'read_logstream', 'read_engine_events', 'read_change_record',
         // 2026-10-11: Decision Watch (5YQA). Bays opens, lists and closes; running the pass stays with a person.
         'open_decision_watch', 'list_decision_watches', 'close_decision_watch',
         // 2026-10-11: attach an SOP written after the watch was opened (Jason, 1791746835.121559).
@@ -265,7 +266,7 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         // 2026-10-09: where the vFarm stage gates and the pilot offer stand (7S0O). A read.
         'get_vfarm_gates',
         // 2026-10-10: recurring faults and what was done about them, for guidance on a Logstream job.
-        'read_logstream',
+        'read_logstream', 'read_change_record',
         // 2026-10-10: the engine's own events (engine.event.v1), Jason's go-time notice.
         'read_engine_events',
         // 2026-10-11: what the cabinet is doing, its cycle boundary and the evidence rules (IMFX).
@@ -318,7 +319,7 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         'find_records', 'read_publication_decision', 'read_doctrine_gap_summary', 'write_research_finding', 'write_commercial_card_fields', 'compute_lane_state',
         'queue_followup_research', 'update_watched_client_question', 'create_client_report_doc',
         // 2026-10-10: a fault's own history, read before writing the finding on a Logstream job.
-        'read_logstream',
+        'read_logstream', 'read_change_record',
         'read_engine_events',
         // 2026-10-11: the crop cycle's real boundary and what Coimbatore data may be used for (IMFX),
         // so a finding never infers a stage the cabinet does not run.
@@ -395,7 +396,7 @@ const AGENT_KEYS: ReadonlyArray<AgentKey> = (
         'read_outside_digest',
         // 2026-11-17 (Genie rebuild 7 and 8): one shared memory, and what every part of the engine is doing.
         'read_shared_memory', 'read_engine_activity',
-        'read_logstream', 'read_engine_events',
+        'read_logstream', 'read_engine_events', 'read_change_record',
         // 2026-10-14: EG4N (LOOP-1791557096136-EG4N). "Are we ready?" and "can we say X?" are
         // answered from the T0NO claim and the current VRFK decision for surface genie_ns, the
         // same resolver Media Twin and the three agents read, never from raw engine_events rows.
@@ -622,7 +623,18 @@ async function handleRpc(req: RpcRequest, deps: ToolDeps): Promise<Record<string
           }
           callArgs = g.args;
         }
-        let value = await tool.handler(callArgs, deps);
+        // 25 Nov 2026 (PT9J): every change this call makes records who asked, which call, and which agent carried it.
+        const requester = typeof callArgs.requester_user_id === 'string' && callArgs.requester_user_id.trim() ? callArgs.requester_user_id.trim() : null;
+        const outer = changeContext.current();
+        let value = await changeContext.run(
+          {
+            actor: requester ?? deps.agent ?? (outer?.actor && outer.actor !== 'n8n' ? outer.actor : 'claude connector'),
+            run_id: changeContext.newRunId('mcp'),
+            via: `mcp:${name}`,
+            handler: deps.agent ?? 'claude connector',
+          },
+          () => tool.handler(callArgs, deps),
+        );
         // 2026-11-11 (Sovereign Context Layer): an answer built from a copy says so: which store is the
         // original, when the dashboard last copied it, and that the original wins.
         if (value && typeof value === 'object' && !Array.isArray(value) && COPY_TOOLS[name]) {

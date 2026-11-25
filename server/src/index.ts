@@ -159,6 +159,8 @@ import * as slackApps from './slackApps';
 import * as candidateActions from './candidateActions';
 import * as patternDraft from './patternDraft';
 import * as codeReview from './codeReview';
+import * as changeContext from './changeContext';
+import * as changeRecord from './changeRecord';
 import type { Freshness, NewLoop, RecordKind, ServerStatus } from '../../src/data/types';
 import { INTAKE2_FILE_MAX_BYTES } from '../../src/data/intake2';
 
@@ -2046,6 +2048,20 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      * or on credit, for Monday's research digest. GET, read only. `all=1`
      * returns the newest signals in every state.
      */
+    /**
+     * The change record (25 Nov 2026, PT9J / MPMD Part A). GET, read only: every state change in a
+     * window with Jason's six change fields and the two approver fields. `since`, `until`, `lane`,
+     * `kind`, `record_id`, `limit`, `offset`.
+     */
+    if (p === '/api/engine/change-record') {
+      if (method !== 'GET') throw new HttpError(405, 'GET the change record. It is a read: nothing is written through it.');
+      const sp = new URL(req.url ?? '', 'http://x').searchParams;
+      const r = await changeRecord.read({ since: sp.get('since'), until: sp.get('until'), lane: sp.get('lane'), kind: sp.get('kind'), record_id: sp.get('record_id'), limit: Number(sp.get('limit')) || undefined, offset: Number(sp.get('offset')) || undefined }).catch((e: unknown) => {
+        throw new HttpError(422, e instanceof Error ? e.message : String(e));
+      });
+      await mirror.logWrite({ endpoint, kind: 'change_record', method, key_label: 'DASHBOARD_INBOUND_KEY', outcome: 'read', detail: `${r.total} change(s) ${r.window.since.slice(0, 10)} to ${r.window.until.slice(0, 10)}`, ms: Date.now() - t0 });
+      return send(res, 200, r);
+    }
     if (p === '/api/engine/research-signals') {
       if (method !== 'GET') throw new HttpError(405, 'GET the signals. The pass runs on its own clock, or through the MCP tool run_research_signals.');
       const all = new URL(req.url ?? '', 'http://x').searchParams.get('all') === '1';
@@ -2682,6 +2698,17 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       /** Every scheduler's runs on one page (2026-10-09, K9B7). A read. */
       case '/api/logstream':
         return send(res, 200, await logstream.read());
+      /** The change record (25 Nov 2026, PT9J): every state change with who, which run and who approved. A read. */
+      case '/api/change-record':
+        return send(
+          res,
+          200,
+          await changeRecord
+            .read({ since: url.searchParams.get('since'), until: url.searchParams.get('until'), lane: url.searchParams.get('lane'), kind: url.searchParams.get('kind'), record_id: url.searchParams.get('record_id'), limit: Number(url.searchParams.get('limit')) || undefined, offset: Number(url.searchParams.get('offset')) || undefined })
+            .catch((e: unknown) => {
+              throw new HttpError(422, e instanceof Error ? e.message : String(e));
+            }),
+        );
       case '/api/scheduled-runs':
         return send(res, 200, await scheduledRuns.scheduledRuns());
       /** Model spend (2026-11-02, Destiny): OpenRouter's measured dollars and every agent's tokens. A read. */
@@ -3489,6 +3516,28 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
  * routes are refused by name as well, because "unreachable by construction" is
  * a claim worth making twice on a path that skips the cookie.
  */
+/**
+ * Who a request's changes belong to (25 Nov 2026, PT9J). An engine route is n8n's (or the system that
+ * names itself in `x-bha-actor`), and its run is the n8n execution id when the caller sends one in
+ * `x-n8n-execution-id` or `x-bha-run-id`, else this request's own id. Anything else under /api is the
+ * dashboard page. The values are what the caller said: nothing here is a sign-in.
+ */
+function requestChangeContext(req: IncomingMessage, url: URL): changeContext.ChangeContext {
+  const h = (n: string) => {
+    const v = req.headers[n];
+    return typeof v === 'string' && v.trim() ? v.trim() : null;
+  };
+  const engineRoute = url.pathname.startsWith('/api/engine/') || url.pathname.startsWith('/api/inbound/') || url.pathname.startsWith('/api/public/');
+  const via = `${engineRoute ? 'engine' : 'page'}:${req.method ?? 'GET'} ${url.pathname}`;
+  const run = h('x-n8n-execution-id') ?? h('x-bha-run-id');
+  if (url.pathname.startsWith('/api/public/')) return { actor: 'public', run_id: changeContext.newRunId('req'), via, handler: 'dashboard' };
+  if (engineRoute) return { actor: h('x-bha-actor') ?? 'n8n', run_id: run ? `n8n:${run}` : changeContext.newRunId('req'), via, handler: 'n8n' };
+  // Under the admin login the person is the one who signed in (declared at sign-in, as every name
+  // under the shared login is); otherwise the page alone.
+  const admin = adminAuth.readAdmin(req);
+  return { actor: admin ? `page:${admin.by}` : 'page', run_id: changeContext.newRunId('req'), via, handler: 'dashboard page' };
+}
+
 async function dispatchApi(pathWithQuery: string): Promise<{ status: number; body: unknown }> {
   const url = new URL(pathWithQuery, 'http://localhost');
   if (url.pathname !== '/api' && !url.pathname.startsWith('/api/')) {
@@ -3687,7 +3736,7 @@ const server = createServer((req, res) => {
     return;
   }
   if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
-    api(req, res, url).catch((e: unknown) => {
+    changeContext.run(requestChangeContext(req, url), () => api(req, res, url)).catch((e: unknown) => {
       if (e instanceof HttpError) return send(res, e.status, { ok: false, message: e.message });
       console.error(e);
       return send(res, 500, { ok: false, message: 'The server hit an error handling that request.' });

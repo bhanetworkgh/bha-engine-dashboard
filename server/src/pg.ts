@@ -14,6 +14,7 @@
  * saying so, which is the failure this move exists to end.
  */
 import { Pool, type PoolClient, type QueryResultRow } from 'pg';
+import * as changeContext from './changeContext';
 
 export const DATABASE_URL = process.env.DATABASE_URL?.trim() || null;
 
@@ -80,6 +81,10 @@ export function getPool(): Pool {
 }
 
 export async function query<R extends QueryResultRow = QueryResultRow>(text: string, values?: unknown[]): Promise<{ rows: R[]; rowCount: number | null }> {
+  // 25 Nov 2026 (PT9J): a write made with a change context runs in a transaction that carries it,
+  // so the status ledger and the version history record who made it, through which door, in which run.
+  const ctx = changeContext.current();
+  if (ctx && changeContext.isWrite(text)) return withTransaction((db) => db.query<R>(text, values));
   return getPool().query<R>(text, values);
 }
 
@@ -105,6 +110,11 @@ export async function withTransaction<T>(fn: (db: Queryable) => Promise<T>): Pro
   AFTER_COMMIT.set(client, queue);
   try {
     await client.query('BEGIN');
+    const ctx = changeContext.current();
+    if (ctx) {
+      const set = changeContext.settingsSql(ctx);
+      await client.query(set.text, set.values);
+    }
     const out = await fn(client);
     await client.query('COMMIT');
     AFTER_COMMIT.delete(client);

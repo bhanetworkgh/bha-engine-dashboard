@@ -1089,6 +1089,10 @@ export const HEALTH_LANES: { key: string; source: string; label: string }[] = [
   // Genie publishes its own incidents under source=genie, in the Genie corpus
   // card workspace, with a key of its own (2026-10-05, Destiny, LOOP-…-3LXR).
   { key: 'genie', source: 'genie', label: 'Genie' },
+  // vFarm's own incidents (INC-VFARM.WATER-045 and the like), written by vFarm's alert lane straight
+  // into BHARAG and, until now, never read here (25 Nov 2026, Destiny — Jegan's PT9J note A). Read
+  // like the other four once BHARAG_VFARM_INCIDENTS is set; until then the lane says it was not read.
+  { key: 'vfarm', source: 'vfarm', label: 'vFarm' },
 ];
 
 export function laneLabelOf(lane: string | null): string {

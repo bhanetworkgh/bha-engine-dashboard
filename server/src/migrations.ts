@@ -5273,6 +5273,47 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `ALTER TABLE engine_media_post_decisions ADD CONSTRAINT engine_media_post_decisions_decided_by_check CHECK (decided_by IN ('U0A9V97949F','U0AEW3TBYH1','media-twin-reviewer'))`,
     ],
   },
+  {
+    // 25 Nov 2026, Destiny (PT9J / MPMD Part A, Jason's six change fields and two approver fields): every
+    // status change and every saved version says who made it, which run, through which door and what
+    // carried it out. The values come from the transaction's bha.* settings (changeContext.ts), as column
+    // defaults, so no write path changed. A change with no context records nulls, never a guess. The
+    // version history also keeps the new value of each changed field, so "from what to what" is one row.
+    id: 158,
+    name: 'change record: who, which run and which door on every status change and saved version',
+    statements: [
+      `ALTER TABLE events ADD COLUMN IF NOT EXISTS actor text DEFAULT NULLIF(current_setting('bha.actor', true), '')`,
+      `ALTER TABLE events ADD COLUMN IF NOT EXISTS run_id text DEFAULT NULLIF(current_setting('bha.run_id', true), '')`,
+      `ALTER TABLE events ADD COLUMN IF NOT EXISTS change_via text DEFAULT NULLIF(current_setting('bha.via', true), '')`,
+      `ALTER TABLE events ADD COLUMN IF NOT EXISTS handler_id text DEFAULT NULLIF(current_setting('bha.handler', true), '')`,
+      `ALTER TABLE engine_record_history ADD COLUMN IF NOT EXISTS actor text DEFAULT NULLIF(current_setting('bha.actor', true), '')`,
+      `ALTER TABLE engine_record_history ADD COLUMN IF NOT EXISTS run_id text DEFAULT NULLIF(current_setting('bha.run_id', true), '')`,
+      `ALTER TABLE engine_record_history ADD COLUMN IF NOT EXISTS change_via text DEFAULT NULLIF(current_setting('bha.via', true), '')`,
+      `ALTER TABLE engine_record_history ADD COLUMN IF NOT EXISTS handler_id text DEFAULT NULLIF(current_setting('bha.handler', true), '')`,
+      `ALTER TABLE engine_record_history ADD COLUMN IF NOT EXISTS after_values jsonb`,
+      `CREATE INDEX IF NOT EXISTS events_at ON events (at)`,
+      `CREATE OR REPLACE FUNCTION engine_keep_history() RETURNS trigger LANGUAGE plpgsql AS $$
+       DECLARE keys text[];
+       BEGIN
+         IF TG_OP = 'UPDATE' THEN
+           IF OLD.fields IS DISTINCT FROM NEW.fields THEN
+             keys := (SELECT coalesce(array_agg(k ORDER BY k), '{}'::text[]) FROM (
+                  SELECT o.key AS k FROM jsonb_each(OLD.fields) o
+                   WHERE NOT (NEW.fields ? o.key) OR NEW.fields -> o.key IS DISTINCT FROM o.value
+                  UNION
+                  SELECT n.key FROM jsonb_each(NEW.fields) n WHERE NOT (OLD.fields ? n.key)) x);
+             INSERT INTO engine_record_history (table_name, row_id, natural_id, op, before_fields, changed_keys, after_values)
+             VALUES (TG_TABLE_NAME, to_jsonb(OLD)->>'id', to_jsonb(OLD)->>'natural_id', 'update', OLD.fields, keys,
+               (SELECT coalesce(jsonb_object_agg(k, NEW.fields -> k), '{}'::jsonb) FROM unnest(keys) k WHERE NEW.fields ? k));
+           END IF;
+           RETURN NEW;
+         END IF;
+         INSERT INTO engine_record_history (table_name, row_id, natural_id, op, before_fields)
+         VALUES (TG_TABLE_NAME, to_jsonb(OLD)->>'id', to_jsonb(OLD)->>'natural_id', 'delete', OLD.fields);
+         RETURN OLD;
+       END $$`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

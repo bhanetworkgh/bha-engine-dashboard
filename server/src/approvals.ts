@@ -35,6 +35,7 @@
  * written on the card in words and answered `raise: true`, which the n8n
  * workflow turns into an incident.
  */
+import * as changeContext from './changeContext';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import { query } from './pg';
@@ -520,7 +521,12 @@ export async function decide(input: DecideInput): Promise<DecideResult> {
   } else {
     try {
       const run = executor;
-      result = await callerStore.run({ agent: claimed.agent }, () => approvedRun.run({ approval_id: claimed.approval_id, approver: input.user_id }, () => run(claimed.tool, { ...claimed.arguments })));
+      // 25 Nov 2026 (PT9J): the change is the asker's, carried out by the agent, and its run is this
+      // approval, so the change record reads the approver and when they decided from the approval row.
+      result = await changeContext.run(
+        { actor: claimed.requester_user_id ?? claimed.agent, run_id: `approval:${claimed.approval_id}`, via: `approval:${claimed.tool}`, handler: claimed.agent },
+        () => callerStore.run({ agent: claimed.agent }, () => approvedRun.run({ approval_id: claimed.approval_id, approver: input.user_id }, () => run(claimed.tool, { ...claimed.arguments }))),
+      );
     } catch (e) {
       result = { ok: false, reason: 'tool_threw', message: e instanceof Error ? e.message : String(e) };
     }

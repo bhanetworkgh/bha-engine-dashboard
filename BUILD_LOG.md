@@ -16299,3 +16299,11 @@ Files:      server/src/watchPenalty.ts (RULE.lanes), server/test/watch-penalty.t
 Problem:    The 22 Nov DM approval had named the wider scope; Jason's ruling today is the narrow one, and SOP a4ed8707 now says so.
 Fix:        RULE.lanes is ['VFARM', 'KIOSK', 'CST']. Escalation logic, shares and the 30-day reset are unchanged. No penalty had been recorded.
 Decision:   VFARM_HARDWARE is out, as Jason listed it by name. Any widening needs his separate explicit approval.
+
+## 2026-11-25 10:45 — The change record: who changed what, which run, who approved it
+Intent:     Jegan's PT9J doc maps Jason's six change fields and two approver fields across five systems and asks Destiny why Logstream shows no vFarm incident. Destiny: build the dashboard to record all of it, so the shared record is shown in one place.
+Files:      server/src/changeContext.ts (new), server/src/changeRecord.ts (new), server/src/pg.ts, server/src/index.ts, server/src/mcp/index.ts, server/src/mcp/logstreamTools.ts, server/src/approvals.ts, server/src/timers.ts, server/src/migrations.ts (158), server/src/sources.ts, server/src/bharag.ts, render.yaml, src/data/index.ts, src/screens/Logstream.tsx, src/screens/EngineHealth/index.tsx, server/test/change-record.test.cjs, package.json, CLAUDE.md
+Problem:    The version history said what changed but not who or which run; that lived in engine_mcp_writes and had to be matched up by hand. No incident from vFarm's own lane was ever read: 0 INC-VFARM rows in engine_incidents, Logstream lanes BAYS 4416, NS 111, RT 108, GENIE 101.
+Fix:        Each door sets a change context; pg.ts writes it as bha.* settings; events and engine_record_history take them as column defaults; the history keeps after_values. read_change_record, the engine route and a Logstream tab read one union of status changes, incidents and approval cards. A vfarm lane on Engine health, read once BHARAG_VFARM_INCIDENTS is set.
+Decision:   The approver is a named person only, never self. Nothing is backfilled: before 25 Nov who made a change reads null. Migration and trigger tested on local Postgres 16; the union run read-only against production (938 incidents, 281 loop and 66 Codex changes in 7 days, 313 ms).
+Proof:      Not yet: the deploy, then a real change read back with its actor and run.
