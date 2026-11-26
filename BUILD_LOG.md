@@ -16383,3 +16383,10 @@ Files:      server/src/decisionWatch.ts (read reads every row; heldNote/realProb
 Problem:    read() took the newest 300 of 588 rows, so 27 open watches were never read (Genie counted 126 of 153); 78 of 79 "with a problem" were the daily pacing note, not a fault; no offset, no id list, 40 at most.
 Fix:        every row read; status, watch_ids (50), limit 100, offset, full, next_offset; problem vs held; classify into closed_with_proof / superseded / open / closed_without_proof / escalated, stale on a closed linked loop, a former owner or 14 quiet days, per-owner summary.
 Decision:   classification is read only and changes no watch; closing or superseding stays with the owner, Destiny or Jason, on proof.
+
+## 2026-11-26 — Media Twin back to plain Approve
+Intent:     Destiny: remove the second reviewer and automatic posting; draft, card in Slack, Approve posts.
+Files:      server/src/mediaReview.ts (removed), server/src/index.ts, server/src/mediaPosts.ts, server/src/mcp/mediaPostsTools.ts, server/src/mcp/index.ts, server/src/intentCheck.ts, server/test/media-review.test.cjs (removed), package.json, CLAUDE.md; n8n Media Twin — Daily Draft (jUy6631k7aH24LP2, now aad4476c, restore 8b826514) and Rewrite Draft (u9FaeR0q4QZTxn8k, now 6acabfa9, restore 72e7423f); genie src/agent/openaiService.ts, toolFocus.ts.
+Problem:    The second review approved and posted drafts on its own; Destiny wants a person's Approve to be the only way a post goes out.
+Fix:        n8n: Card Request goes straight to the approval card in both workflows; the review, route, rewrite-on-fail and no-op nodes are gone. Dashboard: the review route, the autopost pause route and tool, the reviewer path in decide(), Genie's scope entry and the intent-check entries are removed. Approve already posts through autoPostFor whatever the old pause said.
+Decision:   Decisions written as media-twin-reviewer (24 to 26 Nov) stay on record; migration 157's constraint is left as it is, nothing writes that id now.

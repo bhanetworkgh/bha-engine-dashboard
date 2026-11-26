@@ -9,7 +9,6 @@
  * `edit_media_post` — a person's exact words on a draft still waiting for its decision. Write connection, no agent's scope.
  */
 import * as posts from '../mediaPosts';
-import * as review from '../mediaReview';
 import * as slack from '../slack';
 import { auditClose, auditOpen } from './writeTools';
 import type { ToolDefinition } from './tools';
@@ -191,44 +190,6 @@ export const setMediaPostPattern = gateTool(
 );
 
 
-export const setMediaAutopost: ToolDefinition = {
-  name: 'set_media_autopost',
-  description:
-    "Pause or resume the Media Twin's automatic posting (24 Nov 2026). Use it when Jason or Destiny asks, in any words, to turn automatic posting off, stop it, disable it, hold it, or turn it back on: paused true to stop, false to resume, and the reason in their words. While paused, a draft that would have passed the second review and posted on its own goes to Jason and Destiny as Approve / Reject cards instead; resuming lets the next review post again. Nothing already posted changes. HELD HERE: requester_user_id is Jason or Destiny (not_permitted); refused on any agent token but Genie's, whose call is checked against the ask; a reason is required. With no paused argument it reads the current state and changes nothing. dry_run shows the change and writes nothing. One media_autopost_paused or media_autopost_resumed event. Audited on engine_mcp_writes.",
-  inputSchema: {
-    type: 'object',
-    properties: {
-      paused: { type: 'boolean', description: 'true pauses, false resumes. Leave out to read the state.' },
-      reason: { type: 'string' },
-      requester_user_id: { type: 'string' },
-      dry_run: { type: 'boolean' },
-    },
-    additionalProperties: false,
-  },
-  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false, title: 'Pause or resume Media Twin posting' },
-  handler: async (args, deps) => {
-    if (typeof args.paused !== 'boolean') return { ok: true, ...(await review.pauseState()) };
-    // Genie may, for Jason or Destiny asking it in Slack (24 Nov 2026, Destiny); its call is intent-checked first.
-    if (deps.agent && deps.agent !== 'genie') return { ok: false, reason: 'agent_not_permitted', message: `An agent (${deps.agent}) may not pause or resume Media Twin posting.` };
-    const dry = args.dry_run === true;
-    const requester = str(args, 'requester_user_id');
-    const audit = await auditOpen({ tool: 'set_media_autopost', args, access: deps.access, kind: 'media_posts', requester, dry_run: dry });
-    try {
-      const out = await review.setPaused({ paused: args.paused, by: requester, reason: str(args, 'reason'), dry_run: dry });
-      await auditClose(audit, { outcome: dry ? 'dry_run' : 'written', natural_id: 'media_twin' });
-      return { ...out, audit_id: audit };
-    } catch (e) {
-      if (e instanceof posts.MediaPostError) {
-        await auditClose(audit, { outcome: 'refused', detail: e.reason, natural_id: 'media_twin' });
-        return { ok: false, reason: e.reason, message: e.message, audit_id: audit };
-      }
-      await auditClose(audit, { outcome: 'failed', detail: String(e), natural_id: 'media_twin' });
-      throw e;
-    }
-  },
-};
-
-
 /**
  * `approve_media_post` (25 Nov 2026, Destiny: approve and post from the dashboard connection, then show it on the card).
  * The same `posts.decide` the card's Approve reaches, so the claim rules run again at the click and Approve posts that
@@ -299,4 +260,4 @@ export const approveMediaPost: ToolDefinition = {
 };
 
 export const MEDIA_POSTS_READ_TOOLS: ToolDefinition[] = [readMediaPosts];
-export const MEDIA_POSTS_WRITE_TOOLS: ToolDefinition[] = [editMediaPost, approveMediaPost, recordMediaPostLink, markMediaPattern, setMediaPostPattern, setMediaAutopost];
+export const MEDIA_POSTS_WRITE_TOOLS: ToolDefinition[] = [editMediaPost, approveMediaPost, recordMediaPostLink, markMediaPattern, setMediaPostPattern];

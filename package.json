@@ -67,7 +67,6 @@
     "test:outage-class": "node --no-warnings=ExperimentalWarning server/test/outage-class.test.cjs",
     "test:vfarm-presence": "node --no-warnings=ExperimentalWarning server/test/vfarm-presence.test.cjs",
     "test:vfarm-unlisted": "node --no-warnings=ExperimentalWarning server/test/vfarm-unlisted.test.cjs",
-    "test:media-review": "npm run build:server && node server/test/media-review.test.cjs",
     "test:media-claims": "npm run build:server && node server/test/media-claims.test.cjs",
     "test:media-doctrine": "npm run build:server && node server/test/media-doctrine.test.cjs",
     "test:media-rewrite-sources": "npm run build:server && node server/test/media-rewrite-sources.test.cjs",

@@ -573,21 +573,16 @@ export interface DecideInput {
   by: string;
   note?: string | null;
   via?: string;
-  /**
-   * In process only, from mediaReview.review (24 Nov 2026): the second reviewer deciding. No route sets it, so
-   * over HTTP and Slack only Jason or Destiny still decide.
-   */
-  reviewer?: boolean;
 }
 
-/** The second reviewer's id on a decision (mediaReview.ts). Never a Slack user. */
+/** The second reviewer's id on decisions made 24 to 26 Nov 2026 (retired 26 Nov); kept to read that history. */
 export const REVIEWER_ID = 'media-twin-reviewer';
 const deciderName = (by: string) => APPROVERS[by] ?? (by === REVIEWER_ID ? 'the second review' : by);
 
 /** Records Jason's (or Destiny's) Approve or Reject for one platform. Append-only history beside the row. */
 export async function decide(postId: string, input: DecideInput) {
-  const by = input.reviewer === true ? REVIEWER_ID : bare(s(input.by, 40));
-  if (!by || !(APPROVERS[by] || (input.reviewer === true && by === REVIEWER_ID))) refuse('not_permitted', `Only Jason or Destiny decide on a Media Twin post${by ? `; ${by} is not one of them` : ''}.`, 403);
+  const by = bare(s(input.by, 40));
+  if (!by || !APPROVERS[by]) refuse('not_permitted', `Only Jason or Destiny decide on a Media Twin post${by ? `; ${by} is not one of them` : ''}.`, 403);
   const platform = s(input.platform, 20) as Platform;
   if (!(PLATFORMS as readonly string[]).includes(platform)) refuse('bad_value', `platform must be one of ${PLATFORMS.join(', ')}.`);
   const decision = s(input.decision, 10);
@@ -660,7 +655,7 @@ export async function autoPostFor(_db: Queryable, post: Pick<MediaPost, 'pattern
   return post.test ? { post: true, mode: 'check', reason: 'A test draft runs the check and posts nothing.' } : { post: true, mode: 'post', reason: 'Approved, so it posts.' };
 }
 
-/** The model the second review runs on (mediaReview.ts), named on every post it approved. */
+/** The model the retired second review ran on (24 to 26 Nov 2026), named on the posts it approved. */
 export const REVIEWER_MODEL = 'Claude Sonnet 5.5';
 
 /** Pure: how a platform came to be approved, for the post's log line. */
