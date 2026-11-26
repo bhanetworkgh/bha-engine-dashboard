@@ -56,5 +56,17 @@ assert.ok(/Stops the paid pilot/.test(s.rows[1].why));
 assert.equal(s.stops_paid_pilot, 25);
 assert.ok(JSON.stringify(s).length < 20000, `short form is ${JSON.stringify(s).length} characters`);
 ok('the short blockers list holds the counts and the 25 that matter, late first, under 20,000 characters');
+assert.equal(s.complete, false);
+assert.match(s.note, /Summary by design, not a cut read/);
+assert.match(s.note, /25 of 97 shown/);
+const o = board.ownerBlockers({ rows, late: 1, no_date: 96, read_at: 'now', rule: 'r' }, 'hardik');
+assert.equal(o.total, 48);
+assert.equal(o.rows.length, 48);
+assert.equal(o.complete, true);
+assert.equal(o.rows[0].title.length, 400);
+const none = board.ownerBlockers({ rows, late: 1, no_date: 96, read_at: 'now', rule: 'r' }, 'Kavin');
+assert.equal(none.total, 0);
+assert.match(none.note, /Owners held: Destiny, Hardik|Owners held: Hardik, Destiny/);
+ok('the short list says it is a summary by design, and one owner\'s blocked loops come back whole');
 
 console.log(`\n${n} checks passed`);

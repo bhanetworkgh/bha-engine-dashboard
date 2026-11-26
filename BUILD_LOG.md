@@ -16416,3 +16416,10 @@ Files:      server/src/mcp/writeTools.ts, server/test/update-append.test.cjs, CL
 Problem:    Asked to remove "Austin Virtual", the microsecond lines, the CST SLA lines and the $10 to $75 comparison from HSJ6's research_gleanings, Genie resent the whole 5,763-character field rewritten from memory on three approval cards (HYCA, NCM5 and a split DNZ2), rewording each time, then advised denying its own card. The write approved by mistake at 17:03 was undone by hand at 18:07 (audit 8400, md5 matched the 15 Nov text).
 Fix:        update_record takes replace: { field: [{ find, with }] }, applied on the server to the stored text; a find that is not there refuses the whole call.
 Decision:   Every place a find appears is changed, because the asks are "everywhere they appear"; a missing find refuses rather than half-applies.
+
+## 2026-11-26 21:30 — Income Board blocked list reads as a summary, not a cut
+Intent:     Jason asked (C0ASMPYQLG3 1795696380.626199) to stop Genie's Income Board "read cutting": Genie kept saying the blocked-loops read was cut and that the evening report should wait.
+Files:      server/src/incomeBoard.ts, server/src/mcp/incomeBoardTools.ts, server/test/knowledge-capture.test.cjs, CLAUDE.md
+Problem:    The 23 Nov short form (counts plus the 25 that matter of 93) said only "The 25 that matter most of 93; call again with full: true", so Genie read it as a failed read. The evening report and blocker tags never used that read; they call incomeBoard.blockers() on the server.
+Fix:        shortBlockers carries complete and a note: summary by design, "N of M shown", never "cut", and that the report and tags use the full list. New ownerBlockers and read_income_board's blocked_owner return one person's blocked loops whole.
+Decision:   No bigger read: the full list was ~229,000 characters. Checked with tsx against the pure functions (node_modules not installed here); CI on push runs typecheck and build.

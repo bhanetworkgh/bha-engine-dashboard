@@ -566,7 +566,32 @@ export function shortBlockers(b: Awaited<ReturnType<typeof blockers>>) {
     by_owner,
     shown: Math.min(SHORT_BLOCKERS, b.rows.length),
     rows: ranked.slice(0, SHORT_BLOCKERS).map((x) => ({ ...x, title: cut(x.title, 160) ?? '', blocked_by: cut(x.blocked_by, 200) ?? '', why: cut(x.why, 200) })),
-    note: b.rows.length > SHORT_BLOCKERS ? `The ${SHORT_BLOCKERS} that matter most of ${b.rows.length}; call again with full: true for every one, or read the page.` : 'Every blocked loop.',
+    complete: b.rows.length <= SHORT_BLOCKERS,
+    note: b.rows.length > SHORT_BLOCKERS
+      ? `Summary by design, not a cut read: all ${b.rows.length} blocked loops are counted above (late, no date, stops the paid pilot, by_owner), and the ${SHORT_BLOCKERS} that matter most are listed. Say "${SHORT_BLOCKERS} of ${b.rows.length} shown", never that the read was cut or incomplete. The evening report and the Monday and Friday blocker tags are built on the dashboard from the full list, so they never depend on this read. For one person's blocked loops in full pass blocked_owner; for every one pass full: true.`
+      : 'Every blocked loop.',
+    rule: b.rule,
+    read_at: b.read_at,
+  };
+}
+
+/**
+ * One person's blocked loops in full (26 Nov 2026, Destiny: Genie read the short list as a cut read). Matches the
+ * owner's name case-blind, or a Slack id through the roster. Pure.
+ */
+export function ownerBlockers(b: Awaited<ReturnType<typeof blockers>>, who: string) {
+  const w = who.trim();
+  const name = /^[UW][A-Z0-9]{6,}$/.test(w) ? nameOf(w) : w;
+  const key = (name ?? w).toLowerCase();
+  const rows = b.rows.filter((x) => (x.owner ?? '').toLowerCase() === key || (x.owner ?? '').toLowerCase().split(/\s+/)[0] === key);
+  return {
+    owner: name ?? w,
+    total: rows.length,
+    late: rows.filter((x) => x.late).length,
+    no_date: rows.filter((x) => !x.unblock_date).length,
+    complete: true,
+    rows,
+    note: rows.length ? `Every blocked loop owned by ${name ?? w}.` : `No blocked loop is owned by ${name ?? w}. Owners held: ${[...new Set(b.rows.map((x) => x.owner ?? 'none'))].join(', ')}.`,
     rule: b.rule,
     read_at: b.read_at,
   };
