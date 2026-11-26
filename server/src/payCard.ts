@@ -218,6 +218,9 @@ export async function figures(b: Obj, db?: Queryable): Promise<Figures> {
         // A release a card carries is priced at the day it was worked, so read each one.
         const relUsd = u.sub ? await claimedUsd(q, log.builder_slack_id, u.sub) : 0;
         const c$ = money(cr, r);
+        // 26 Nov 2026 (Destiny, LOOP-1794488290310-MKGF part 2): a day owed nothing (credited 0%, nothing
+        // released on it) is not owed, so it is not listed under Owed from earlier days.
+        if (cr === 0 && !(relUsd && relUsd > 0)) continue;
         earlier.push({ codex_entry_id: u.cid, session_date: u.d, credited: cr, note_found: !!n, rate: r, credited_usd: c$, releases_usd: relUsd ?? 0, total_usd: c$ === null || relUsd === null ? null : round2(c$ + relUsd) });
       }
     }

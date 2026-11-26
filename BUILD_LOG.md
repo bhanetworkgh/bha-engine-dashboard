@@ -16395,3 +16395,10 @@ Decision:   Decisions written as media-twin-reviewer (24 to 26 Nov) stay on reco
 Intent:     Destiny: code checks are automatic; stop the reminders asking him to mark reviews.
 Files:      server/src/codeCheckWatch.ts, CLAUDE.md
 Fix:        startSweeping no longer calls run(), which posted the alert card and the 6-hourly reminders in #bha-code-reviews. recordSent and the draft sweep still run. run() is kept, uncalled by the timer.
+
+## 2026-11-26 13:20 — Pay card: a day owed nothing is not listed as owed
+Intent:     MKGF part 2: Ahad's card of 25 Nov listed 30 Oct and 24 Nov at 0% under "Owed from earlier days".
+Files:      server/src/payCard.ts
+Problem:    every unpaid approved log was listed, including ones credited 0% with nothing released.
+Fix:        the earlier-days loop skips a log credited 0% with no release on it; one with a release (23 Nov, $46.25) stays.
+Decision:   only the listing changes; totals were already $0 for those days.
