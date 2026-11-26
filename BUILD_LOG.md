@@ -16390,3 +16390,8 @@ Files:      server/src/mediaReview.ts (removed), server/src/index.ts, server/src
 Problem:    The second review approved and posted drafts on its own; Destiny wants a person's Approve to be the only way a post goes out.
 Fix:        n8n: Card Request goes straight to the approval card in both workflows; the review, route, rewrite-on-fail and no-op nodes are gone. Dashboard: the review route, the autopost pause route and tool, the reviewer path in decide(), Genie's scope entry and the intent-check entries are removed. Approve already posts through autoPostFor whatever the old pause said.
 Decision:   Decisions written as media-twin-reviewer (24 to 26 Nov) stay on record; migration 157's constraint is left as it is, nothing writes that id now.
+
+## 2026-11-26 — Code-check reminders off
+Intent:     Destiny: code checks are automatic; stop the reminders asking him to mark reviews.
+Files:      server/src/codeCheckWatch.ts, CLAUDE.md
+Fix:        startSweeping no longer calls run(), which posted the alert card and the 6-hourly reminders in #bha-code-reviews. recordSent and the draft sweep still run. run() is kept, uncalled by the timer.

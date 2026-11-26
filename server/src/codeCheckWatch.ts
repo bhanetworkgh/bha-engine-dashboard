@@ -810,11 +810,9 @@ export function startSweeping(): void {
         for (const id of r.unread) console.error(`[code-check-watch] the thread for ${id} could not be read; it stays ready`);
       })
       .catch((e) => console.error(`[code-check-watch] sent pass failed: ${e instanceof Error ? e.message : String(e)}`))
-      .then(() => run())
-      .then((r) => draftSweep().then(() => r))
-      .then((r) => {
-        if (r.sent.length || r.failed.length) console.log(`[code-check-watch] ${r.waiting} waiting: sent ${r.sent.map((x) => `${x.codex_entry_id}#${x.step}`).join(', ') || 'none'}; failed ${r.failed.length}`);
-      })
+      // 26 Nov 2026 (Destiny): code checks are automatic, so no alert card and no reminders to mark one reviewed.
+      // run() stays for run_code_check_watch on demand; the timer no longer calls it.
+      .then(() => draftSweep())
       .catch((e) => console.error(`[code-check-watch] pass failed: ${e instanceof Error ? e.message : String(e)}`))
       .finally(() => (busy = false));
   }, RULE.every_minutes * 60 * 1000);
