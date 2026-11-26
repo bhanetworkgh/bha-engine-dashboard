@@ -68,5 +68,18 @@ const none = board.ownerBlockers({ rows, late: 1, no_date: 96, read_at: 'now', r
 assert.equal(none.total, 0);
 assert.match(none.note, /Owners held: Destiny, Hardik|Owners held: Hardik, Destiny/);
 ok('the short list says it is a summary by design, and one owner\'s blocked loops come back whole');
+{
+  const { compactForAgent } = require('../../server-dist/mcp/incomeBoardTools');
+  const item = (i) => ({ kind: 'loop', id: `LOOP-17950000000${String(i).padStart(2, '0')}-BBBB`, title: 't'.repeat(300), status: 'Open', open: true, lane: 'CST', owner: 'Ahad', target_date: '2026-12-08', date_state: 'set', days_slipped: null, section: 'cst_gate_a', section_label: 'CST Gate A', impact: 'BLOCKS_PILOT_1', last_change: 'x', moved_this_week: true, reason: 'r'.repeat(300), link: 'l' });
+  const blocking = Array.from({ length: 18 }, (_, i) => item(i));
+  const c = compactForAgent({ ready: 'No', blocking, gates: [], items: [...blocking, { ...item(40), impact: 'QUALITY_OF_LIFE' }], this_week: { moved: blocking }, cst: { stalled_loops: [] } }, s, { rows: [], total: 0 });
+  assert.equal(c.blocking.length, 18);
+  assert.equal(c.blocking[0].id, blocking[0].id);
+  assert.ok(c.blocking[0].title.length <= 111);
+  assert.equal(c.items.length, 1);
+  assert.ok(!('link' in c.blocked_loops.rows[0]));
+  assert.match(c.shape, /not a cut read/);
+}
+ok('the agent shape keeps every blocker id and lists items once, shortened');
 
 console.log(`\n${n} checks passed`);

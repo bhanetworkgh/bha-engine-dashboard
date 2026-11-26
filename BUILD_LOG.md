@@ -16423,3 +16423,9 @@ Files:      server/src/incomeBoard.ts, server/src/mcp/incomeBoardTools.ts, serve
 Problem:    The 23 Nov short form (counts plus the 25 that matter of 93) said only "The 25 that matter most of 93; call again with full: true", so Genie read it as a failed read. The evening report and blocker tags never used that read; they call incomeBoard.blockers() on the server.
 Fix:        shortBlockers carries complete and a note: summary by design, "N of M shown", never "cut", and that the report and tags use the full list. New ownerBlockers and read_income_board's blocked_owner return one person's blocked loops whole.
 Decision:   No bigger read: the full list was ~229,000 characters. Checked with tsx against the pure functions (node_modules not installed here); CI on push runs typecheck and build.
+
+## 2026-11-26 21:40 — Income Board read fits Genie's 40,000-character read
+Intent:     After the first fix, read_income_board itself answered about 101,000 characters; Genie reads planner tools at 40,000 (genie orchestrator MAX_PLANNING_CONTEXT_READ_CHARS), so the board was still cut partway, which is the "read cutting" Jason saw.
+Files:      server/src/mcp/incomeBoardTools.ts, server/test/knowledge-capture.test.cjs, CLAUDE.md
+Fix:        compactForAgent: the default answer keeps every id, owner, status and date; titles and texts shortened, items already under blocking not repeated, knowledge capture as counts plus one short line per row, blocked rows without their links (link_rule says where each opens). Measured on the live read: 37,542 characters. detail: true returns the page's shape whole.
+Decision:   The page (/api/income-board) is unchanged; only the agent tool's answer is shaped.
