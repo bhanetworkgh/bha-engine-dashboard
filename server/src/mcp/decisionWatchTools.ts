@@ -236,13 +236,17 @@ export function searchWatches<W extends { watch_id: string; decision?: string | 
 export const listDecisionWatches: ToolDefinition = {
   name: 'list_decision_watches',
   description:
-    'List the decisions being watched: open ones first (soonest reminder first), then the closed ones. status is watching, answered (the owner replied), moved (the linked loop or task was closed), escalated (the reminders ran out and Jason and Destiny were told) or cancelled. "problem" is why a watch could not be checked or posted, e.g. a thread no bot can read. Filter with owner_user_id or open_only, or find a watch by what it is about with search (words, e.g. "monitoring twin checklist"): each word is looked for in the decision, the next step, the SOP and North Star references and the watch id, watches matching none are left out, and the best match comes first. Each watch comes back short (the decision and its latest next step clipped, no history, no how_it_moves) to keep the answer small; pass watch_id to get one watch whole, with how_it_moves and its history. Use it to answer "what is Bays watching" or "what am I being waited on for". Each watch carries how_it_moves: where a reply counts, what it does, and when the next reminder goes. Before telling anyone what a watch will do (whether a message resets it, closes it, or when it will nudge), read that line and say it as written; never work it out from the thread you are in, because the watch may be on a different thread.',
+    'List the decisions being watched: open ones first (soonest reminder first), then the closed ones. Every watch is read, however many are held. status is watching, answered (the owner replied), moved (the linked loop or task was closed), escalated (the reminders ran out and Jason and Destiny were told) or cancelled. "problem" is a real fault, e.g. a thread no bot can read; "held" is only the daily pacing (one reminder per person per 12 hours), not a fault. Filter with owner_user_id, status or open_only, a list of watch_ids, or find a watch by what it is about with search (best match first). Page with limit (default 15, at most 100) and offset: the answer gives count (every watch the filters matched), returned and next_offset, so read on with next_offset until it is null. Each watch comes back short (decision and next step clipped, no history); full: true returns each whole except its history, and watch_id returns one watch whole, with how_it_moves and its history. To check watches against the closure SOP (closed with proof, superseded, or open, and which are stale), use classify_decision_watches. Before telling anyone what a watch will do, read its how_it_moves and say it as written.',
   inputSchema: {
     type: 'object',
     properties: {
       watch_id: { type: 'string', description: 'One watch (DW-…), returned whole: how_it_moves, full next step and history.' },
+      watch_ids: { description: 'Several watches by id, a list or a comma-separated string, at most 50.', anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'string' }] },
       open_only: { type: 'boolean', description: 'Only watches still open.' },
-      limit: { type: 'number', description: 'Watches to return. Default 15, at most 40.' },
+      status: { type: 'string', enum: ['watching', 'answered', 'moved', 'escalated', 'cancelled'], description: 'Only watches at this status.' },
+      limit: { type: 'number', description: 'Watches to return. Default 15, at most 100.' },
+      offset: { type: 'number', description: 'Watches to skip, for the next page: the last answer\'s next_offset.' },
+      full: { type: 'boolean', description: 'Each watch whole (decision, next step, how_it_moves, close reason) instead of shortened. History is left out; ask with watch_id for that.' },
       owner_user_id: { type: 'string', description: 'Only watches waiting on this person.' },
       include_fixtures: { type: 'boolean', description: 'Include marked test watches.' },
       search: { type: 'string', description: 'Words to find a watch by, e.g. "monitoring twin gating checklist". Best match first; watches matching no word are left out.' },
@@ -255,7 +259,17 @@ export const listDecisionWatches: ToolDefinition = {
     const who = bare(str(args, 'owner_user_id'));
     let rows = all.watches;
     if (args.open_only === true) rows = rows.filter((w) => w.status === 'watching');
+    const status = str(args, 'status');
+    if (status) rows = rows.filter((w) => w.status === status);
     if (who) rows = rows.filter((w) => w.owner_user_id === who);
+    const ids = idList(args.watch_ids);
+    if (ids.length > 50) return { ok: false, reason: 'too_many_ids', message: `watch_ids takes at most 50; ${ids.length} were sent. Ask in batches of 50.` };
+    let missing: string[] = [];
+    if (ids.length) {
+      const held = new Set(rows.map((w) => w.watch_id));
+      missing = ids.filter((id) => !held.has(id));
+      rows = rows.filter((w) => ids.includes(w.watch_id));
+    }
     const search = str(args, 'search');
     if (search) rows = searchWatches(rows, search);
     const one = str(args, 'watch_id');
@@ -264,16 +278,83 @@ export const listDecisionWatches: ToolDefinition = {
       if (!w) return { ok: false, reason: 'not_found', message: `No watch ${one} matches (with the other filters given).` };
       return { ok: true, rule: all.rule.in_words, watch: w };
     }
-    const limit = Math.min(Math.max(Math.floor(Number(args.limit) || 15), 1), 40);
+    const limit = Math.min(Math.max(Math.floor(Number(args.limit) || 15), 1), 100);
+    const offset = Math.max(Math.floor(Number(args.offset) || 0), 0);
+    const page = rows.slice(offset, offset + limit);
+    const next = offset + page.length < rows.length ? offset + page.length : null;
     return {
       ok: true,
       counts: all.counts,
       posted_today: all.posted_today,
       count: rows.length,
-      returned: Math.min(rows.length, limit),
-      watches: rows.slice(0, limit).map(compactWatch),
-      truncated: rows.length > limit,
-      note: 'Each watch is shortened. Ask again with watch_id for one watch whole (how_it_moves, full next step, history), and quote its how_it_moves before saying what a watch will do.',
+      offset,
+      returned: page.length,
+      next_offset: next,
+      ...(missing.length ? { not_found: missing } : {}),
+      watches: page.map((w) => (args.full === true ? wholeWatch(w) : compactWatch(w))),
+      truncated: next !== null,
+      note: next !== null
+        ? `${rows.length} matched; this is ${offset + 1} to ${offset + page.length}. Ask again with offset ${next} for the next page.`
+        : args.full === true ? 'Every watch that matched is here.' : 'Every watch that matched is here, each shortened. Ask with full: true, or watch_id for one whole with its history.',
+    };
+  },
+};
+
+/** A list of watch ids from an array or a comma- or space-separated string. Pure. */
+export function idList(v: unknown): string[] {
+  const parts = Array.isArray(v) ? v.map(String) : typeof v === 'string' ? v.split(/[\s,]+/) : [];
+  return [...new Set(parts.map((x) => x.trim()).filter(Boolean))];
+}
+
+function wholeWatch(w: ReturnType<typeof dw.show>) {
+  const { history: _history, ...rest } = w;
+  return rest;
+}
+
+export const classifyDecisionWatches: ToolDefinition = {
+  name: 'classify_decision_watches',
+  description:
+    'Check every Decision Watch against the closure SOP (SOP 81cd9c04-98fa-4f75-94a9-fed445fcce4e): each watch is closed_with_proof (its close names a link or a record id), superseded (folded into another DW-, named as successor), or open; closed_without_proof and escalated (the reminders ran out and nobody closed or superseded it) break the SOP. An open watch is also flagged stale when its linked loop or task is closed, its owner has left BHA, or nothing has moved for 14 days. Reads every watch, not a sample. Returns the counts per state, a summary per owner (follows_sop is true only with nothing breaking the SOP and nothing stale), and the watches that need action: stale open ones and the ones breaking the SOP, each with the reason, at most item_limit (default 40) with next_offset to page. owner_user_id scopes it to one person. include_compliant lists the compliant watches too. Read only: it changes no watch.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      owner_user_id: { type: 'string', description: 'Only this person\'s watches (Slack id).' },
+      item_limit: { type: 'number', description: 'Watches listed in items. Default 40, at most 100.' },
+      offset: { type: 'number', description: 'Items to skip: the last answer\'s next_offset.' },
+      include_compliant: { type: 'boolean', description: 'List every watch, not only the ones that need action.' },
+    },
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false, title: 'Check watches against the closure SOP' },
+  handler: async (args) => {
+    const { classifyAll } = await import('../watchClassify');
+    const who = bare(str(args, 'owner_user_id')) || null;
+    const r = await classifyAll({ owner_user_id: who });
+    const needs = args.include_compliant === true ? r.rows : r.rows.filter((x) => !x.compliant || x.stale.length);
+    const limit = Math.min(Math.max(Math.floor(Number(args.item_limit) || 40), 1), 100);
+    const offset = Math.max(Math.floor(Number(args.offset) || 0), 0);
+    const page = needs.slice(offset, offset + limit);
+    const next = offset + page.length < needs.length ? offset + page.length : null;
+    return {
+      ok: true,
+      sop: 'SOP -- Decision Watch closure standard (81cd9c04-98fa-4f75-94a9-fed445fcce4e)',
+      read_at: r.read_at,
+      scope: who ? `watches owned by ${who}` : 'every watch',
+      ...r.summary,
+      items_count: needs.length,
+      offset,
+      next_offset: next,
+      items: page.map((x) => ({
+        watch_id: x.watch_id,
+        owner: x.owner_name ?? x.owner_user_id,
+        state: x.state,
+        ...(x.stale.length ? { stale: x.stale } : {}),
+        ...(x.successor ? { successor: x.successor } : {}),
+        ...(x.proof.length ? { proof: x.proof.slice(0, 3) } : {}),
+        decision: x.decision,
+        thread_link: x.thread_link,
+      })),
+      note: next !== null ? `${needs.length} listed; ask again with offset ${next} for the rest.` : `Every watch ${args.include_compliant === true ? '' : 'needing action '}is listed.`,
     };
   },
 };
@@ -499,4 +580,4 @@ export const reopenDecisionWatch: ToolDefinition = {
     }),
 };
 
-export const DECISION_WATCH_WRITE_TOOLS: ToolDefinition[] = [openDecisionWatch, listDecisionWatches, closeDecisionWatch, updateDecisionWatch, snoozeDecisionWatch, runDecisionWatch, reopenDecisionWatch];
+export const DECISION_WATCH_WRITE_TOOLS: ToolDefinition[] = [openDecisionWatch, listDecisionWatches, classifyDecisionWatches, closeDecisionWatch, updateDecisionWatch, snoozeDecisionWatch, runDecisionWatch, reopenDecisionWatch];

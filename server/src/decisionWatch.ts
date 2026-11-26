@@ -1262,6 +1262,10 @@ export function movesText(w: WatchRow, due: Date, now = new Date()): string {
   return parts.join(' ');
 }
 
+/** A watch's last_error is either a real fault, or a "held:" note from the daily pacing, which is not a fault (26 Nov 2026). */
+export const heldNote = (e: string | null | undefined): string | null => (e && /^held:/i.test(e.trim()) ? e : null);
+export const realProblem = (e: string | null | undefined): string | null => (e && !/^held:/i.test(e.trim()) ? e : null);
+
 export function show(w: WatchRow, now = new Date()) {
   const open = w.status === 'watching';
   const snoozed = open && snoozedAt(w, now);
@@ -1271,7 +1275,7 @@ export function show(w: WatchRow, now = new Date()) {
   return {
     watch_id: w.watch_id,
     status: w.status,
-    state: !open ? w.status : snoozed ? `snoozed until ${dayWords(new Date(w.snoozed_until as Date))}` : w.last_error ? 'watching, with a problem' : w.reminders_sent >= w.max_reminders ? 'last reminder sent, escalates next' : w.reminders_sent ? `reminded ${w.reminders_sent} of ${w.max_reminders}` : 'watching',
+    state: !open ? w.status : snoozed ? `snoozed until ${dayWords(new Date(w.snoozed_until as Date))}` : realProblem(w.last_error) ? 'watching, with a problem' : heldNote(w.last_error) ? 'watching, reminder waiting its turn' : w.reminders_sent >= w.max_reminders ? 'last reminder sent, escalates next' : w.reminders_sent ? `reminded ${w.reminders_sent} of ${w.max_reminders}` : 'watching',
     decision: w.decision,
     owner_user_id: w.owner_user_id,
     owner_name: w.owner_name,
@@ -1293,7 +1297,9 @@ export function show(w: WatchRow, now = new Date()) {
     next_action_when: !open ? null : due.getTime() <= now.getTime() ? 'due now' : `in ${hoursWords((due.getTime() - now.getTime()) / 60_000)}`,
     last_reminder_at: iso(w.last_reminder_at),
     last_checked_at: iso(w.last_checked_at),
-    problem: w.last_error,
+    // 26 Nov 2026: a "held:" line is the daily pacing (one reminder per person per 12 hours, 12 posts a day), not a fault.
+    problem: realProblem(w.last_error),
+    held: heldNote(w.last_error),
     close_reason: w.close_reason,
     closed_by: w.closed_by,
     closed_at: iso(w.closed_at),
@@ -1311,7 +1317,9 @@ export function show(w: WatchRow, now = new Date()) {
 /** The page's and the tool's read: open watches first (soonest action first), then the closed ones, newest first. */
 export async function read(opts: { fixtures?: boolean; limit?: number } = {}) {
   const now = new Date();
-  const r = await query<WatchRow>(`SELECT * FROM engine_decision_watches WHERE ($1::boolean OR NOT fixture) ORDER BY created_at DESC LIMIT $2`, [opts.fixtures === true, opts.limit ?? 300]);
+  // 26 Nov 2026: was the newest 300 rows, so once 588 watches were held the older open ones were never read (Genie saw
+  // 126 of 153 open). Every watch is read; the table is small and the answer is shortened by the callers.
+  const r = await query<WatchRow>(`SELECT * FROM engine_decision_watches WHERE ($1::boolean OR NOT fixture) ORDER BY created_at DESC LIMIT $2`, [opts.fixtures === true, opts.limit ?? 20000]);
   const rows = r.rows.map((w) => show(w, now));
   const open = rows.filter((w) => w.status === 'watching').sort((a, b) => String(a.next_action_at).localeCompare(String(b.next_action_at)));
   const closed = rows.filter((w) => w.status !== 'watching').sort((a, b) => String(b.closed_at).localeCompare(String(a.closed_at)));
@@ -1323,7 +1331,7 @@ export async function read(opts: { fixtures?: boolean; limit?: number } = {}) {
       daily_cap: RULE.daily_cap,
       in_words: `A watch waits ${RULE.wait_hours} hours for movement (the owner replying, anyone else replying, or the linked loop or task changing). Quiet past that, Bays posts a reminder in the thread, up to ${RULE.max_reminders}. After the last one and another quiet wait, one escalation names Jason and Destiny and the watch stops. At most ${RULE.daily_cap} posts a day across all watches. A thread that could not be read is never reminded on. A watch can be snoozed for up to ${RULE.max_snooze_days} days by its owner, whoever asked for it, Destiny or Jason: it stays open, a reply still counts, and nothing is posted until the date; then the full wait starts again. Each person gets at most one reminder per ${RULE.owner_gap_hours} hours across all their watches.`,
     },
-    counts: { watching: open.length, snoozed: open.filter((w) => w.snoozed_until).length, with_a_problem: open.filter((w) => w.problem).length, answered: count('answered'), moved: count('moved'), escalated: count('escalated'), cancelled: count('cancelled') },
+    counts: { watching: open.length, snoozed: open.filter((w) => w.snoozed_until).length, with_a_problem: open.filter((w) => w.problem).length, reminder_waiting_its_turn: open.filter((w) => !w.problem && w.held && !w.snoozed_until).length, answered: count('answered'), moved: count('moved'), escalated: count('escalated'), cancelled: count('cancelled') },
     posted_today: await postedToday(now),
     watches: [...open, ...closed],
   };

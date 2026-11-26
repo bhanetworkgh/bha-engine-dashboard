@@ -1175,6 +1175,20 @@ archive records directly, with the checks the Bays Tools Router enforces.
   every one rode along on each later step of Bays' run. `list_decision_watches` likewise returns
   each watch short (no history or how_it_moves), 15 by default and 40 at most, and `watch_id`
   returns one watch whole.
+- **Every watch is read, paged, and checked against the closure SOP** (26 Nov 2026, Destiny — Jason in
+  C0ASMPYQLG3 1795642017.292079; SOP 81cd9c04, "Decision Watch closure standard"). `decisionWatch.read` read
+  the newest 300 rows, so with 588 held the older open watches were never read (Genie saw 126 of 153); it reads
+  every row now. `list_decision_watches` takes `status`, `watch_ids` (a list or comma string, at most 50),
+  `limit` (at most 100), `offset` and `full` (each watch whole but its history), and answers `count`,
+  `next_offset` and `not_found`. A `held:` line is the daily pacing, not a fault: `problem` is only a real
+  fault, `held` the pacing note, and the state reads "watching, reminder waiting its turn".
+  `classify_decision_watches` (`server/src/watchClassify.ts`, read only, in Bays' and so Genie's scope) puts
+  every watch in one state: closed_with_proof (the close names a link or record id, or a moved close on its
+  record), superseded (folded into another DW-, named), open, and the two that break the SOP,
+  closed_without_proof and escalated. An open watch is stale when its linked loop is Closed, its owner is in
+  `FORMER_BUILDERS`, or it has been quiet `STALE_QUIET_DAYS` (14) and is not snoozed. Counts per state, a
+  summary per owner (`follows_sop`), and the watches needing action, paged. Genie's planner reads both tools
+  at 40,000 characters and its instructions say to page with `next_offset`. `npm run test:watch-classify`.
 - **Eight writable kinds**: loops, codex, patterns, pattern_candidates,
   commercial, rt-jobs, lane_backlog, builder_profiles. `list_writable_kinds`
   reads their columns and row counts from the database and the values each

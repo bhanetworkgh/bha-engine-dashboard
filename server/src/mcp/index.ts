@@ -187,6 +187,8 @@ const BAYS_TOOLS: ReadonlySet<string> = new Set([
         'read_logstream', 'read_engine_events', 'read_change_record',
         // 2026-10-11: Decision Watch (5YQA). Bays opens, lists and closes; running the pass stays with a person.
         'open_decision_watch', 'list_decision_watches', 'close_decision_watch',
+        // 2026-11-26: the closure SOP check over every watch (Jason, C0ASMPYQLG3 1795642017.292079).
+        'classify_decision_watches',
         // 2026-10-11: attach an SOP written after the watch was opened (Jason, 1791746835.121559).
         'update_decision_watch',
         // 2026-10-18: pause a watch's reminders until a date the person names, at most 14 days,

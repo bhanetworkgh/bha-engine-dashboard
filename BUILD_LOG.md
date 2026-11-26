@@ -16376,3 +16376,10 @@ Files:      server/src/reviewCard.ts (withVerdict, verdict and verdict_note on r
 Problem:    No tool could rewrite a Pending card; refreshPay was reachable only on the inbound key. matchReleases matches a claim to a hold by the hold's Codex or Submission id inside the claim's log field, so "23 Nov log" matched neither.
 Fix:        refresh_review_card on the write connection; the Codex row's Releases rewritten with the two Codex ids so the Pay Suggestion is worked out again on the write.
 Decision:   The reviewer's reason stays on the card and the row; the correction is a separate Completeness note naming Destiny, so Jason reads it as a correction.
+
+## 2026-11-26 08:30 — Every watch read, paged, and checked against the closure SOP
+Intent:     Jason (C0ASMPYQLG3 1795642017.292079) asked for paged, owner- and id-scoped watch reads and a closure classification so Genie can enforce SOP 81cd9c04 over all watches instead of sampling 40.
+Files:      server/src/decisionWatch.ts (read reads every row; heldNote/realProblem), server/src/watchClassify.ts (new), server/src/mcp/decisionWatchTools.ts (list_decision_watches paging; classify_decision_watches), server/src/mcp/index.ts (Bays' scope, so Genie's), server/test/watch-classify.test.cjs, package.json, CLAUDE.md
+Problem:    read() took the newest 300 of 588 rows, so 27 open watches were never read (Genie counted 126 of 153); 78 of 79 "with a problem" were the daily pacing note, not a fault; no offset, no id list, 40 at most.
+Fix:        every row read; status, watch_ids (50), limit 100, offset, full, next_offset; problem vs held; classify into closed_with_proof / superseded / open / closed_without_proof / escalated, stale on a closed linked loop, a former owner or 14 quiet days, per-owner summary.
+Decision:   classification is read only and changes no watch; closing or superseding stays with the owner, Destiny or Jason, on proof.
