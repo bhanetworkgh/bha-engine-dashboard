@@ -31,6 +31,9 @@ assert.equal(b.decide(gatesOk, [item('A', false, 'BLOCKS_PILOT_1'), item('B', tr
 assert.equal(b.decide(gatesOk, [item('A', true, 'BLOCKS_PILOT_1')]).ready, false);
 assert.equal(b.decide([{ id: 'STAGE1_PASSED', open: true }, { id: 'CHARGE_GATE_OPEN', open: false }], [item('A', false, 'BLOCKS_PILOT_1')]).ready, false);
 assert.match(b.decide([{ id: 'STAGE1_PASSED', open: true }, { id: 'CHARGE_GATE_OPEN', open: true }], [item('A', true, 'BLOCKS_PILOT_1')]).why, /STAGE1_PASSED and CHARGE_GATE_OPEN are false/);
+// 26 Nov 2026: the count says items plus gates, so it never reads as disagreeing with the blocking list.
+assert.match(b.decide([{ id: 'STAGE1_PASSED', open: true }, { id: 'CHARGE_GATE_OPEN', open: true }], [item('A', true, 'BLOCKS_PILOT_1')]).why, /3 open blockers in all \(1 item plus 2 gates\)/);
+assert.deepEqual([...b.GATE_IDS], ['STAGE1_PASSED', 'CHARGE_GATE_OPEN']);
 assert.equal(b.decide(gatesOk, [item('B', false, 'QUALITY_OF_LIFE')]).ready, false);
 ok('ready needs both gates and every BLOCKS_PILOT_1 item closed; quality of life never holds it at No');
 

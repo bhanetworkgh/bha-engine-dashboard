@@ -30,12 +30,13 @@ export const readIncomeBoard: ToolDefinition = {
 
 export const setIncomeBoardItem: ToolDefinition = {
   name: 'set_income_board_item',
-  description: `Put a loop (LOOP-...) or Decision Watch (DW-...) on the Production-Income Board (${board.BOARD_KEY}) as something that blocks "${board.QUESTION}", change one already on it, or take one off. Each item sits in one of Jason's seven sections (${board.SECTION_KEYS.join(', ')}) and is BLOCKS_PILOT_1 or QUALITY_OF_LIFE; update changes only the section, impact or target_date sent (an empty target_date means date_to_set). Only when Destiny (U0AEW3TBYH1) or Jason (U0A9V97949F) asks, in this conversation: pass them as requester_user_id; anyone else is refused. reason is required (what it blocks, or why it comes off); target_date (YYYY-MM-DD) is optional and only what the person said, never guessed. Nothing is deleted: a removal is dated and signed. dry_run checks and writes nothing. Audited on engine_mcp_writes (kind income_board).`,
+  description: `Put a loop (LOOP-...) or Decision Watch (DW-...) on the Production-Income Board (${board.BOARD_KEY}) as something that blocks "${board.QUESTION}", change one already on it, or take one off. Each item sits in one of Jason's seven sections (${board.SECTION_KEYS.join(', ')}) and is BLOCKS_PILOT_1 or QUALITY_OF_LIFE; update changes only the section, impact or target_date sent (an empty target_date means date_to_set). The two gates (STAGE1_PASSED, CHARGE_GATE_OPEN) are always on the board: update sets their owner (a Slack id) and target_date, never whether they are true, and every change keeps the one before it with its reason. Only when Destiny (U0AEW3TBYH1) or Jason (U0A9V97949F) asks, in this conversation: pass them as requester_user_id; anyone else is refused. reason is required (what it blocks, or why it comes off); target_date (YYYY-MM-DD) is optional and only what the person said, never guessed. Nothing is deleted: a removal is dated and signed. dry_run checks and writes nothing. Audited on engine_mcp_writes (kind income_board).`,
   inputSchema: {
     type: 'object',
     properties: {
       action: { type: 'string', enum: ['add', 'update', 'remove'] },
-      record_id: { type: 'string', description: 'LOOP-... or DW-...' },
+      record_id: { type: 'string', description: 'LOOP-..., DW-..., or a gate: STAGE1_PASSED or CHARGE_GATE_OPEN (update only: owner and target_date).' },
+      owner: { type: 'string', description: 'Gates only: the Slack id (U...) of who owns the gate.' },
       reason: { type: 'string' },
       target_date: { type: 'string', description: 'YYYY-MM-DD, only if the person gave one; empty on update clears it to date_to_set.' },
       section: { type: 'string', enum: [...board.SECTION_KEYS] },
@@ -60,7 +61,7 @@ export const setIncomeBoardItem: ToolDefinition = {
     }
     const opt = (k: string) => (k in args ? (typeof args[k] === 'string' ? (args[k] as string) : null) : undefined);
     try {
-      const r = await board.setItem({ action, record_id: String(args.record_id ?? ''), reason: typeof args.reason === 'string' ? args.reason : null, target_date: opt('target_date'), section: opt('section'), impact: opt('impact'), requester }, dry);
+      const r = await board.setItem({ action, record_id: String(args.record_id ?? ''), reason: typeof args.reason === 'string' ? args.reason : null, target_date: opt('target_date'), section: opt('section'), impact: opt('impact'), owner: opt('owner'), requester }, dry);
       await auditClose(audit, { outcome: r.ok ? (dry ? 'dry_run' : action === 'add' ? 'inserted' : 'applied') : 'refused', detail: String(r.ok ? (r.added ?? r.updated ?? r.removed ?? r.would) : r.reason) });
       return { ...r, audit_id: audit };
     } catch (e) {

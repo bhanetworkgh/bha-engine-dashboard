@@ -16402,3 +16402,10 @@ Files:      server/src/payCard.ts
 Problem:    every unpaid approved log was listed, including ones credited 0% with nothing released.
 Fix:        the earlier-days loop skips a log credited 0% with no release on it; one with a release (23 Nov, $46.25) stays.
 Decision:   only the listing changes; totals were already $0 for those days.
+
+## 2026-11-26 17:40 — Income Board: owners and dates on the two gates
+Intent:     Jason (C0ASMPYQLG3 1795696380.626199) ruled a gate with no owner and no date is a fault and said he or Destiny would set them on the board. The board computed both gates with owner and date hard-coded to null, so nobody could.
+Files:      server/src/incomeBoard.ts, server/src/mcp/incomeBoardTools.ts, server/src/migrations.ts (161), server/test/income-board-v2.test.cjs, CLAUDE.md
+Problem:    gateRow returned owner: null, target_date: null for STAGE1_PASSED and CHARGE_GATE_OPEN; the why line read "16 of 17 items" beside a blocking list of 18, which Genie and Jason read as a disagreement.
+Fix:        engine_income_board_gate_sets (append-only, Destiny or Jason, reason required); set_income_board_item update on a gate id sets owner and target_date; gates join the owner views; why now ends "N open blockers in all (items plus gates)".
+Decision:   Whether a gate is true is never set by hand; only who owns it and when it is due.

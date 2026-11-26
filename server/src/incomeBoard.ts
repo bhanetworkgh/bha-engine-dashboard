@@ -127,8 +127,10 @@ export function decide(gates: Blocker[], items: Blocker[]): { ready: boolean; wh
   if (failing.length || open.length) {
     const parts = [];
     if (failing.length) parts.push(`${failing.map((g) => g.id).join(' and ')} ${failing.length === 1 ? 'is' : 'are'} false`);
-    if (open.length) parts.push(`${open.length} of ${blocking.length} item${blocking.length === 1 ? '' : 's'} that block Pilot 1 still open`);
-    return { ready: false, why: `${parts.join(', and ')}.` };
+    if (open.length) parts.push(`${open.length} of ${blocking.length} board item${blocking.length === 1 ? '' : 's'} that block Pilot 1 still open`);
+    // 26 Nov 2026: "16 of 17" read as disagreeing with a blocking list of 18. The list is the open items plus the gates.
+    const total = open.length + failing.length;
+    return { ready: false, why: `${parts.join(', and ')}: ${total} open blocker${total === 1 ? '' : 's'} in all (${open.length} item${open.length === 1 ? '' : 's'} plus ${failing.length} gate${failing.length === 1 ? '' : 's'}).` };
   }
   return { ready: true, why: `STAGE1_PASSED and CHARGE_GATE_OPEN are both true and all ${blocking.length} items that block Pilot 1 are closed.` };
 }
@@ -144,13 +146,37 @@ export function stage1Passed(records: { object_id: string; status: string; loop_
   return { passed: per_loop.every((x) => x.state === 'passed'), per_loop };
 }
 
-function gateRow(id: string, title: string, open: boolean, status: string, reason: string, lane: string, link: string | null, today: string): Blocker {
-  return { kind: 'gate', id, title, status, open, lane, owner: null, target_date: null, ...dateState(null, open, today), section: null, section_label: null, impact: 'BLOCKS_PILOT_1', last_change: null, moved_this_week: false, reason, link };
+/** The two gates (26 Nov 2026, Jason in C0ASMPYQLG3 1795696380.626199: a gate with no owner and no date is a fault). */
+export const GATE_IDS = ['STAGE1_PASSED', 'CHARGE_GATE_OPEN'] as const;
+type GateSet = { owner: string | null; target_date: string | null; set_by: string; set_at: string; reason: string };
+
+/**
+ * Who owns each gate and when it is due. Whether a gate is true is still read from the records only; the owner and
+ * the date are set by Destiny or Jason, append-only, newest wins, with the reason kept (engine_income_board_gate_sets).
+ */
+export async function gateSets(): Promise<Record<string, GateSet>> {
+  const r = await query<GateSet & { gate_id: string }>(
+    `SELECT DISTINCT ON (gate_id) gate_id, owner, target_date::text AS target_date, set_by, to_char(set_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS set_at, reason
+       FROM engine_income_board_gate_sets WHERE board_key = $1 ORDER BY gate_id, set_at DESC, id DESC`,
+    [BOARD_KEY],
+  );
+  return Object.fromEntries(r.rows.map((x) => [x.gate_id, x]));
+}
+
+function gateRow(id: string, title: string, open: boolean, status: string, reason: string, lane: string, link: string | null, today: string, set?: GateSet): Blocker {
+  const target = set?.target_date ?? null;
+  return { kind: 'gate', id, title, status, open, lane, owner: set?.owner ? nameOf(set.owner) : null, target_date: target, ...dateState(target, open, today), section: null, section_label: null, impact: 'BLOCKS_PILOT_1', last_change: set?.set_at ?? null, moved_this_week: false, reason, link };
 }
 
 async function gates(today: string): Promise<{ list: Blocker[]; errors: string[] }> {
   const errors: string[] = [];
   const list: Blocker[] = [];
+  let sets: Record<string, GateSet> = {};
+  try {
+    sets = await gateSets();
+  } catch (e) {
+    errors.push(`gate owners and dates: ${(e as Error).message}`);
+  }
   const vfarmPage = `${PAGE.replace('/income-board', '')}/vfarm?tab=gates`;
   try {
     const recs = (await query<{ object_id: string; status: string; loop_ref: string | null }>(
@@ -158,10 +184,10 @@ async function gates(today: string): Promise<{ list: Blocker[]; errors: string[]
     )).rows;
     const s = stage1Passed(recs);
     list.push(gateRow('STAGE1_PASSED', 'A real Stage 1 record has passed for both H9KF (production rack) and L4WA (Kavin\'s rack)', !s.passed, s.passed ? 'true' : 'false',
-      s.per_loop.map((x) => `${x.loop_id.slice(-4)}: ${x.record ? `${x.record} ${x.state}` : x.state}`).join('; ') + '.', 'VFARM_HARDWARE', vfarmPage, today));
+      s.per_loop.map((x) => `${x.loop_id.slice(-4)}: ${x.record ? `${x.record} ${x.state}` : x.state}`).join('; ') + '.', 'VFARM_HARDWARE', vfarmPage, today, sets.STAGE1_PASSED));
   } catch (e) {
     errors.push(`STAGE1_PASSED: ${(e as Error).message}`);
-    list.push(gateRow('STAGE1_PASSED', 'A real Stage 1 record has passed for both H9KF and L4WA', true, 'unread', 'Could not be read, so it counts as false.', 'VFARM_HARDWARE', null, today));
+    list.push(gateRow('STAGE1_PASSED', 'A real Stage 1 record has passed for both H9KF and L4WA', true, 'unread', 'Could not be read, so it counts as false.', 'VFARM_HARDWARE', null, today, sets.STAGE1_PASSED));
   }
   try {
     const cg = await chargeGate.status();
@@ -175,10 +201,10 @@ async function gates(today: string): Promise<{ list: Blocker[]; errors: string[]
       paid ? `A live end-to-end payment above $1 is recorded (largest $${(Number(pay?.biggest) / 100).toFixed(2)}).` : 'No live end-to-end payment above the $1 team tests is recorded yet.',
     ];
     list.push(gateRow('CHARGE_GATE_OPEN', "Real buyers may be charged: Jason's offer_approved recorded, the charge gate open, and one live end-to-end payment beyond the $1 team test",
-      !(cg.can_charge_live && paid), cg.can_charge_live && paid ? 'true' : 'false', parts.join(' '), 'CST', null, today));
+      !(cg.can_charge_live && paid), cg.can_charge_live && paid ? 'true' : 'false', parts.join(' '), 'CST', null, today, sets.CHARGE_GATE_OPEN));
   } catch (e) {
     errors.push(`CHARGE_GATE_OPEN: ${(e as Error).message}`);
-    list.push(gateRow('CHARGE_GATE_OPEN', 'Real buyers may be charged', true, 'unread', 'Could not be read, so it counts as false.', 'CST', null, today));
+    list.push(gateRow('CHARGE_GATE_OPEN', 'Real buyers may be charged', true, 'unread', 'Could not be read, so it counts as false.', 'CST', null, today, sets.CHARGE_GATE_OPEN));
   }
   return { list, errors };
 }
@@ -329,7 +355,7 @@ export async function read(now = new Date()) {
     items: resolved,
     items_closed: resolved.filter((i) => !i.open).length,
     sections: bySection(resolved),
-    owner_views: ownerViews(resolved),
+    owner_views: ownerViews([...g.list, ...resolved]),
     this_week: {
       since: new Date(now.getTime() - WEEK_DAYS * 86_400_000).toISOString().slice(0, 10),
       moved: resolved.filter((i) => i.moved_this_week).map((i) => ({ id: i.id, title: i.title, owner: i.owner, status: i.status, last_change: i.last_change, link: i.link })),
@@ -355,6 +381,8 @@ export interface SetInput {
   target_date?: string | null;
   section?: string | null;
   impact?: string | null;
+  /** Gates only: the Slack id of who owns it. */
+  owner?: string | null;
   requester: string | null;
 }
 
@@ -383,13 +411,39 @@ export function checkFields(i: Pick<SetInput, 'section' | 'impact' | 'target_dat
   return { ok: true, set };
 }
 
+const SLACK_ID_RE = /^[UW][A-Z0-9]{6,}$/;
+
+/**
+ * A gate's owner and date (26 Nov 2026). Only update, only Destiny or Jason, a reason always. Whether the gate is true
+ * is never set here: that is read from the records. Each change is a new row, so a moved date keeps the old one and
+ * its reason on record.
+ */
+async function setGate(i: SetInput & { reason: string }, dryRun: boolean): Promise<Record<string, unknown>> {
+  if (i.action !== 'update') return { ok: false, reason: 'gate_update_only', message: `${i.record_id} is always on the board; only its owner and target_date can be changed (action update).` };
+  if (i.reason.length < 3) return { ok: false, reason: 'reason_required', message: 'Say why: who owns this gate and why that date.' };
+  const owner = i.owner === undefined ? undefined : (i.owner ?? '').trim() || null;
+  if (owner && !SLACK_ID_RE.test(owner)) return { ok: false, reason: 'bad_owner', message: 'owner is a Slack user id (U...).' };
+  const f = checkFields({ target_date: i.target_date });
+  if (!f.ok) return f;
+  if (owner === undefined && i.target_date === undefined) return { ok: false, reason: 'nothing_to_change', message: 'Send owner, target_date or both.' };
+  const before = (await gateSets())[i.record_id] ?? null;
+  const next = { owner: owner === undefined ? before?.owner ?? null : owner, target_date: i.target_date === undefined ? before?.target_date ?? null : (f.set.target_date ?? null) };
+  if (dryRun) return { ok: true, dry_run: true, would: `set ${i.record_id}`, before, after: next };
+  await query(
+    `INSERT INTO engine_income_board_gate_sets (board_key, gate_id, owner, target_date, set_by, reason) VALUES ($1, $2, $3, $4::date, $5, $6)`,
+    [BOARD_KEY, i.record_id, next.owner, next.target_date, i.requester, i.reason.slice(0, 600)],
+  );
+  return { ok: true, updated: i.record_id, before, after: next, reason: i.reason, page: PAGE };
+}
+
 /** Adds, updates or removes one item. Only Destiny or Jason. Nothing is deleted: a removal is dated and signed. */
 export async function setItem(i: SetInput, dryRun = false): Promise<Record<string, unknown>> {
   if (!i.requester || !ADMIN_IDS.includes(i.requester)) return { ok: false, reason: 'not_permitted', message: 'Only Destiny (U0AEW3TBYH1) or Jason (U0A9V97949F) changes what is on the Production-Income Board.' };
   const id = (i.record_id ?? '').trim();
-  const kind = LOOP_RE.test(id) ? 'loop' : WATCH_RE.test(id) ? 'watch' : null;
-  if (!kind) return { ok: false, reason: 'bad_record_id', message: 'record_id is a full loop id (LOOP-...) or Decision Watch id (DW-...).' };
   const reason = (i.reason ?? '').trim();
+  if ((GATE_IDS as readonly string[]).includes(id)) return setGate({ ...i, record_id: id, reason }, dryRun);
+  const kind = LOOP_RE.test(id) ? 'loop' : WATCH_RE.test(id) ? 'watch' : null;
+  if (!kind) return { ok: false, reason: 'bad_record_id', message: 'record_id is a full loop id (LOOP-...), a Decision Watch id (DW-...), or a gate (STAGE1_PASSED, CHARGE_GATE_OPEN).' };
   if (reason.length < 3) return { ok: false, reason: 'reason_required', message: 'Say why, in a few words: what it blocks, what changed, or why it comes off.' };
   const f = checkFields(i);
   if (!f.ok) return f;

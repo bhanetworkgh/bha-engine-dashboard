@@ -5338,6 +5338,30 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
       `ALTER TABLE engine_pay_note_history ADD CONSTRAINT engine_pay_note_history_action_check CHECK (action IN ('set', 'correct', 'release', 'remove', 'unrelease'))`,
     ],
   },
+  {
+    // 26 Nov 2026 (Destiny; Jason in C0ASMPYQLG3 1795696380.626199): a gate with no owner and no date is a fault, and
+    // the board had nowhere to keep them. Append-only: newest row per gate wins, a moved date keeps the old row and its reason.
+    id: 161,
+    name: 'income board: gate owners and dates',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_income_board_gate_sets (
+         id bigserial PRIMARY KEY,
+         board_key text NOT NULL,
+         gate_id text NOT NULL CHECK (gate_id IN ('STAGE1_PASSED', 'CHARGE_GATE_OPEN')),
+         owner text,
+         target_date date,
+         set_by text NOT NULL CHECK (set_by IN ('U0AEW3TBYH1', 'U0A9V97949F')),
+         reason text NOT NULL CHECK (length(reason) >= 3),
+         set_at timestamptz NOT NULL DEFAULT now()
+       )`,
+      `CREATE INDEX IF NOT EXISTS engine_income_board_gate_sets_gate ON engine_income_board_gate_sets (board_key, gate_id, set_at DESC)`,
+      `CREATE OR REPLACE FUNCTION engine_income_board_gate_sets_frozen() RETURNS trigger LANGUAGE plpgsql AS $$
+         BEGIN RAISE EXCEPTION 'engine_income_board_gate_sets is append-only: a change is a new row'; END $$`,
+      `DROP TRIGGER IF EXISTS engine_income_board_gate_sets_frozen ON engine_income_board_gate_sets`,
+      `CREATE TRIGGER engine_income_board_gate_sets_frozen BEFORE UPDATE OR DELETE ON engine_income_board_gate_sets
+         FOR EACH ROW EXECUTE FUNCTION engine_income_board_gate_sets_frozen()`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */
