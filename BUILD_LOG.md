@@ -16409,3 +16409,10 @@ Files:      server/src/incomeBoard.ts, server/src/mcp/incomeBoardTools.ts, serve
 Problem:    gateRow returned owner: null, target_date: null for STAGE1_PASSED and CHARGE_GATE_OPEN; the why line read "16 of 17 items" beside a blocking list of 18, which Genie and Jason read as a disagreement.
 Fix:        engine_income_board_gate_sets (append-only, Destiny or Jason, reason required); set_income_board_item update on a gate id sets owner and target_date; gates join the owner views; why now ends "N open blockers in all (items plus gates)".
 Decision:   Whether a gate is true is never set by hand; only who owns it and when it is due.
+
+## 2026-11-26 18:25 — update_record cuts passages by exact text (HSJ6)
+Intent:     Let an agent remove a few passages from a long text field without resending the whole field.
+Files:      server/src/mcp/writeTools.ts, server/test/update-append.test.cjs, CLAUDE.md
+Problem:    Asked to remove "Austin Virtual", the microsecond lines, the CST SLA lines and the $10 to $75 comparison from HSJ6's research_gleanings, Genie resent the whole 5,763-character field rewritten from memory on three approval cards (HYCA, NCM5 and a split DNZ2), rewording each time, then advised denying its own card. The write approved by mistake at 17:03 was undone by hand at 18:07 (audit 8400, md5 matched the 15 Nov text).
+Fix:        update_record takes replace: { field: [{ find, with }] }, applied on the server to the stored text; a find that is not there refuses the whole call.
+Decision:   Every place a find appears is changed, because the asks are "everywhere they appear"; a missing find refuses rather than half-applies.

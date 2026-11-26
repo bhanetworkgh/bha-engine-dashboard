@@ -175,6 +175,53 @@ function appendOf(args: Record<string, unknown>): Record<string, string[]> | nul
   return out;
 }
 
+/**
+ * Exact cuts and swaps in a long text field (26 Nov 2026, Destiny — HSJ6: asked to remove a few lines from a
+ * 5,763-character research field, Genie resent the whole field rewritten from memory three times, rewording it each
+ * time). update_record's `replace` is applied here, on the server, to the field as it stands: each `find` is exact
+ * text and every place it appears is changed; `with` is what replaces it (empty or left out removes it). A find
+ * that does not appear refuses the whole call, so nothing is half-applied. Exported for the test.
+ */
+export type TextEdit = { find: string; with: string };
+export function replaceIn(existing: unknown, edits: TextEdit[]): { ok: true; value: string; counts: number[] } | { ok: false; message: string } {
+  if (typeof existing !== 'string') return { ok: false, message: 'it does not hold text' };
+  let value = existing;
+  const counts: number[] = [];
+  for (const [i, e] of edits.entries()) {
+    const n = value.split(e.find).length - 1;
+    if (n === 0) return { ok: false, message: `edit ${i + 1}: the text to find is not in the field as it stands now (${JSON.stringify(e.find.slice(0, 120))})` };
+    value = value.split(e.find).join(e.with);
+    counts.push(n);
+  }
+  return { ok: true, value, counts };
+}
+
+function replaceOf(args: Record<string, unknown>): Record<string, TextEdit[]> | null {
+  let a = args.replace;
+  if (typeof a === 'string' && a.trim().startsWith('{')) {
+    try {
+      a = JSON.parse(a);
+    } catch {
+      throw new McpError('bad_argument', '"replace" is text that is not valid JSON: send an object, { "<field>": [{ "find": "…", "with": "" }] }.');
+    }
+  }
+  if (a === undefined || a === null) return null;
+  if (typeof a !== 'object' || Array.isArray(a)) throw new McpError('bad_argument', '"replace" must be an object: { "<field>": [{ "find": "…", "with": "" }] }.');
+  const out: Record<string, TextEdit[]> = {};
+  for (const [k, v] of Object.entries(a as Record<string, unknown>)) {
+    const list = (Array.isArray(v) ? v : [v]).map((x) => {
+      const o = (x ?? {}) as Record<string, unknown>;
+      if (typeof o.find !== 'string' || o.find === '') throw new McpError('bad_argument', `"replace.${k}": every edit needs "find", the exact text to change.`);
+      if (o.with !== undefined && o.with !== null && typeof o.with !== 'string') throw new McpError('bad_argument', `"replace.${k}": "with" must be text, or left out to remove.`);
+      return { find: o.find, with: typeof o.with === 'string' ? o.with : '' };
+    });
+    if (!list.length) throw new McpError('bad_argument', `"replace.${k}" has no edits.`);
+    out[k] = list;
+  }
+  if (!Object.keys(out).length) throw new McpError('bad_argument', '"replace" names no field.');
+  return out;
+}
+
 /** The one row an `id` or `natural_id` names, or a refusal naming the problem. */
 async function target(kind: mirror.MirrorKind, args: Record<string, unknown>, ctx: engineWrite.WriteCtx): Promise<mirror.LookupRow> {
   const id = s(args, 'id');
@@ -706,7 +753,7 @@ const createRecord: ToolDefinition = {
 const updateRecord: ToolDefinition = {
   name: 'update_record',
   description:
-    'Change part of one record: only the fields sent change, and a field sent as null is removed. To add a note or decision without touching what a field holds, use append (e.g. { "decision_log": "2026-11-24 (Jason): …" }), never fields. A call without dry_run writes; use dry_run only to preview. Name the row by id or natural_id. The same merge PATCH /api/engine/:kind/:id does. Loops need requester_user_id and follow the Tools Router’s permission rule (an admin, the assignee, or an unassigned loop); a lane must be one of the locked set. A pattern candidate cannot be set to Registered here (refused as use_register_path): register_pattern_candidate is the only way, because it also saves, announces and hands off the pattern. Returns the row before and after.',
+    'Change part of one record: only the fields sent change, and a field sent as null is removed. To add a note or decision without touching what a field holds, use append (e.g. { "decision_log": "2026-11-24 (Jason): …" }), never fields. To remove or change a few passages inside a long text field, use replace with the exact text, never resend the whole field. A call without dry_run writes; use dry_run only to preview. Name the row by id or natural_id. The same merge PATCH /api/engine/:kind/:id does. Loops need requester_user_id and follow the Tools Router’s permission rule (an admin, the assignee, or an unassigned loop); a lane must be one of the locked set. A pattern candidate cannot be set to Registered here (refused as use_register_path): register_pattern_candidate is the only way, because it also saves, announces and hands off the pattern. Returns the row before and after.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -720,6 +767,12 @@ const updateRecord: ToolDefinition = {
         description:
           'Add to a log without replacing it, e.g. { "decision_log": "2026-11-24 (Jason): Decision – …" }. A field not there yet becomes a list of the new entries; a list gets them added at the end; text already there becomes the first item. Nothing already in the field is lost. Use this, not fields, to add a note or a decision to a record.',
       },
+      replace: {
+        type: 'object',
+        additionalProperties: { type: 'array', items: { type: 'object', properties: { find: { type: 'string' }, with: { type: 'string' } }, required: ['find'] } },
+        description:
+          'Exact cuts or swaps inside a long text field, applied by the server to the field as it stands: { "research_gleanings": [{ "find": "exact text", "with": "" }] }. Every place the find appears changes; "with" left out or empty removes it. A find that is not in the field refuses the whole call. Use this, never fields, to remove or change a few passages in a long field: the rest of the field stays exactly as it is.',
+      },
       ...GUARD_ARGS,
     },
     required: ['kind'],
@@ -729,10 +782,15 @@ const updateRecord: ToolDefinition = {
   handler: async (args, deps) => {
     const spec = kindOf(args);
     const append = appendOf(args);
-    const fields = append && args.fields === undefined ? {} : { ...fieldsOf(args) };
+    const replace = replaceOf(args);
+    const fields = (append || replace) && args.fields === undefined ? {} : { ...fieldsOf(args) };
     if (append) {
       const both = Object.keys(append).filter((k) => k in fields);
       if (both.length) throw new McpError('bad_argument', `${both.join(', ')} is in both "fields" and "append": send a field one way or the other.`);
+    }
+    if (replace) {
+      const both = Object.keys(replace).filter((k) => k in fields || (append && k in append));
+      if (both.length) throw new McpError('bad_argument', `${both.join(', ')} is in "replace" and in "fields" or "append": send a field one way.`);
     }
     const dry = b(args, 'dry_run');
     const requester = s(args, 'requester_user_id');
@@ -758,6 +816,20 @@ const updateRecord: ToolDefinition = {
         appended.push(k);
       }
     }
+    const replaced: Record<string, number[]> = {};
+    if (replace) {
+      for (const [k, edits] of Object.entries(replace)) {
+        const r = replaceIn(row.fields?.[k], edits);
+        if (!r.ok) {
+          const message = `"${k}" was not changed: ${r.message}. Nothing was written; read the field again and send the exact text.`;
+          await auditClose(audit, { outcome: 'refused', detail: `replace_not_found: ${message}`, record_id: row.id, natural_id: row.natural_id, before: row });
+          return { ok: false, written: false, reason: 'replace_not_found', message, id: row.id, natural_id: row.natural_id, audit_id: audit };
+        }
+        fields[k] = r.value;
+        replaced[k] = r.counts;
+      }
+    }
+    const replacedOut = Object.keys(replaced).length ? { replaced } : {};
     const plan = await guards.planUpdate(spec.kind, row, fields, requester, { registerPath: deps.internal === 'register_path' });
     if (!plan.ok) {
       await auditClose(audit, { outcome: 'refused', detail: `${plan.reason}: ${plan.message}`, record_id: row.id, natural_id: row.natural_id, before: row, guard_result: plan });
@@ -779,6 +851,7 @@ const updateRecord: ToolDefinition = {
         would_merge: plan.fields,
         fields_after: preview,
         ...(appended.length ? { appended } : {}),
+        ...replacedOut,
         untouched: 'Only the fields in would_merge change; every other field on the record stays exactly as it is.',
         checks: plan.checks,
         message: 'Dry run: nothing was written. Send the same call without dry_run to write it.',
@@ -810,6 +883,7 @@ const updateRecord: ToolDefinition = {
         before: row.fields,
         row: after,
         ...(appended.length ? { appended } : {}),
+        ...replacedOut,
         checks: plan.checks,
         ...(reingest ? { reingested_to_bharag: reingest.ok, bharag: reingest } : {}),
         audit_id: audit,

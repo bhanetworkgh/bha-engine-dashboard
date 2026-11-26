@@ -5,7 +5,7 @@
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const DIST = process.env.SERVER_DIST || path.join(__dirname, '../../server-dist');
-const { appendTo } = require(path.join(DIST, 'server/src/mcp/writeTools'));
+const { appendTo, replaceIn } = require(path.join(DIST, 'server/src/mcp/writeTools'));
 let n = 0;
 const ok = (m) => { n += 1; console.log('  ok  ' + m); };
 const e = '2026-11-24 (Jason): Decision - P1.0 FLAGSHIP is one in-house rack, not four.';
@@ -15,4 +15,12 @@ assert.deepEqual(appendTo('old note', [e]), { ok: true, value: ['old note', e] }
 assert.deepEqual(appendTo('', [e, 'x']), { ok: true, value: [e, 'x'] }); ok('an empty field takes every entry in order');
 assert.equal(appendTo(42, [e]).ok, false); ok('a number is refused, never guessed at');
 assert.equal(appendTo({ a: 1 }, [e]).ok, false); ok('an object is refused');
+// replace (26 Nov 2026, HSJ6): exact cuts applied to the field as it stands, never a rewrite from memory.
+const field = 'Intro. Sub-250µs target, see S3. Middle. Sub-250µs target, see S3. Austin Virtual pilot. End.';
+const r = replaceIn(field, [{ find: 'Sub-250µs target, see S3. ', with: '' }, { find: ' Austin Virtual pilot.', with: '' }]);
+assert.deepEqual(r, { ok: true, value: 'Intro. Middle. End.', counts: [2, 1] }); ok('every place a find appears is cut, and the rest stays byte for byte');
+assert.equal(replaceIn(field, [{ find: 'Austin', with: 'X' }]).value, field.replace('Austin', 'X')); ok('with swaps the text');
+const miss = replaceIn(field, [{ find: ' Austin Virtual pilot.', with: '' }, { find: 'not there', with: '' }]);
+assert.equal(miss.ok, false); assert.match(miss.message, /edit 2/); ok('a find that is not there refuses the whole call');
+assert.equal(replaceIn(['a'], [{ find: 'a', with: '' }]).ok, false); ok('a field that is not text is refused');
 console.log(`update-append: ${n} passed`);
