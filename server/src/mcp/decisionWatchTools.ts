@@ -314,12 +314,12 @@ function wholeWatch(w: ReturnType<typeof dw.show>) {
 export const classifyDecisionWatches: ToolDefinition = {
   name: 'classify_decision_watches',
   description:
-    'Check every Decision Watch against the closure SOP (SOP 81cd9c04-98fa-4f75-94a9-fed445fcce4e): each watch is closed_with_proof (its close names a link or a record id), superseded (folded into another DW-, named as successor), or open; closed_without_proof and escalated (the reminders ran out and nobody closed or superseded it) break the SOP. An open watch is also flagged stale when its linked loop or task is closed, its owner has left BHA, or nothing has moved for 14 days. Reads every watch, not a sample. Returns the counts per state, a summary per owner (follows_sop is true only with nothing breaking the SOP and nothing stale), and the watches that need action: stale open ones and the ones breaking the SOP, each with the reason, at most item_limit (default 40) with next_offset to page. owner_user_id scopes it to one person. include_compliant lists the compliant watches too. Read only: it changes no watch.',
+    'Check every Decision Watch against the closure SOP (SOP 81cd9c04-98fa-4f75-94a9-fed445fcce4e): each watch is closed_with_proof (its close names a link or a record id), superseded (folded into another DW-, named as successor), or open; closed_without_proof and escalated (the reminders ran out and nobody closed or superseded it) break the SOP. An open watch is also flagged stale when its linked loop or task is closed, its owner has left BHA, or nothing has moved for 14 days. Reads every watch, not a sample. Returns the counts per state, a summary per owner (follows_sop is true only with nothing breaking the SOP and nothing stale), and the watches that need action: stale open ones and the ones breaking the SOP, each with the reason, at most item_limit (default 150, enough for every one today) with next_offset to page; open a watch whole with list_decision_watches watch_id. owner_user_id scopes it to one person. include_compliant lists the compliant watches too. Read only: it changes no watch.',
   inputSchema: {
     type: 'object',
     properties: {
       owner_user_id: { type: 'string', description: 'Only this person\'s watches (Slack id).' },
-      item_limit: { type: 'number', description: 'Watches listed in items. Default 40, at most 100.' },
+      item_limit: { type: 'number', description: 'Watches listed in items. Default 150, at most 200.' },
       offset: { type: 'number', description: 'Items to skip: the last answer\'s next_offset.' },
       include_compliant: { type: 'boolean', description: 'List every watch, not only the ones that need action.' },
     },
@@ -331,7 +331,7 @@ export const classifyDecisionWatches: ToolDefinition = {
     const who = bare(str(args, 'owner_user_id')) || null;
     const r = await classifyAll({ owner_user_id: who });
     const needs = args.include_compliant === true ? r.rows : r.rows.filter((x) => !x.compliant || x.stale.length);
-    const limit = Math.min(Math.max(Math.floor(Number(args.item_limit) || 40), 1), 100);
+    const limit = Math.min(Math.max(Math.floor(Number(args.item_limit) || 150), 1), 200);
     const offset = Math.max(Math.floor(Number(args.offset) || 0), 0);
     const page = needs.slice(offset, offset + limit);
     const next = offset + page.length < needs.length ? offset + page.length : null;
@@ -344,15 +344,16 @@ export const classifyDecisionWatches: ToolDefinition = {
       items_count: needs.length,
       offset,
       next_offset: next,
+      // 26 Nov 2026: kept short (no link, the decision to 90 characters, one proof) so the whole needs-action list,
+      // about 110 watches, fits one page: Genie's first run saw items 1 to 40 and lost 40 to 89 to its own cut.
       items: page.map((x) => ({
-        watch_id: x.watch_id,
+        id: x.watch_id,
         owner: x.owner_name ?? x.owner_user_id,
         state: x.state,
         ...(x.stale.length ? { stale: x.stale } : {}),
         ...(x.successor ? { successor: x.successor } : {}),
-        ...(x.proof.length ? { proof: x.proof.slice(0, 3) } : {}),
-        decision: x.decision,
-        thread_link: x.thread_link,
+        ...(args.include_compliant === true && x.proof.length ? { proof: x.proof[0] } : {}),
+        what: x.decision.length > 90 ? `${x.decision.slice(0, 89)}…` : x.decision,
       })),
       note: next !== null ? `${needs.length} listed; ask again with offset ${next} for the rest.` : `Every watch ${args.include_compliant === true ? '' : 'needing action '}is listed.`,
     };
