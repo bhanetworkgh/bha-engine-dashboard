@@ -372,3 +372,47 @@ export async function retireOnSubmission(fields: Record<string, unknown> | null 
   }
   return out;
 }
+
+/**
+ * Approved means done (27 Nov 2026, Destiny, C0AUKTND199 1795737185.947809). Jason approved Ahad's 26 Nov log
+ * early, with its Codex incomplete, and the parked copy stayed pending: Ahad kept being reminded, completed it,
+ * the review ran again and a second card came up with no buttons, because the log was already approved. Now
+ * the moment a log is approved (Jason Status Approved or Input Added), any parked copy still waiting under the
+ * same Submission ID is voided. The approval and the pay decided with it stand; the builder is not asked again.
+ * Never throws and never fails the write that approved it; its outcome is on engine_writes.
+ */
+export const APPROVED_STATUSES = ['approved', 'input added'];
+export const APPROVAL_ACTOR = 'auto-retire-on-approval';
+
+export function isApproval(fields: Record<string, unknown> | null | undefined): boolean {
+  const v = fields && typeof fields['Jason Status'] === 'string' ? fields['Jason Status'].trim().toLowerCase() : '';
+  return APPROVED_STATUSES.includes(v);
+}
+
+export async function retireOnApproval(by: { submissionId?: string | null; rowId?: string | null }, fields: Record<string, unknown> | null | undefined): Promise<{ retired: string[]; failed: { row_id: string; error: string }[] }> {
+  const out = { retired: [] as string[], failed: [] as { row_id: string; error: string }[] };
+  try {
+    if (!isApproval(fields)) return out;
+    let sub = by.submissionId?.trim() || '';
+    if (!sub && by.rowId) {
+      const r = await query<{ s: string | null }>(`SELECT fields->>'Submission ID' AS s FROM engine_codex_submissions WHERE id::text = $1`, [by.rowId]);
+      sub = r.rows[0]?.s?.trim() || '';
+    }
+    if (!sub) return out;
+    const r = await query<HeldRow>(`${SELECT} WHERE lower(coalesce(fields->>'Status', '')) = $1 AND fields->>'Submission ID' = $2`, [LAYER0_PENDING, sub]);
+    for (const row of r.rows) {
+      try {
+        await voidLog({ ref: row.id, requester_user_id: null, reason: `This log was approved, so its parked copy is closed: the builder is not asked to complete it again and no second review card follows. The approval and the pay decided with it stand.`, actor: APPROVAL_ACTOR, auto: true });
+        out.retired.push(row.id);
+      } catch (e) {
+        out.failed.push({ row_id: row.id, error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    if (out.failed.length) {
+      await mirror.logWrite({ endpoint: `void:${APPROVAL_ACTOR}`, kind: 'layer0', method: 'PATCH', key_label: 'auto-retire', natural_id: sub, outcome: 'error', detail: `could not close ${out.failed.map((x) => `row ${x.row_id}: ${x.error}`).join('; ')}`.slice(0, 500) });
+    }
+  } catch (e) {
+    console.error(`[layer0 retire-on-approval] ${e instanceof Error ? e.message : String(e)}`);
+  }
+  return out;
+}

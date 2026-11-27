@@ -16482,3 +16482,16 @@ Files:     server/src/mcp/slackTools.ts (send_nudge: a former builder is skipped
 
 Effect:    A nudge to the team never waits. A nudge naming someone who has left goes to the rest
            and says who was skipped. The stranger guard still holds for anyone the engine does not know.
+
+## 2026-11-27 22:20 — An approved log closes its own parked copy
+
+Intent:    Jason approved Ahad's 26 Nov log early (Codex incomplete). The parked copy stayed pending, so
+           Ahad was reminded, completed it, the review ran again and a second card came up with no buttons
+           (C0AUKTND199 1795737185.947809).
+
+Files:     server/src/layer0Void.ts (retireOnApproval: when Jason Status becomes Approved or Input Added,
+           any parked copy still pending under the same Submission ID is voided through the void path;
+           never throws). server/src/engineWrite.ts (called after every codex POST and PATCH).
+
+Effect:    Once Jason approves, the builder is not asked again and no button-less card follows. The
+           approval and the pay decided with it stand. Proof waits on the next early approval.

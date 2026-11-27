@@ -21,7 +21,7 @@ import { query } from './pg';
 import * as mirror from './mirror';
 import * as store from './store';
 import { guardRejected } from './codexReject';
-import { guardVoided, retireOnSubmission } from './layer0Void';
+import { guardVoided, retireOnSubmission, retireOnApproval } from './layer0Void';
 
 /** The submission a whole-record codex write names, for the rejected-log guard. */
 function submissionOf(fields: unknown): string | null {
@@ -99,6 +99,8 @@ export async function postRecord(kind: mirror.MirrorKind, body: mirror.MirrorInp
     // A log that went through retires any parked copy of the same recording (2026-10-25).
     // Not awaited and never able to fail this write: its outcome is on engine_writes.
     if (kind === 'codex') void retireOnSubmission((body.fields as Record<string, unknown> | null) ?? null);
+    // An approved log closes its own parked copy (27 Nov 2026): never awaited, never able to fail this write.
+    if (kind === 'codex') void retireOnApproval({ submissionId: submissionOf(body.fields) }, (body.fields as Record<string, unknown> | null) ?? null);
     // One read-only record post in #bha-code-reviews per code review (never awaited, never able to fail this write).
     if (kind === 'codex') void codeReview.afterCodexWrite((body.fields as Record<string, unknown> | null) ?? null);
     // The row is stored; this dates the status it left the record in. It is
@@ -172,6 +174,8 @@ export async function patchRecord(
     await store.recordEngineWrite(kind, r.id);
     // A parked log just completed: its review notice goes (layer0Notice.ts). Never awaited, never able to fail this.
     if (kind === 'layer0' && layer0Notice.becameComplete(fields, r.changed)) void layer0Notice.deleteOnComplete(String(r.id)).catch(() => undefined);
+    // An approved log closes its own parked copy (27 Nov 2026): never awaited, never able to fail this write.
+    if (kind === 'codex') void retireOnApproval({ rowId: r.id ? String(r.id) : rowId }, fields);
     await mirror.logWrite({
       endpoint: ctx.endpoint,
       kind,
