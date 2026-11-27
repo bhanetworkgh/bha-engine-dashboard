@@ -16429,3 +16429,15 @@ Intent:     After the first fix, read_income_board itself answered about 101,000
 Files:      server/src/mcp/incomeBoardTools.ts, server/test/knowledge-capture.test.cjs, CLAUDE.md
 Fix:        compactForAgent: the default answer keeps every id, owner, status and date; titles and texts shortened, items already under blocking not repeated, knowledge capture as counts plus one short line per row, blocked rows without their links (link_rule says where each opens). Measured on the live read: 37,542 characters. detail: true returns the page's shape whole.
 Decision:   The page (/api/income-board) is unchanged; only the agent tool's answer is shaped.
+
+## 2026-11-27 13:55 — Hardik added to FORMER_BUILDERS before the first blocker round
+
+Intent:    The first Friday blocker alert round (BWQW) runs at 14:00 UTC and tags every
+           person a loop's "Blocked By" names. Hardik left BHA on 25 Nov but was not on
+           the former-builders list, so 8 open loops would have tagged him.
+
+Files:     server/src/sources.ts (FORMER_BUILDERS gains U0BKT6MAW2Y, comment updated).
+
+Effect:    Hardik is treated as gone everywhere the list is read: blocker alerts, the
+           evening report, Decision Watch owners, Genie's people list, the code-check gap
+           and Slack id checks. Pay records are untouched.

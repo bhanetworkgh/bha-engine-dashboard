@@ -173,8 +173,10 @@ export const SLACK_TO_BUILDER: Record<string, string> = {
  * the engine starts on its own may notify them: no lane defaults to them, the missing-log check never DMs
  * them, no Decision Watch can be opened on them, and an agent's DM to them waits for Destiny's or Jason's
  * approval. Kept here, the one place the roster lives, so every check reads the same list.
+ * Hardik (U0BKT6MAW2Y) added 27 Nov 2026 (Destiny): he left BHA on 25 Nov, and the first Friday blocker round
+ * would otherwise have tagged him in #bha-coordination for loops still naming him in "Blocked By".
  */
-export const FORMER_BUILDERS: readonly string[] = ['U0AD1V1D65N'];
+export const FORMER_BUILDERS: readonly string[] = ['U0AD1V1D65N', 'U0BKT6MAW2Y'];
 export const isFormerBuilder = (id: string | null | undefined): boolean => !!id && FORMER_BUILDERS.includes(id);
 
 /** Display names as the Codex Log's builder_name select spells them, lower-cased. */
