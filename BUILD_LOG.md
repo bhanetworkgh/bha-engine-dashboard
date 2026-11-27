@@ -16467,3 +16467,18 @@ Files:     server/src/mcp/mediaPostsTools.ts (markCardApproved falls back to
 Effect:    A dashboard Approve redraws its card through Media Twin — Approval Card in
            update mode, the same redraw a Slack click gets. A refusal is returned as
            card_error and logged, never hidden.
+
+## 2026-11-27 21:40 — Nudges go straight out; only a stranger waits (Jason: "when I ask you to nudge, just do it")
+
+Intent:    Genie's nudge to Destiny and Hardik (C0AFR4BH9UH 1795808630.957169) stopped on two
+           Approve cards (APR-1795808871869-T6MD, APR-1795808972782-1VKZ), because Hardik is a
+           former builder and one unknown name held everyone's DM.
+
+Files:     server/src/mcp/slackTools.ts (send_nudge: a former builder is skipped and named in
+           skipped_left_bha; everyone the engine knows is sent to at once; only people with no
+           Builder Profile wait on a card that carries just them, named in waiting_for).
+           server/src/mcp/agentDescriptions.ts (Genie and Bays are told the new answer).
+           server/test/approvals.test.cjs (case 16 rewritten for the split, plus a former-builder case).
+
+Effect:    A nudge to the team never waits. A nudge naming someone who has left goes to the rest
+           and says who was skipped. The stranger guard still holds for anyone the engine does not know.

@@ -130,7 +130,7 @@ function summarise(results: NudgeLine[]): string {
 export const sendNudge: ToolDefinition = {
   name: 'send_nudge',
   description:
-    'DM each person being nudged, one Slack DM each, and send a marked copy to everyone cc\'d. recipients: only the people the message is written to (U…/W… ids or <@U…> mentions, an array or one string separated by spaces or commas). cc: people who should see it but are not being asked anything (e.g. "cc Jason"); each gets the same text under a line saying who it was sent to, so a message written to Hardik never lands in Jason\'s DM looking like it was meant for him. Pass requester_user_id: if the person asking is also in recipients beside others, they are moved to cc and the answer says so (moved_to_cc). Anything that is not a Slack user id comes back as not_a_slack_user_id, never dropped. thread_link is appended to the text unless already in it. Returns {ok (every DM sent), sent_count, failed_count, results: [{recipient, user_id, role, ok, ts, error}], summary}; when any DM fails, reason is slack_refused and message carries Slack\'s own error for each. Empty text or no valid recipient: ok:false and nothing is sent. A DM to someone with no Builder Profile is not sent on an agent token: a person is asked in Slack first and the answer is ok:false, reason awaiting_approval (say so, do not retry). As the Bays bot, or as Genie\'s own bot when Genie calls it (no Bays in it); audited on engine_mcp_writes.',
+    'DM each person being nudged, one Slack DM each, and send a marked copy to everyone cc\'d. recipients: only the people the message is written to (U…/W… ids or <@U…> mentions, an array or one string separated by spaces or commas). cc: people who should see it but are not being asked anything (e.g. "cc Jason"); each gets the same text under a line saying who it was sent to, so a message written to Hardik never lands in Jason\'s DM looking like it was meant for him. Pass requester_user_id: if the person asking is also in recipients beside others, they are moved to cc and the answer says so (moved_to_cc). Anything that is not a Slack user id comes back as not_a_slack_user_id, never dropped. thread_link is appended to the text unless already in it. Returns {ok (every DM sent), sent_count, failed_count, results: [{recipient, user_id, role, ok, ts, error}], summary}; when any DM fails, reason is slack_refused and message carries Slack\'s own error for each. Empty text or no valid recipient: ok:false and nothing is sent. A builder who has left BHA is skipped (skipped_left_bha) and the rest still go. On an agent token, everyone the engine knows is sent to at once; only a person with no Builder Profile waits on an Approve card, and the answer is ok:false, reason awaiting_approval, naming waiting_for (say so, do not retry). As the Bays bot, or as Genie\'s own bot when Genie calls it (no Bays in it); audited on engine_mcp_writes.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -169,7 +169,6 @@ export const sendNudge: ToolDefinition = {
       // 20 Nov 2026 (Destiny): on Genie's token the DM is Genie's, made by Genie's own bot, with no Bays in it.
       const asGenie = deps.agent === 'genie';
       const sender = asGenie ? 'Genie' : 'Bays';
-      const ccText = `_Copy for you: ${sender} sent this to ${valid.map((u) => `<@${u}>`).join(', ')}._\n\n${text}`;
       const invalidLines: NudgeLine[] = invalid.map((x) => ({ recipient: x, user_id: '', ok: false, ts: '', channel: '', error: 'not_a_slack_user_id' }));
 
       if (!body || !valid.length) {
@@ -182,7 +181,19 @@ export const sendNudge: ToolDefinition = {
           answer: { ok: false, reason: !body ? 'no_message_text' : 'no_valid_recipients', sent_count: 0, failed_count: invalidLines.length, results: invalidLines, summary },
         };
       }
-      const unknown = await unknownRecipients([...valid, ...ccIds]);
+      // 27 Nov 2026 (Jason, C0AFR4BH9UH 1795808630.957169: "when I ask you to nudge, just do it"):
+      // a nudge that named one person off the team used to hold everyone's DM on one card. Now
+      // a builder who has left BHA is skipped and said so, the team gets theirs at once, and only
+      // a person the engine does not know waits on the card.
+      const former = [...valid, ...ccIds].filter((u) => isFormerBuilder(u));
+      const sendTo = valid.filter((u) => !former.includes(u));
+      const copyTo = ccIds.filter((u) => !former.includes(u));
+      const skippedLines: NudgeLine[] = former.map((u) => ({ recipient: `<@${u}>`, user_id: u, role: valid.includes(u) ? 'recipient' : 'cc', ok: false, ts: '', channel: '', error: 'no_longer_with_bha' }));
+      const unknown = await unknownRecipients([...sendTo, ...copyTo]);
+      const held = unknown.length && approvals.needsApproval() ? unknown : [];
+      const nowTo = sendTo.filter((u) => !held.includes(u));
+      const nowCc = copyTo.filter((u) => !held.includes(u));
+      const ccText = `_Copy for you: ${sender} sent this to ${sendTo.map((u) => `<@${u}>`).join(', ')}._\n\n${text}`;
       if (args.dry_run === true) {
         return {
           outcome: 'dry_run',
@@ -191,34 +202,33 @@ export const sendNudge: ToolDefinition = {
           answer: {
             ok: invalid.length === 0,
             dry_run: true,
-            would_send_to: valid,
-            would_copy: ccIds,
+            would_send_to: nowTo,
+            would_copy: nowCc,
             moved_to_cc: movedToCc,
+            skipped_left_bha: former,
             not_in_builder_profiles: unknown,
-            would_wait_for_approval: unknown.length > 0 && approvals.needsApproval(),
+            would_wait_for_approval: held.length > 0,
+            would_wait_for: held,
             not_a_slack_user_id: invalid,
             text,
             slack_configured: slack.slackConfigured(),
-            summary: `Would send ${valid.length} DM${valid.length === 1 ? '' : 's'}${ccIds.length ? ` and ${ccIds.length} marked cop${ccIds.length === 1 ? 'y' : 'ies'}` : ''}${invalid.length ? `; ${invalid.length} recipient${invalid.length === 1 ? ' is' : 's are'} not a Slack user id` : ''}.`,
+            summary: `Would send ${nowTo.length} DM${nowTo.length === 1 ? '' : 's'}${nowCc.length ? ` and ${nowCc.length} marked cop${nowCc.length === 1 ? 'y' : 'ies'}` : ''}${former.length ? `; ${former.length} skipped, no longer with BHA` : ''}${held.length ? `; ${held.length} would wait for Approve` : ''}${invalid.length ? `; ${invalid.length} recipient${invalid.length === 1 ? ' is' : 's are'} not a Slack user id` : ''}.`,
           },
         };
       }
-      if (!asGenie && !slack.slackConfigured()) return { outcome: 'refused', detail: 'not configured', target: valid.join(','), answer: notConfigured() };
-      if (unknown.length && approvals.needsApproval()) {
-        const asked = approvals.pendingAnswer(
-          await approvals.request({
-            tool: 'send_nudge',
-            args: { ...args, destination: [...valid, ...ccIds].join(',') },
-            target: [...valid, ...ccIds].join(','),
-            summary: `send a DM as ${sender} to ${unknown.map((u) => `<@${u}>`).join(', ')}, who ${unknown.length === 1 ? 'has' : 'have'} no Builder Profile${valid.length > unknown.length ? ` (and to ${valid.length - unknown.length} known team member${valid.length - unknown.length === 1 ? '' : 's'})` : ''}. Message: "${text.slice(0, 400)}"`,
-          }),
-        );
-        return { ...asked, target: valid.join(',') };
+      if (!nowTo.length && !nowCc.length && !held.length) {
+        return {
+          outcome: 'refused',
+          detail: `no_one_left_to_nudge (${former.length} no longer with BHA)`,
+          target: valid.join(','),
+          answer: { ok: false, reason: 'no_longer_with_bha', sent_count: 0, failed_count: 0, skipped_left_bha: former, results: [...skippedLines, ...invalidLines], summary: `Nothing was sent: ${former.map((u) => `<@${u}>`).join(', ')} ${former.length === 1 ? 'is' : 'are'} no longer with BHA.` },
+        };
       }
+      if (!asGenie && !slack.slackConfigured()) return { outcome: 'refused', detail: 'not configured', target: valid.join(','), answer: notConfigured() };
 
       // One post per recipient, in order. A refusal for one never stops the rest.
       const results: NudgeLine[] = [];
-      const sends: Array<[string, 'recipient' | 'cc']> = [...valid.map((u) => [u, 'recipient'] as [string, 'recipient']), ...ccIds.map((u) => [u, 'cc'] as [string, 'cc'])];
+      const sends: Array<[string, 'recipient' | 'cc']> = [...nowTo.map((u) => [u, 'recipient'] as [string, 'recipient']), ...nowCc.map((u) => [u, 'cc'] as [string, 'cc'])];
       for (const [u, role] of sends) {
         const msg = role === 'cc' ? ccText : text;
         const r: { ok: boolean; ts?: unknown; channel?: unknown; error?: unknown } = asGenie
@@ -238,22 +248,44 @@ export const sendNudge: ToolDefinition = {
           error: r.ok ? '' : String(r.error || 'no confirmation from Slack'),
         });
       }
-      results.push(...invalidLines);
+      // Only the people the engine does not know wait on a card; it carries just them.
+      let asked: { outcome: string; detail: string; answer: Record<string, unknown> } | null = null;
+      if (held.length) {
+        const heldTo = held.filter((u) => sendTo.includes(u));
+        const heldCc = held.filter((u) => copyTo.includes(u));
+        asked = approvals.pendingAnswer(
+          await approvals.request({
+            tool: 'send_nudge',
+            args: { ...args, recipients: heldTo.length ? heldTo : heldCc, cc: heldTo.length && heldCc.length ? heldCc : undefined, destination: held.join(',') },
+            target: held.join(','),
+            summary: `send a DM as ${sender} to ${held.map((u) => `<@${u}>`).join(', ')}, who ${held.length === 1 ? 'has' : 'have'} no Builder Profile${sends.length ? ` (the ${sends.length} known team member${sends.length === 1 ? ' was' : 's were'} sent it already)` : ''}. Message: "${text.slice(0, 400)}"`,
+          }),
+        );
+      }
+      results.push(...skippedLines, ...invalidLines);
       const sent = results.filter((r) => r.ok).length;
-      const failed = results.length - sent;
+      const failed = results.filter((r) => !r.ok && r.error !== 'no_longer_with_bha').length;
+      const lines = summarise(results.filter((r) => r.error !== 'no_longer_with_bha'));
+      const summary = [
+        lines,
+        former.length ? `Skipped ${former.map((u) => `<@${u}>`).join(', ')}: no longer with BHA.` : '',
+        held.length ? `${held.map((u) => `<@${u}>`).join(', ')} ${held.length === 1 ? 'waits' : 'wait'} on an Approve card${asked?.answer.card_link ? ` (${asked.answer.card_link})` : ''}.` : '',
+      ].filter(Boolean).join(' ');
       return {
-        outcome: sent ? 'applied' : 'failed',
-        detail: `${sent} sent, ${failed} failed${failed ? `: ${results.filter((r) => !r.ok).map((r) => `${r.user_id || r.recipient} ${r.error}`).join('; ')}` : ''}`,
+        outcome: sent ? 'applied' : asked ? asked.outcome : 'failed',
+        detail: `${sent} sent, ${failed} failed${failed ? `: ${results.filter((r) => !r.ok && r.error !== 'no_longer_with_bha').map((r) => `${r.user_id || r.recipient} ${r.error}`).join('; ')}` : ''}${former.length ? `; skipped ${former.join(',')} (left BHA)` : ''}${asked ? `; held ${held.join(',')}: ${asked.detail}` : ''}`,
         target: valid.join(','),
         answer: {
-          ok: failed === 0,
-          ...(failed ? { reason: 'slack_refused', message: summarise(results) } : {}),
+          ...(asked ? asked.answer : {}),
+          ok: failed === 0 && !asked,
+          ...(failed ? { reason: 'slack_refused', message: lines } : asked ? { reason: 'awaiting_approval', waiting_for: held } : {}),
           sent_count: sent,
           failed_count: failed,
           posted_as: sender,
+          ...(former.length ? { skipped_left_bha: former } : {}),
           ...(movedToCc.length ? { moved_to_cc: movedToCc, note: `${movedToCc.map((u) => `<@${u}>`).join(', ')} asked for this nudge, so they got a marked copy rather than a DM written to someone else.` } : {}),
           results,
-          summary: summarise(results),
+          summary,
         },
       };
     }),

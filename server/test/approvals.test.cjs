@@ -450,12 +450,26 @@ const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(s.addr
     const held = await asAgent('send_nudge', { recipients: [known, stranger], text: `Guard test ${T}: a stranger.` });
     assert.equal(held.ok, false);
     assert.equal(held.reason, 'awaiting_approval', JSON.stringify(held));
-    assert.equal(seen.posts.length, p + 1, 'only the card is posted');
-    assert.ok(!seen.posts.slice(p).some((x) => x.channel === stranger || x.channel === known), 'nobody is sent the DM before a person approves');
-    assert.ok(cardText(seen.posts[p].blocks).includes(`<@${stranger}>`));
+    // 27 Nov 2026 (Jason): the known builder gets it at once; only the stranger waits on the card.
+    assert.deepEqual(held.waiting_for, [stranger]);
+    assert.equal(held.sent_count, 1);
+    assert.deepEqual(seen.posts.slice(p).filter((x) => x.text && x.text.includes(`Guard test ${T}`)).map((x) => x.channel), [known], 'the known builder is sent to before anyone approves');
+    assert.ok(!seen.posts.slice(p).some((x) => x.channel === stranger), 'the stranger is not sent the DM before a person approves');
+    const card = seen.posts.slice(p).find((x) => x.blocks && cardText(x.blocks).includes(`<@${stranger}>`));
+    assert.ok(card, 'a card names the stranger');
+    assert.ok(!cardText(card.blocks).includes(`to <@${known}>`), 'the card carries only the stranger');
     const done = await approvals.decide({ approval_id: held.approval_id, decision: 'approve', user_id: DESTINY });
     assert.equal(done.body.ok, true, JSON.stringify(done.body));
-    assert.deepEqual(seen.posts.filter((x) => [known, stranger].includes(x.channel) && x.text && x.text.includes(`Guard test ${T}`)).map((x) => x.channel), [known, stranger], 'Approve sends it once to each');
+    assert.deepEqual(seen.posts.filter((x) => [known, stranger].includes(x.channel) && x.text && x.text.includes(`Guard test ${T}`)).map((x) => x.channel), [known, stranger], 'Approve sends it once to the stranger, and the known builder is not sent it twice');
+    // A builder who has left BHA is skipped, and the rest go with no card.
+    p = seen.posts.length;
+    const HARDIK = 'U0BKT6MAW2Y';
+    const left = await asAgent('send_nudge', { recipients: [known, HARDIK], text: `Guard test ${T}: one has left.` });
+    assert.equal(left.ok, true, JSON.stringify(left));
+    assert.deepEqual(left.skipped_left_bha, [HARDIK]);
+    assert.deepEqual(seen.posts.slice(p).map((x) => x.channel), [known], 'only the current builder is sent to, and no card is posted');
+    const onlyLeft = await asAgent('send_nudge', { recipients: [HARDIK], text: 'Guard test: only someone who has left.' });
+    assert.equal(onlyLeft.reason, 'no_longer_with_bha', JSON.stringify(onlyLeft));
     p = seen.posts.length;
     const person = await asPerson('send_nudge', { recipients: [stranger], text: 'Guard test: a person asking.' });
     assert.equal(person.ok, true);
@@ -466,7 +480,7 @@ const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(s.addr
     await approvals.decide({ approval_id: file.approval_id, decision: 'deny', user_id: JASON });
     await query(`DELETE FROM engine_builder_profiles WHERE natural_id = $1`, [known]);
     await query(`DELETE FROM engine_approvals WHERE target LIKE $1`, [`%${stranger}%`]);
-    ok('send_nudge and post_file: a known builder is sent to at once, anyone else waits for Approve, and a person is never gated');
+    ok('send_nudge and post_file: a known builder is sent to at once, only a stranger waits for Approve, someone who has left is skipped, and a person is never gated');
   }
 
   /* 17 — the channel-post guard (2026-10-11) */
