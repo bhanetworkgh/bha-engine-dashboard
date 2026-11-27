@@ -16453,3 +16453,17 @@ Files:     server/src/blockerAlerts.ts (names() adds BUILDER_LABELS by Slack id)
 
 Effect:    The next tick today posts Jegan's round once (the per-person-per-day claim
            still holds), and every later round tags him.
+
+## 2026-11-27 14:30 — Dashboard Approve redraws Media Twin cards as the Media Twin bot (Q894)
+
+Intent:    approve_media_post approved and posted, but every card answered cant_update_message:
+           the cards are the Media Twin bot's and the dashboard edits as Bays.
+
+Files:     server/src/mcp/mediaPostsTools.ts (markCardApproved falls back to
+           redrawAsMediaTwin on cant_update_message; each result says card_redrawn_by).
+           n8n Media Twin — Card Redraw Runner (65HoNKIXyorKXLlt) gains POST
+           /webhook/media-twin-card-redraw behind the inbound key, published 9566206d.
+
+Effect:    A dashboard Approve redraws its card through Media Twin — Approval Card in
+           update mode, the same redraw a Slack click gets. A refusal is returned as
+           card_error and logged, never hidden.

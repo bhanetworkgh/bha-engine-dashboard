@@ -9,6 +9,7 @@
  * `edit_media_post` — a person's exact words on a draft still waiting for its decision. Write connection, no agent's scope.
  */
 import * as posts from '../mediaPosts';
+import * as n8n from '../n8n';
 import * as slack from '../slack';
 import { auditClose, auditOpen } from './writeTools';
 import type { ToolDefinition } from './tools';
@@ -196,7 +197,35 @@ export const setMediaPostPattern = gateTool(
  * platform live, its link landing in the card's thread. Then the card is rewritten without its buttons and says who
  * approved it and when; a card Slack will not rewrite never undoes the approval and the answer says so.
  */
-async function markCardApproved(channel: string | null, ts: string | null, byName: string): Promise<{ ok: boolean; error?: string }> {
+const REDRAW_PATH = process.env.MEDIA_CARD_REDRAW_PATH?.trim() || '/webhook/media-twin-card-redraw';
+
+/**
+ * Media Twin cards are posted by the Media Twin bot, and this dashboard holds no Media Twin token, so Slack refuses
+ * Bays' chat.update with cant_update_message (27 Nov 2026, Q894). The card is then redrawn as the Media Twin bot by
+ * n8n `Media Twin — Card Redraw Runner` (POST /webhook/media-twin-card-redraw, inbound key), through Media Twin —
+ * Approval Card in update mode, the same redraw a Slack click gets. A refusal there comes back as the error.
+ */
+export async function redrawAsMediaTwin(postId: string, platform: string, channel: string, ts: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const key = process.env.DASHBOARD_INBOUND_KEY?.trim();
+    if (!key) return { ok: false, error: 'DASHBOARD_INBOUND_KEY is not set' };
+    const r = await fetch(`${n8n.n8nHost()}${REDRAW_PATH}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-dashboard-key': key },
+      body: JSON.stringify({ post_id: postId, channel, cards: [{ platform, ts }] }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    const text = await r.text();
+    if (!r.ok) return { ok: false, error: `redraw runner answered ${r.status}: ${text.slice(0, 200)}` };
+    const body = JSON.parse(text) as Array<{ redrawn?: number }> | { redrawn?: number };
+    const redrawn = Array.isArray(body) ? body[0]?.redrawn : body.redrawn;
+    return redrawn === 1 ? { ok: true } : { ok: false, error: `redraw runner redrew ${String(redrawn ?? 'nothing')}: ${text.slice(0, 200)}` };
+  } catch (e) {
+    return { ok: false, error: `redraw runner unreachable: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
+async function markCardApproved(channel: string | null, ts: string | null, byName: string, postId: string, platform: string): Promise<{ ok: boolean; error?: string; via?: string }> {
   if (!channel || !ts) return { ok: false, error: 'no_card' };
   const read = await slack.botCall('conversations.replies', { channel, ts, limit: 1, inclusive: true }, 'form');
   const msg = (read.ok && Array.isArray(read.messages) ? (read.messages as Array<Record<string, unknown>>)[0] : null) ?? null;
@@ -206,7 +235,11 @@ async function markCardApproved(channel: string | null, ts: string | null, byNam
   const blocks = (Array.isArray(msg.blocks) ? (msg.blocks as Array<Record<string, unknown>>) : []).filter((b) => b.type !== 'actions');
   blocks.push({ type: 'section', text: { type: 'mrkdwn', text: line } });
   const up = await slack.botCall('chat.update', { channel, ts, text: `${String(msg.text ?? '')}\n${line}`.trim(), blocks });
-  return up.ok ? { ok: true } : { ok: false, error: String(up.error ?? 'update_failed') };
+  if (up.ok) return { ok: true, via: 'bays' };
+  if (up.error !== 'cant_update_message') return { ok: false, error: String(up.error ?? 'update_failed') };
+  const redraw = await redrawAsMediaTwin(postId, platform, channel, ts);
+  if (!redraw.ok) console.error(`[media-posts] card for ${postId} ${platform} not redrawn: ${redraw.error}`);
+  return redraw.ok ? { ok: true, via: 'media_twin' } : { ok: false, error: `cant_update_message, then ${redraw.error}` };
 }
 
 export const approveMediaPost: ToolDefinition = {
@@ -246,8 +279,8 @@ export const approveMediaPost: ToolDefinition = {
       try {
         const out = await posts.decide(postId, { platform, decision: 'approve', by: requester, via: 'mcp:approve_media_post' });
         const p = out.post.platforms[platform as posts.Platform];
-        const card = await markCardApproved(out.post.slack_channel, p?.slack_ts ?? null, posts.APPROVERS[requester]);
-        results.push({ platform, approved: true, auto_post: out.auto_post, card_updated: card.ok, ...(card.ok ? {} : { card_error: card.error }) });
+        const card = await markCardApproved(out.post.slack_channel, p?.slack_ts ?? null, posts.APPROVERS[requester], postId, platform);
+        results.push({ platform, approved: true, auto_post: out.auto_post, card_updated: card.ok, ...(card.ok ? { card_redrawn_by: card.via } : { card_error: card.error }) });
       } catch (e) {
         if (e instanceof posts.MediaPostError) results.push({ platform, approved: false, reason: e.reason, message: e.message });
         else results.push({ platform, approved: false, reason: 'failed', message: String(e) });
