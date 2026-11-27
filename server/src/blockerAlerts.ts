@@ -92,6 +92,22 @@ export function byBlocker(rows: BlockedLoop[], people: Person[]): Map<string, { 
   return out;
 }
 
+/**
+ * The loops whose "Blocked By" names nobody the round can tag (27 Nov 2026, after the first round missed Jegan
+ * without a word). Each comes back with the "who" parts that matched no one, so a name the matcher does not know,
+ * or a person who has left, is surfaced instead of found by reading the posts. Pure.
+ */
+export function unmatched(rows: BlockedLoop[], people: Person[]): { loop_id: string; who: string[] }[] {
+  const out: { loop_id: string; who: string[] }[] = [];
+  for (const row of rows) {
+    if (!String(row.blocked_by ?? '').trim()) continue;
+    if (blockersNamed(row.blocked_by, people).length) continue;
+    const who = String(row.blocked_by).split(';').map((c) => whoPart(c).who.trim()).filter(Boolean);
+    out.push({ loop_id: row.loop_id, who: [...new Set(who)] });
+  }
+  return out;
+}
+
 const cut = (s: string | null | undefined, n: number) => {
   const t = String(s ?? '').replace(/\s+/g, ' ').trim();
   return t.length > n ? `${t.slice(0, n - 1)}…` : t;
@@ -129,7 +145,15 @@ async function people(): Promise<Person[]> {
 export async function round(now = new Date(), opts: { force?: boolean } = {}): Promise<{ due: boolean; posted: number; skipped: number; failed: string[] }> {
   if (!opts.force && !isDue(now)) return { due: false, posted: 0, skipped: 0, failed: [] };
   const day = now.toISOString().slice(0, 10);
-  const grouped = byBlocker((await blockers(now)).rows, await people());
+  const rows = (await blockers(now)).rows;
+  const folks = await people();
+  const grouped = byBlocker(rows, folks);
+  // A loop waiting on a name nobody matches is raised once a day as its own event, never dropped quietly.
+  const missed = unmatched(rows, folks);
+  if (missed.length) {
+    const r = await record({ event_type: 'blocker_alert_unmatched', subject_id: `blocker_round:${day}`, lane: 'ENGINE', actor: 'blocker-alerts', detail: { loops: missed.length, unmatched: missed.slice(0, 200) }, dedupe_key: `blocker_unmatched:${day}` });
+    if (r.recorded) console.warn(`[blocker-alerts] ${missed.length} blocked loop(s) name no one the round can tag: ${missed.slice(0, 10).map((m) => `${m.loop_id} (${m.who.join(', ')})`).join('; ')}`);
+  }
   let posted = 0;
   let skipped = 0;
   const failed: string[] = [];

@@ -78,6 +78,15 @@ assert.deepEqual(realWho('Jegan: the v0.1 vFarm mechanical spec'), ['Jeganathan'
 assert.deepEqual(realWho('LOOP-1794856525804-H9KF (Jegan): the Stage 1 run on the production rack'), ['Jeganathan']);
 assert.deepEqual(realWho('Jegan and Jason Bays (ruling on the 3NBE scope conflict, commit 9b81f568)'), ['Jason Bays', 'Jeganathan']);
 assert.deepEqual(realWho('Jeganathan: the canonical config'), ['Jeganathan']);
+// 27 Nov 2026: a loop whose Blocked By names nobody the round can tag is raised, not dropped.
+const miss = b.unmatched([
+  { loop_id: 'LOOP-1-AAAA', blocked_by: 'Jegan: the spec' },
+  { loop_id: 'LOOP-2-BBBB', blocked_by: 'Hardik: the CAD handover; Vendor quote (external)' },
+  { loop_id: 'LOOP-3-CCCC', blocked_by: '' },
+], REAL);
+assert.deepEqual(miss.map((m) => m.loop_id), ['LOOP-2-BBBB']);
+assert.deepEqual(miss[0].who, ['Hardik', 'Vendor quote']);
+ok('a loop waiting on a name nobody matches is raised with that name');
 ok('Jegan is tagged by his short name though his profile says Jeganathan');
 
 console.log(`blocker alerts: ${passed} passed`);
