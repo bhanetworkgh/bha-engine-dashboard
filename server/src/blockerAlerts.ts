@@ -19,7 +19,7 @@ import { postAsGenie } from './genieSlack';
 import { readSince } from './decisionWatch';
 import { patchRecord } from './engineWrite';
 import { blockers, type BlockedLoop } from './incomeBoard';
-import { FORMER_BUILDERS } from './sources';
+import { BUILDER_LABELS, FORMER_BUILDERS, SLACK_TO_BUILDER } from './sources';
 import * as timers from './timers';
 
 export const RULE = {
@@ -57,7 +57,15 @@ export function whoPart(clause: string): { who: string; what: string } {
   return { who: NAME_LIST.test(paren.trim()) ? `${head} ${paren}` : head, what: c };
 }
 
-const names = (p: Person) => [p.name, p.name.split(/\s+/)[0]].filter((n) => n.length > 2);
+/**
+ * The names a "Blocked By" clause may use for a person: the profile name, its first word, and the short name the
+ * engine knows them by (BUILDER_LABELS). The short name matters for Jegan: his profile says "Jeganathan" while
+ * every loop says "Jegan", so the first round on 27 Nov tagged him for none of the 39 loops waiting on him.
+ */
+const names = (p: Person) => {
+  const label = BUILDER_LABELS[SLACK_TO_BUILDER[p.id] ?? ''];
+  return [...new Set([p.name, p.name.split(/\s+/)[0], label].filter((n): n is string => !!n && n.length > 2))];
+};
 const named = (p: Person, who: string) => names(p).some((n) => new RegExp(`\\b${esc(n)}\\b`, 'i').test(who));
 
 /** The people a "Blocked By" text is waiting on, one ";" clause at a time. Pure. */

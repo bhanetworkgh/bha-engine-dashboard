@@ -16441,3 +16441,15 @@ Files:     server/src/sources.ts (FORMER_BUILDERS gains U0BKT6MAW2Y, comment upd
 Effect:    Hardik is treated as gone everywhere the list is read: blocker alerts, the
            evening report, Decision Watch owners, Genie's people list, the code-check gap
            and Slack id checks. Pay records are untouched.
+
+## 2026-11-27 14:10 — Blocker alerts match Jegan by his short name
+
+Intent:    The first Friday blocker round (14:03 UTC, events 222690 to 222693) tagged Kavin,
+           Jason, Destiny and Ahad, but not Jegan: his Builder Profile name is "Jeganathan"
+           and the 39 open loops waiting on him say "Jegan".
+
+Files:     server/src/blockerAlerts.ts (names() adds BUILDER_LABELS by Slack id),
+           server/test/blocker-alerts.test.cjs (a case with his real profile name).
+
+Effect:    The next tick today posts Jegan's round once (the per-person-per-day claim
+           still holds), and every later round tags him.

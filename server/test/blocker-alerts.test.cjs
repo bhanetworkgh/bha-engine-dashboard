@@ -70,4 +70,14 @@ assert.equal(b.isDue(new Date('2026-11-27T18:00:00Z')), true); // Friday
 assert.equal(b.isDue(new Date('2026-11-24T15:00:00Z')), false); // Tuesday
 ok('due Monday and Friday from 14:00 UTC only');
 
+// 27 Nov 2026: Jegan's Builder Profile name is "Jeganathan", but loops say "Jegan". The first round tagged him for
+// none of the 39 loops waiting on him. His short name (BUILDER_LABELS, by his Slack id) now counts too.
+const REAL = [{ id: 'U0AF011R821', name: 'Jeganathan' }, { id: 'U0A9V97949F', name: 'Jason Bays' }];
+const realWho = (t) => b.blockersNamed(t, REAL).map((p) => p.name).sort();
+assert.deepEqual(realWho('Jegan: the v0.1 vFarm mechanical spec'), ['Jeganathan']);
+assert.deepEqual(realWho('LOOP-1794856525804-H9KF (Jegan): the Stage 1 run on the production rack'), ['Jeganathan']);
+assert.deepEqual(realWho('Jegan and Jason Bays (ruling on the 3NBE scope conflict, commit 9b81f568)'), ['Jason Bays', 'Jeganathan']);
+assert.deepEqual(realWho('Jeganathan: the canonical config'), ['Jeganathan']);
+ok('Jegan is tagged by his short name though his profile says Jeganathan');
+
 console.log(`blocker alerts: ${passed} passed`);
