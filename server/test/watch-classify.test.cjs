@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const DIST = process.env.SERVER_DIST || path.join(__dirname, '../../server-dist');
 process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://unused@127.0.0.1:1/unused';
-const { classify, refsIn, summarise } = require(path.join(DIST, 'server/src/watchClassify'));
+const { classify, refsIn, summarise, laneOf, laneGroup, heirFor, needsOwner, byLane } = require(path.join(DIST, 'server/src/watchClassify'));
 const { idList } = require(path.join(DIST, 'server/src/mcp/decisionWatchTools'));
 const { heldNote, realProblem } = require(path.join(DIST, 'server/src/decisionWatch'));
 
@@ -49,4 +49,39 @@ assert.equal(heldNote('held: Destiny Arupi was reminded by DW-1'), 'held: Destin
 assert.equal(realProblem('held: pacing'), null);
 assert.equal(realProblem('conversations.replies as Bays: thread_not_found'), 'conversations.replies as Bays: thread_not_found');
 console.log('  ok  an id list, and pacing is held, not a problem');
+
+// Lanes and the aggregate (28 Nov 2026).
+assert.equal(laneOf('CST', 'MEDIA'), 'CST');
+assert.equal(laneOf(null, 'vfarm_hardware'), 'VFARM_HARDWARE');
+assert.equal(laneOf(null, null), 'unrouted');
+assert.equal(laneOf('UNASSIGNED', null), 'unrouted');
+assert.equal(laneGroup('KIOSK'), 'vFarm');
+assert.equal(laneGroup('GENIE'), 'Engine');
+assert.equal(laneGroup('unrouted'), 'unrouted');
+const viaLoop = classify(w({ lane: null, record: { kind: 'loops', id: 'LOOP-1-ABCD' } }), false, now, 'CST');
+assert.equal(viaLoop.lane, 'CST');
+assert.equal(viaLoop.lane_group, 'CST');
+console.log('  ok  a watch takes its own lane, else its record\'s, and none or UNASSIGNED is unrouted, never guessed');
+
+const lanes = byLane([
+  classify(w({ lane: 'CST', status: 'escalated' }), null, now),
+  classify(w({ lane: 'CST' }), null, now),
+  classify(w({ lane: null }), null, now),
+  classify(w({ lane: 'MEDIA', status: 'answered', close_reason: 'https://x' }), null, now),
+]);
+assert.deepEqual(lanes.map((l) => l.lane_group), ['CST', 'Media', 'unrouted']);
+assert.deepEqual({ ...lanes[0], lanes: undefined }, { lane_group: 'CST', total: 2, open: 1, breaking_sop: 1, stale_open: 0, lanes: undefined });
+assert.equal(summarise(lanes.length ? [classify(w({ lane: 'CST' }), null, now)] : []).lanes[0].lane_group, 'CST');
+console.log('  ok  the lane aggregate counts total, open, breaking and stale per group, worst first and unrouted last');
+
+assert.equal(heirFor('CST'), 'U0AC6RFNP3P');
+assert.equal(heirFor('VFARM_HARDWARE'), 'U0AF011R821');
+assert.equal(heirFor('MEDIA'), 'U0AEW3TBYH1');
+assert.equal(heirFor('unrouted'), 'U0AEW3TBYH1');
+assert.equal(needsOwner('open'), true);
+assert.equal(needsOwner('escalated'), true);
+assert.equal(needsOwner('closed_without_proof'), true);
+assert.equal(needsOwner('closed_with_proof'), false);
+assert.equal(needsOwner('superseded'), false);
+console.log('  ok  a leaver\'s watch goes to its lane owner, else Destiny, and only open or SOP-breaking watches move');
 console.log('watch-classify: all passed');

@@ -16587,3 +16587,11 @@ Files:      server/src/excusedSessions.ts, server/src/mcp/excusedSessionTools.ts
 Problem:    the SOP was logged on 27 Nov (8996e4da) but nothing read it: an excused day still counted as a missed log and still carried a watch penalty. Genie could not wire it.
 Fix:        one row per builder per UTC day tied to a hard-block incident opened in the ledger; Destiny or Jason decides (CHECK); codexGap counts the gap from the end of an approved day; watchPenalty.judge answers excused that day when the approver suppressed it; the incident is left out of every engine-fault count as hard_block.
 Decision:   no pay change was needed: an excused session is not a Codex log, so it never reaches the pay ledger and pays 0% by construction. The incident uses subsystem CODEX, already registered on the Bays lane, rather than a new one that BHARAG would refuse until registered.
+
+
+## 2026-11-28 15:20 — Decision Watch: owner reads lead with the SOP score, a lane aggregate, a leaver's watches handed over
+Intent:     Jason (C0ASMPYQLG3 1795642017.292079) approved three things: owner reads show the closure-SOP classification and action list by default, a lane aggregate with the no-lane hole fixed, and watches of people who left moved to active owners. Genie could do none of them: no default, no lane view, and no way to change a watch's owner.
+Files:      server/src/watchClassify.ts, server/src/decisionWatch.ts, server/src/mcp/decisionWatchTools.ts, server/src/mcp/agentDescriptions.ts, server/test/watch-classify.test.cjs, CLAUDE.md
+Problem:    168 watches carry no lane; 34 of them can take it from their linked loop. Hardik left (31 open, 5 escalated, more closed without proof) and Kaiqi's closed-without-proof ones still sat under him.
+Fix:        laneOf/laneGroup/byLane in the classifier (own lane, else the record's, else unrouted); `sop` block on an owner read; reassign() plus reassign_decision_watches, preview then confirm, lane owner else Destiny.
+Decision:   Only watches that need action move (open, closed without proof, escalated); a compliant closed watch is history and keeps its owner. The heir is the lane owner because that is who owns the work now (Destiny, 28 Nov: "up to you").

@@ -236,7 +236,7 @@ export function searchWatches<W extends { watch_id: string; decision?: string | 
 export const listDecisionWatches: ToolDefinition = {
   name: 'list_decision_watches',
   description:
-    'List the decisions being watched: open ones first (soonest reminder first), then the closed ones. Every watch is read, however many are held. status is watching, answered (the owner replied), moved (the linked loop or task was closed), escalated (the reminders ran out and Jason and Destiny were told) or cancelled. "problem" is a real fault, e.g. a thread no bot can read; "held" is only the daily pacing (one reminder per person per 12 hours), not a fault. Filter with owner_user_id, status or open_only, a list of watch_ids, or find a watch by what it is about with search (best match first). Page with limit (default 15, at most 100) and offset: the answer gives count (every watch the filters matched), returned and next_offset, so read on with next_offset until it is null. Each watch comes back short (decision and next step clipped, no history); full: true returns each whole except its history, and watch_id returns one watch whole, with how_it_moves and its history. To check watches against the closure SOP (closed with proof, superseded, or open, and which are stale), use classify_decision_watches. Before telling anyone what a watch will do, read its how_it_moves and say it as written.',
+    'List the decisions being watched: open ones first (soonest reminder first), then the closed ones. Every watch is read, however many are held. status is watching, answered (the owner replied), moved (the linked loop or task was closed), escalated (the reminders ran out and Jason and Destiny were told) or cancelled. "problem" is a real fault, e.g. a thread no bot can read; "held" is only the daily pacing (one reminder per person per 12 hours), not a fault. Filter with owner_user_id, status or open_only (an owner read, which is what my watches means, leads with that person\'s score against the closure SOP, sop: total, open, breaking_sop, stale_open, follows_sop and the watches they need to act on; say that first, never a bare open count), a list of watch_ids, or find a watch by what it is about with search (best match first). Page with limit (default 15, at most 100) and offset: the answer gives count (every watch the filters matched), returned and next_offset, so read on with next_offset until it is null. Each watch comes back short (decision and next step clipped, no history); full: true returns each whole except its history, and watch_id returns one watch whole, with how_it_moves and its history. To check watches against the closure SOP (closed with proof, superseded, or open, and which are stale), use classify_decision_watches. Before telling anyone what a watch will do, read its how_it_moves and say it as written.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -282,8 +282,11 @@ export const listDecisionWatches: ToolDefinition = {
     const offset = Math.max(Math.floor(Number(args.offset) || 0), 0);
     const page = rows.slice(offset, offset + limit);
     const next = offset + page.length < rows.length ? offset + page.length : null;
+    // 28 Nov 2026 (Jason, SOP b2f660ab): an owner read shows the SOP classification and the action list, not a raw count.
+    const sop = who ? await ownerSop(who) : null;
     return {
       ok: true,
+      ...(sop ? { sop } : {}),
       counts: all.counts,
       posted_today: all.posted_today,
       count: rows.length,
@@ -300,6 +303,28 @@ export const listDecisionWatches: ToolDefinition = {
   },
 };
 
+/** One owner's score against the closure SOP and the watches they need to act on, short enough to say first. */
+async function ownerSop(owner: string) {
+  const { classifyAll } = await import('../watchClassify');
+  const r = await classifyAll({ owner_user_id: owner });
+  const o = r.summary.owners[0];
+  const needs = r.rows.filter((x) => !x.compliant || x.stale.length);
+  return {
+    rule: 'SOP -- Decision Watch closure standard (81cd9c04); owner reads per SOP b2f660ab',
+    owner: o?.owner_name ?? owner,
+    total: r.summary.total,
+    open: r.summary.counts.open,
+    breaking_sop: r.summary.breaking_sop,
+    stale_open: r.summary.stale_open,
+    follows_sop: !!o && o.follows_sop,
+    in_words: r.summary.total
+      ? `${o?.owner_name ?? owner} has ${r.summary.breaking_sop} breaking the closure SOP and ${r.summary.stale_open} stale, of ${r.summary.total} watches (${r.summary.counts.open} open).`
+      : `${owner} has no watches.`,
+    needs_action: needs.slice(0, 60).map((x) => ({ id: x.watch_id, state: x.state, lane: x.lane_group, ...(x.stale.length ? { stale: x.stale } : {}), what: x.decision.length > 90 ? `${x.decision.slice(0, 89)}…` : x.decision })),
+    ...(needs.length > 60 ? { more: `${needs.length - 60} more; classify_decision_watches with owner_user_id lists them all.` } : {}),
+  };
+}
+
 /** A list of watch ids from an array or a comma- or space-separated string. Pure. */
 export function idList(v: unknown): string[] {
   const parts = Array.isArray(v) ? v.map(String) : typeof v === 'string' ? v.split(/[\s,]+/) : [];
@@ -314,7 +339,7 @@ function wholeWatch(w: ReturnType<typeof dw.show>) {
 export const classifyDecisionWatches: ToolDefinition = {
   name: 'classify_decision_watches',
   description:
-    'Check every Decision Watch against the closure SOP (SOP 81cd9c04-98fa-4f75-94a9-fed445fcce4e): each watch is closed_with_proof (its close names a link or a record id), superseded (folded into another DW-, named as successor), or open; closed_without_proof and escalated (the reminders ran out and nobody closed or superseded it) break the SOP. An open watch is also flagged stale when its linked loop or task is closed, its owner has left BHA, or nothing has moved for 14 days. Reads every watch, not a sample. Returns the counts per state, a summary per owner (follows_sop is true only with nothing breaking the SOP and nothing stale), and the watches that need action: stale open ones and the ones breaking the SOP, each with the reason, at most item_limit (default 150, enough for every one today) with next_offset to page; open a watch whole with list_decision_watches watch_id. owner_user_id scopes it to one person. include_compliant lists the compliant watches too. Read only: it changes no watch.',
+    'Check every Decision Watch against the closure SOP (SOP 81cd9c04-98fa-4f75-94a9-fed445fcce4e): each watch is closed_with_proof (its close names a link or a record id), superseded (folded into another DW-, named as successor), or open; closed_without_proof and escalated (the reminders ran out and nobody closed or superseded it) break the SOP. An open watch is also flagged stale when its linked loop or task is closed, its owner has left BHA, or nothing has moved for 14 days. Reads every watch, not a sample. Returns the counts per state, a summary per owner (follows_sop is true only with nothing breaking the SOP and nothing stale), and the watches that need action: stale open ones and the ones breaking the SOP, each with the reason, at most item_limit (default 150, enough for every one today) with next_offset to page; open a watch whole with list_decision_watches watch_id. lanes is the aggregate by lane group (Engine, vFarm, Media, CST, Capital): total, open, breaking_sop and stale_open, with the lane tags inside each; the lane of a watch is its own, else the lane of its linked loop or task, and one with neither is counted as unrouted, never guessed. owner_user_id scopes it to one person. include_compliant lists the compliant watches too. Read only: it changes no watch.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -350,6 +375,7 @@ export const classifyDecisionWatches: ToolDefinition = {
         id: x.watch_id,
         owner: x.owner_name ?? x.owner_user_id,
         state: x.state,
+        lane: x.lane_group,
         ...(x.stale.length ? { stale: x.stale } : {}),
         ...(x.successor ? { successor: x.successor } : {}),
         ...(args.include_compliant === true && x.proof.length ? { proof: x.proof[0] } : {}),
@@ -584,4 +610,65 @@ export const reopenDecisionWatch: ToolDefinition = {
     }),
 };
 
-export const DECISION_WATCH_WRITE_TOOLS: ToolDefinition[] = [openDecisionWatch, listDecisionWatches, classifyDecisionWatches, closeDecisionWatch, updateDecisionWatch, snoozeDecisionWatch, runDecisionWatch, reopenDecisionWatch];
+export const reassignDecisionWatches: ToolDefinition = {
+  name: 'reassign_decision_watches',
+  description:
+    'Hand the watches of someone who has left BHA to an active owner, so they count under that person and they can close them (Jason, C0ASMPYQLG3 1795642017.292079). from_owner_user_id takes every watch of that leaver that needs action (open, or breaking the closure SOP: closed without proof or escalated); watch_ids names them instead. Each goes to to_owner_user_id, or by default to its lane\'s owner (writeGuards LANE_OWNERS), else Destiny. A compliant closed watch is history and stays under its old owner. Same id, thread and history; an open one gets the full wait again under its new owner. Destiny or Jason only, never on an agent token. Without confirm it is a preview listing each watch and where it would go; it moves them only with confirm "REASSIGN <n>", n the number found now. Each move is a history line and a decision_watch_reassigned event. Audited on engine_mcp_writes.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      from_owner_user_id: { type: 'string', description: 'The leaver (Slack id) whose watches move.' },
+      watch_ids: { description: 'Instead, these watches (a list or a comma string, at most 100), each owned by a leaver.', anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'string' }] },
+      to_owner_user_id: { type: 'string', description: 'One new owner for all of them. Left out: each goes to its lane owner, else Destiny.' },
+      reason: { type: 'string', description: 'Why, in a sentence.' },
+      confirm: { type: 'string', description: '"REASSIGN <n>", n the number the preview found.' },
+      requester_user_id: { type: 'string', description: 'Slack id of the person asking: Destiny or Jason.' },
+    },
+    required: ['reason', 'requester_user_id'],
+    additionalProperties: false,
+  },
+  annotations: { ...WRITE, title: 'Hand a leaver\'s watches over' },
+  handler: (args, deps) =>
+    audited('reassign_decision_watches', args, deps, async () => {
+      const { classifyAll, heirFor, needsOwner } = await import('../watchClassify');
+      const { isFormerBuilder } = await import('../sources');
+      const refuse = (reason: string, message: string) => ({ outcome: 'refused', detail: reason, target: null, answer: { ok: false, reason, message: `${message} Nothing was moved.` } });
+      if (deps.agent) return refuse('not_permitted', 'Handing watches over is a person\'s call, through the connector.');
+      const by = bare(str(args, 'requester_user_id'));
+      if (!(dw.APPROVERS as readonly string[]).includes(by)) return refuse('not_permitted', 'Only Destiny or Jason can hand watches over.');
+      const reason = str(args, 'reason').trim();
+      if (reason.length < 3) return refuse('reason_required', 'Say why, in a sentence.');
+      const from = bare(str(args, 'from_owner_user_id'));
+      const ids = idList(args.watch_ids);
+      if (!from && !ids.length) return refuse('nothing_named', 'Name the leaver (from_owner_user_id) or the watches (watch_ids).');
+      if (ids.length > 100) return refuse('too_many_ids', 'At most 100 watch_ids a call.');
+      if (from && !isFormerBuilder(from)) return refuse('owner_active', `<@${from}> is still at BHA. Only a leaver's watches are handed over here.`);
+      const to = bare(str(args, 'to_owner_user_id')) || null;
+      if (to && isFormerBuilder(to)) return refuse('owner_former', `<@${to}> has left BHA too.`);
+      const r = await classifyAll(from ? { owner_user_id: from } : {});
+      const picked = r.rows.filter((x) => isFormerBuilder(x.owner_user_id) && (ids.length ? ids.includes(x.watch_id) : needsOwner(x.state)));
+      const notMovable = ids.filter((id) => !picked.some((x) => x.watch_id === id));
+      const plan = picked.map((x) => ({ id: x.watch_id, from: x.owner_name ?? x.owner_user_id, state: x.state, lane: x.lane, to: to ?? heirFor(x.lane) }));
+      const confirmWith = `REASSIGN ${plan.length}`;
+      if (str(args, 'confirm') !== confirmWith) {
+        const byTo: Record<string, number> = {};
+        for (const p of plan) byTo[p.to] = (byTo[p.to] ?? 0) + 1;
+        return { outcome: 'dry_run', detail: `${plan.length} would move`, target: from || null, answer: { ok: true, preview: true, found: plan.length, by_new_owner: byTo, ...(notMovable.length ? { not_movable: notMovable } : {}), watches: plan, confirm_with: confirmWith, message: `Nothing moved. ${plan.length} watch${plan.length === 1 ? '' : 'es'} would be handed over; call again with confirm "${confirmWith}".` } };
+      }
+      const moved: Array<{ id: string; to: string }> = [];
+      const failed: Array<{ id: string; reason: string; message: string }> = [];
+      for (const p of plan) {
+        const x = await dw.reassign(p.id, p.to, by, reason);
+        if (x.ok) moved.push({ id: p.id, to: x.to });
+        else failed.push({ id: p.id, reason: x.reason, message: x.message });
+      }
+      return {
+        outcome: moved.length ? 'applied' : 'refused',
+        detail: `${moved.length} handed over, ${failed.length} not: ${reason}`,
+        target: from || null,
+        answer: { ok: failed.length === 0, moved: moved.length, handed: moved, failed, ...(notMovable.length ? { not_movable: notMovable } : {}), message: `${moved.length} handed over${failed.length ? `, ${failed.length} not (see failed)` : ''}.` },
+      };
+    }),
+};
+
+export const DECISION_WATCH_WRITE_TOOLS: ToolDefinition[] = [reassignDecisionWatches, openDecisionWatch, listDecisionWatches, classifyDecisionWatches, closeDecisionWatch, updateDecisionWatch, snoozeDecisionWatch, runDecisionWatch, reopenDecisionWatch];

@@ -453,6 +453,48 @@ export async function reopen(watchId: string, by: string, reason: string, now = 
   return { ok: true, watch: r.rows[0] };
 }
 
+/* -------------------------------------------------------------- reassign */
+
+/**
+ * Hands a watch to a new owner (28 Nov 2026, Jason in C0ASMPYQLG3 1795642017.292079: a watch owned by someone who
+ * has left must move to an active owner and count under them). Destiny or Jason only, and only from an owner who
+ * has left BHA (`FORMER_BUILDERS`): moving a live person's watch is a different decision, theirs to make. The new
+ * owner must be active and have a Builder Profile or be an approver. Same id, thread, record and history; the old
+ * owner is a history line and a `decision_watch_reassigned` event. An open watch gets the full wait again under its
+ * new owner (reminders from nothing); a closed one keeps its status, so one that breaks the closure SOP now breaks it
+ * under someone who can fix it.
+ */
+export type ReassignResult = { ok: true; watch: WatchRow; from: string; to: string } | { ok: false; reason: string; message: string };
+export async function reassign(watchId: string, to: string, by: string, reason: string, now = new Date()): Promise<ReassignResult> {
+  if (!(APPROVERS as readonly string[]).includes(by)) return { ok: false, reason: 'not_permitted', message: 'Only Destiny or Jason can hand a watch to someone else.' };
+  if (reason.trim().length < 3) return { ok: false, reason: 'reason_required', message: 'Say why it is being handed over.' };
+  if (!/^[UW][A-Z0-9]{6,}$/.test(to)) return { ok: false, reason: 'owner_required', message: `"${to}" is not a Slack user id (U…).` };
+  if (isFormerBuilder(to)) return { ok: false, reason: 'owner_former', message: `<@${to}> has left BHA too; hand it to someone active.` };
+  const found = await query<WatchRow>(`SELECT * FROM engine_decision_watches WHERE watch_id = $1`, [watchId]);
+  const w = found.rows[0];
+  if (!w) return { ok: false, reason: 'not_found', message: `No watch has the id "${watchId}". Use list_decision_watches to find it.` };
+  if (!isFormerBuilder(w.owner_user_id)) return { ok: false, reason: 'owner_active', message: `${watchId} is owned by ${w.owner_name ?? w.owner_user_id}, who is still at BHA. Only a leaver's watches are handed over here.` };
+  const name = await ownerName(to);
+  if (!name && !(APPROVERS as readonly string[]).includes(to)) return { ok: false, reason: 'no_profile', message: `<@${to}> has no Builder Profile, so a watch cannot wait on them.` };
+  const toName = name ?? (to === 'U0A9V97949F' ? 'Jason Bays' : 'Destiny Arupi');
+  const open = w.status === 'watching';
+  const line = `handed from ${w.owner_name ?? w.owner_user_id} (left BHA) to ${toName} by ${by}: ${clip(reason, 300)}`;
+  const r = await query<WatchRow>(
+    `UPDATE engine_decision_watches
+        SET owner_user_id = $2, owner_name = $3,
+            reminders_sent = CASE WHEN status = 'watching' THEN 0 ELSE reminders_sent END,
+            last_reminder_at = CASE WHEN status = 'watching' THEN NULL ELSE last_reminder_at END,
+            quiet_since = CASE WHEN status = 'watching' THEN $4::timestamptz ELSE quiet_since END,
+            history = history || $5::jsonb
+      WHERE watch_id = $1 AND owner_user_id = $6
+      RETURNING *`,
+    [watchId, to, toName, now.toISOString(), JSON.stringify([{ at: now.toISOString(), what: line }]), w.owner_user_id],
+  );
+  if (!r.rows[0]) return { ok: false, reason: 'changed', message: `${watchId} changed owner just now; read it again.` };
+  await event('decision_watch_reassigned', r.rows[0], `dw:${watchId}:reassigned:${to}`, { by, from: w.owner_user_id, from_name: w.owner_name, to, to_name: toName, reason: clip(reason, 300), was_open: open });
+  return { ok: true, watch: r.rows[0], from: w.owner_user_id, to };
+}
+
 /* ---------------------------------------------------------------- update */
 
 export const UPDATABLE = ['sop_refs', 'ns_refs', 'next_step'] as const;

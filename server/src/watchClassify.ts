@@ -12,11 +12,16 @@
  * the record shows it is likely done or abandoned: its linked loop or task is closed, its owner has left BHA,
  * or nothing has moved on it for STALE_QUIET_DAYS.
  *
- * `classify` is pure; `classifyAll` reads every watch (decisionWatch.read) and the linked loops once.
+ * Lanes (28 Nov 2026, Jason in the same thread: one aggregate by lane, the no-lane hole fixed): a watch's lane is
+ * its own, else its linked loop's or task's, and a watch with neither, or UNASSIGNED, is counted as `unrouted`,
+ * never guessed. `LANE_GROUPS` folds the lane tags into the groups Jason reads (Engine, vFarm, Media, CST, Capital).
+ *
+ * `classify` is pure; `classifyAll` reads every watch (decisionWatch.read) and the linked loops and tasks once.
  */
 import * as dw from './decisionWatch';
 import { query } from './pg';
 import { isFormerBuilder } from './sources';
+import { LANE_OWNERS, DEFAULT_OWNER } from './writeGuards';
 
 export const STATES = ['closed_with_proof', 'superseded', 'open', 'closed_without_proof', 'escalated'] as const;
 export type WatchState = (typeof STATES)[number];
@@ -24,6 +29,33 @@ export const COMPLIANT: readonly WatchState[] = ['closed_with_proof', 'supersede
 export const STALE_QUIET_DAYS = 14;
 
 type Watch = ReturnType<typeof dw.show>;
+
+/** The lane groups the aggregate reads in. A lane tag not listed here is its own group; no lane is `unrouted`. */
+export const LANE_GROUPS: Record<string, string> = {
+  BAYS: 'Engine', NS: 'Engine', RT: 'Engine', GENIE: 'Engine', ENGINE: 'Engine', BHARAG: 'Engine',
+  VFARM: 'vFarm', VFARM_HARDWARE: 'vFarm', VFARM_CORE: 'vFarm', KIOSK: 'vFarm', CAD_API: 'vFarm',
+  MEDIA: 'Media', CST: 'CST', CAPITAL: 'Capital',
+};
+export const UNROUTED = 'unrouted';
+
+/** A watch's lane: its own, else its linked record's; UNASSIGNED or none is unrouted. Pure. */
+export function laneOf(watchLane: string | null | undefined, recordLane: string | null | undefined): string {
+  const l = (watchLane?.trim() || recordLane?.trim() || '').toUpperCase();
+  return !l || l === 'UNASSIGNED' ? UNROUTED : l;
+}
+export const laneGroup = (lane: string): string => (lane === UNROUTED ? UNROUTED : LANE_GROUPS[lane] ?? lane);
+
+/**
+ * Who a watch owned by someone who has left goes to (28 Nov 2026, Destiny): its lane's owner when that person is
+ * still at BHA, else Destiny. Pure.
+ */
+export function heirFor(lane: string): string {
+  const owner = LANE_OWNERS[lane];
+  return owner && !isFormerBuilder(owner) ? owner : DEFAULT_OWNER;
+}
+
+/** A watch that needs its owner to act: open, or breaking the SOP. A compliant closed watch is history. Pure. */
+export const needsOwner = (state: WatchState): boolean => state === 'open' || !COMPLIANT.includes(state);
 
 const REF_RES: RegExp[] = [
   /https?:\/\/\S+/gi,
@@ -59,10 +91,12 @@ export interface Classified {
   thread_link: string | null;
   closed_at: string | null;
   quiet_days: number | null;
+  lane: string;
+  lane_group: string;
 }
 
 /** One watch's state under the SOP. `recordClosed` says whether its linked loop or task is closed. Pure. */
-export function classify(w: Watch, recordClosed: boolean | null, now = new Date()): Classified {
+export function classify(w: Watch, recordClosed: boolean | null, now = new Date(), recordLane: string | null = null): Classified {
   const reason = w.close_reason ?? '';
   const refs = refsIn(reason).filter((r) => r !== w.watch_id);
   const successor = refs.find((r) => /^DW-/i.test(r)) ?? null;
@@ -102,6 +136,8 @@ export function classify(w: Watch, recordClosed: boolean | null, now = new Date(
     thread_link: w.thread_link,
     closed_at: w.closed_at,
     quiet_days: state === 'open' ? quietDays : null,
+    lane: laneOf(w.lane, recordLane),
+    lane_group: laneGroup(laneOf(w.lane, recordLane)),
   };
 }
 
@@ -125,25 +161,60 @@ export function summarise(rows: Classified[]) {
   const owners = [...byOwner.values()]
     .map((o) => ({ ...o, follows_sop: o.breaking_sop === 0 && o.stale_open === 0 }))
     .sort((a, b) => b.breaking_sop + b.stale_open - (a.breaking_sop + a.stale_open) || b.total - a.total);
-  return { total: rows.length, counts, stale_open: staleOpen, breaking_sop: rows.filter((r) => !r.compliant).length, owners };
+  return { total: rows.length, counts, stale_open: staleOpen, breaking_sop: rows.filter((r) => !r.compliant).length, owners, lanes: byLane(rows) };
 }
 
-/** Every watch (no fixtures), classified, with the linked loops' status read once. */
+/** Total, open, breaking and stale per lane group, with the lane tags inside each, worst first; unrouted last. Pure. */
+export function byLane(rows: Classified[]) {
+  const groups = new Map<string, { lane_group: string; total: number; open: number; breaking_sop: number; stale_open: number; lanes: Record<string, number> }>();
+  for (const r of rows) {
+    const g = groups.get(r.lane_group) ?? { lane_group: r.lane_group, total: 0, open: 0, breaking_sop: 0, stale_open: 0, lanes: {} };
+    g.total++;
+    if (r.state === 'open') g.open++;
+    if (!r.compliant) g.breaking_sop++;
+    if (r.stale.length) g.stale_open++;
+    g.lanes[r.lane] = (g.lanes[r.lane] ?? 0) + 1;
+    groups.set(r.lane_group, g);
+  }
+  return [...groups.values()].sort((a, b) =>
+    Number(a.lane_group === UNROUTED) - Number(b.lane_group === UNROUTED) || b.breaking_sop + b.stale_open - (a.breaking_sop + a.stale_open) || b.total - a.total);
+}
+
+/** Every watch (no fixtures), classified, with the linked loops' and tasks' status and lane read once. */
 export async function classifyAll(opts: { owner_user_id?: string | null; now?: Date } = {}) {
   const now = opts.now ?? new Date();
   const all = await dw.read({ fixtures: false });
   let watches = all.watches;
   if (opts.owner_user_id) watches = watches.filter((w) => w.owner_user_id === opts.owner_user_id);
-  const loopIds = [...new Set(watches.filter((w) => w.status === 'watching' && w.record?.kind === 'loops').map((w) => w.record!.id as string))];
+  const ids = (kind: string) => [...new Set(watches.filter((w) => w.record?.kind === kind).map((w) => w.record!.id as string))];
   const closed = new Set<string>();
+  const lane = new Map<string, string | null>();
+  const loopIds = ids('loops');
   if (loopIds.length) {
-    const r = await query<{ loop_id: string; status: string | null }>(
-      `SELECT DISTINCT ON (natural_id) natural_id AS loop_id, fields->>'Status' AS status
+    const r = await query<{ id: string; status: string | null; lane: string | null }>(
+      `SELECT DISTINCT ON (natural_id) natural_id AS id, fields->>'Status' AS status, fields->>'lane_tag' AS lane
          FROM engine_loops WHERE natural_id = ANY($1::text[]) ORDER BY natural_id, updated_at DESC`,
       [loopIds],
     );
-    for (const row of r.rows) if (row.status === 'Closed') closed.add(row.loop_id);
+    for (const row of r.rows) {
+      if (row.status === 'Closed') closed.add(row.id);
+      lane.set(`loops:${row.id}`, row.lane);
+    }
   }
-  const rows = watches.map((w) => classify(w, w.record?.kind === 'loops' ? closed.has(w.record.id as string) : null, now));
+  const taskIds = ids('lane_backlog');
+  if (taskIds.length) {
+    const r = await query<{ id: string; lane: string | null }>(
+      `SELECT DISTINCT ON (natural_id) natural_id AS id, fields->>'lane' AS lane
+         FROM engine_lane_backlog WHERE natural_id = ANY($1::text[]) ORDER BY natural_id, updated_at DESC`,
+      [taskIds],
+    );
+    for (const row of r.rows) lane.set(`lane_backlog:${row.id}`, row.lane);
+  }
+  const rows = watches.map((w) => classify(
+    w,
+    w.record?.kind === 'loops' && w.status === 'watching' ? closed.has(w.record.id as string) : null,
+    now,
+    w.record ? lane.get(`${w.record.kind}:${w.record.id}`) ?? null : null,
+  ));
   return { rows, summary: summarise(rows), read_at: now.toISOString() };
 }
