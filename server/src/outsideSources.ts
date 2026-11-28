@@ -114,9 +114,16 @@ async function usage(urls: string[], since: string): Promise<Map<string, { n: nu
     ['north_star', `SELECT fields::text AS blob FROM engine_ns_asks WHERE first_seen_at >= $2`],
     ['genie', `SELECT payload::text AS blob FROM engine_genie_events WHERE occurred_at >= $2 AND event_type NOT LIKE 'genie.subagent.%'`],
   ];
+  // Each record's links are pulled out once, made bare the way bare() does, and matched exactly.
+  // Matching every link against every record's whole text took over two minutes by 28 Nov 2026
+  // (1,650 links over 8.5 million characters), past BHA RSS's wait.
   for (const [where, sql] of tables) {
     const r = await query<{ u: string; n: string }>(
-      `SELECT u, count(*)::text AS n FROM unnest($1::text[]) u JOIN (${sql}) t ON strpos(t.blob, u) > 0 GROUP BY u`,
+      `SELECT e.u, count(*)::text AS n FROM (
+         SELECT DISTINCT t.rid, regexp_replace(split_part(split_part(m[1], '#', 1), '?', 1), '/+$', '') AS u
+         FROM (SELECT row_number() OVER () AS rid, blob FROM (${sql}) x) t,
+              regexp_matches(t.blob, '(https?://[^\\s"''<>\\\\)\\]]+)', 'g') m
+       ) e WHERE e.u = ANY($1::text[]) GROUP BY e.u`,
       [list, since],
     );
     for (const row of r.rows) {
