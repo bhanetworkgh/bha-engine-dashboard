@@ -34,6 +34,7 @@ import * as events from './events';
 import * as engineEvents from './engineEvents';
 import { PEOPLE } from './mcp/northStarTools';
 import * as intentHeal from './intentHeal';
+import { transcribe as transcribeAudio } from './mcp/audioTools';
 
 /** Which agents are checked. Bays is the one turning founder and builder asks into actions. */
 // 20 Nov 2026 (Genie rebuild step 13.1): Genie writes on the same rules as Bays.
@@ -286,7 +287,43 @@ const cleanText = (t: unknown): string =>
     .replace(/<(https?:[^|>]+)\|([^>]+)>/g, '$2 ($1)')
     .replace(/<(https?:[^>]+)>/g, '$1');
 
-type Msg = { user?: string; bot_id?: string; text?: string; ts?: string; subtype?: string; blocks?: unknown };
+type MsgFile = { id?: string; mimetype?: string; subtype?: string; name?: string };
+type Msg = { user?: string; bot_id?: string; text?: string; ts?: string; subtype?: string; blocks?: unknown; files?: MsgFile[]; genie_transcript?: string; genie_transcript_error?: string };
+
+/** A voice note or other recording on a message. Pure. */
+export const audioFiles = (m: Msg): MsgFile[] => (m.files ?? []).filter((f) => !!f.id && (f.subtype === 'slack_audio' || (f.mimetype ?? '').startsWith('audio/') || (f.mimetype ?? '').startsWith('video/')));
+
+/**
+ * What a message said, its voice notes included (28 Nov 2026, INC-BAYS.AGENT-142: Jason asked Genie by voice note,
+ * the check read the message as blank and refused all four writes). Pure: the transcript is already on the message.
+ */
+export function said(m: Msg): string {
+  const text = cleanText(m.text).trim();
+  if (!audioFiles(m).length) return text;
+  if (m.genie_transcript) return `${text ? text + ' ' : ''}[voice note, transcribed: "${m.genie_transcript.trim()}"]`;
+  return `${text ? text + ' ' : ''}[a voice note that could not be transcribed${m.genie_transcript_error ? `: ${m.genie_transcript_error}` : ''}]`;
+}
+
+/** Fills genie_transcript on the voice notes Genie did not transcribe for us, with the Bays bot's own read. At most 3. */
+async function hearVoiceNotes(msgs: Msg[]): Promise<void> {
+  let n = 0;
+  for (const m of [...msgs].reverse()) {
+    if (m.genie_transcript || !audioFiles(m).length) continue;
+    if (n >= 3) break;
+    const words: string[] = [];
+    for (const f of audioFiles(m).slice(0, 2)) {
+      n++;
+      try {
+        const r = await transcribeAudio('', String(f.id));
+        if (r.ok && typeof r.text === 'string' && r.text.trim()) words.push(r.text.trim());
+        else m.genie_transcript_error = String(r.message ?? r.reason ?? 'not transcribed');
+      } catch (e) {
+        m.genie_transcript_error = e instanceof Error ? e.message : String(e);
+      }
+    }
+    if (words.length) m.genie_transcript = words.join(' ');
+  }
+}
 
 async function readThread(channel: string, threadTs: string): Promise<{ ok: true; msgs: Msg[] } | { ok: false; error: string }> {
   const tokens = [process.env[slack.SLACK_TOKEN_VAR]?.trim(), slack.northStarToken()].filter(Boolean) as string[];
@@ -307,7 +344,7 @@ async function readThread(channel: string, threadTs: string): Promise<{ ok: true
   return { ok: false, error: `${last || 'unreadable'}; ${asGenie.error}` };
 }
 
-const line = (m: Msg, n: number) => `${m.bot_id ? 'Bays or another bot' : NAMES[m.user ?? ''] || m.user || 'someone'}: ${clip(cleanText(m.text), n)}`;
+const line = (m: Msg, n: number) => `${m.bot_id ? 'Bays or another bot' : NAMES[m.user ?? ''] || m.user || 'someone'}: ${clip(said(m), n)}`;
 
 async function scheduledTasks(): Promise<string[]> {
   const r = await query<{ tasks: { name?: string; enabled?: boolean }[] | null }>(`SELECT tasks FROM engine_agent_inventory WHERE agent_id = 'Nw5igXu4WWrjUMWB'`);
@@ -348,7 +385,8 @@ export async function resolveAsk(tool: string, args: Args, agent = ''): Promise<
   if (channel && thread && isTs(thread) && (!message || isTs(message))) {
     const read = await readThread(channel, thread);
     if (!read.ok) return { ok: false, reason: 'ask_not_found', message: `Slack would not give the thread ${channel} / ${thread} back (${read.error}), so the ask cannot be checked. Send the channel_id, thread_ts and message_ts from your context block exactly.` };
-    const msgs = read.msgs.filter((m) => !m.subtype || m.subtype === 'thread_broadcast' || m.subtype === 'bot_message');
+    const msgs = read.msgs.filter((m) => !m.subtype || m.subtype === 'thread_broadcast' || m.subtype === 'bot_message' || m.subtype === 'file_share');
+    await hearVoiceNotes(msgs.slice(-(CONTEXT_MESSAGES + 2)));
     let idx = message ? msgs.findIndex((m) => m.ts === message) : -1;
     let source: Ask['source'] = 'slack';
     if (idx < 0) {
@@ -423,6 +461,7 @@ Rules:
 - SOP edits: the change must be the one the message asked for.
 - Text marked "as it stands now, before this action" (a loop's status and owner, a watch's owner and what it already owes) is the record before the action, shown for context. It is not part of the change: judge only what the action changes. A watch already owing more than this message names is not a miss when the action does not change what it owes.
 - Text marked as shortened for the check is sent whole: judge the part shown, and never call it cut off.
+- A voice note is shown as its transcript ("[voice note, transcribed: ...]"): those are the person's own words, as good as typed. A short reply such as "yes" or "nudge him" means what the messages just before it make clear. A voice note that could not be transcribed is not a blank message: judge what the context shows.
 - In a scheduled task run there is no typed message: the action matches when it is what a task of that name exists to do.
 - When the message is ambiguous and the action is a reasonable reading of it, it matches. Only call a miss when the action is clearly not what was asked: a different loop or person, a different action, or words the message does not support.
 
@@ -494,12 +533,13 @@ async function askModel(user: string): Promise<Verdict> {
   return { match: null, reason: '', asked: '', provider: null, error: errors.join('; ') };
 }
 
-export function prompt(ask: Ask, action: string, tool: string, records = ''): string {
+export function prompt(ask: Ask, action: string, tool: string, records = '', attempts = ''): string {
   return [
     ask.source === 'scheduled' ? 'The run:' : ask.source === 'agent_stated' ? 'The question, as Bays reports it (no Slack message exists):' : ask.source === 'slack_thread_newest' ? 'The newest message a person posted in the thread (Bays did not name which message asked):' : ask.source === 'handoff' ? 'The question handed to Genie (the thread\'s newest messages are below it):' : 'The message that asked:',
     ask.text,
     ask.context ? `\nEarlier in the thread, for context only (oldest first):\n${ask.context}` : '',
     records ? `\nRecords the action names, as the dashboard holds them (facts that match these are supported):\n${records}` : '',
+    attempts ? `\nWhat the assistant already tried in this conversation in the last hour, as the dashboard recorded it (facts about these attempts, such as a post being refused and why, are supported):\n${attempts}` : '',
     `\nThe action Bays is about to take (tool ${tool}):`,
     action,
   ].join('\n');
@@ -527,6 +567,31 @@ async function recordsFor(action: string): Promise<string> {
     return recordLines(r.rows);
   } catch (e) {
     console.error(`[intent-check] loop records not read: ${e instanceof Error ? e.message : String(e)}`);
+    return '';
+  }
+}
+
+/**
+ * The agent's own earlier checked writes in the same conversation in the last hour (28 Nov 2026, INC-BAYS.AGENT-142).
+ * Jason asked Genie to tell Destiny what it had tried and why it failed; the check refused the DM because the refusal
+ * and its reason were not in the thread. They are on record here, so a message reporting them is supported.
+ */
+export function attemptLines(rows: Array<{ at: string; tool: string; verdict: string; reason: string | null; action: string }>): string {
+  return rows.map((r) => `- ${String(r.at).slice(11, 16)} UTC ${r.tool}: ${r.verdict === 'match' ? 'passed the check' : r.verdict === 'mismatch' ? 'refused by the check' : r.verdict} (${clip(r.reason ?? '', 240)}). It was: ${clip(r.action, 240)}`).join('\n');
+}
+async function attemptsFor(agent: string, ask: Ask): Promise<string> {
+  const m = ask.key.match(/^(?:slack|handoff):([CDG][A-Z0-9]+):/);
+  if (!m) return '';
+  try {
+    const r = await query<{ at: string; tool: string; verdict: string; reason: string | null; action: string }>(
+      `SELECT at::text AS at, tool, verdict, reason, action FROM engine_intent_checks
+        WHERE agent = $1 AND ask_key LIKE $2 AND at > now() - interval '1 hour' AND verdict IN ('match', 'mismatch')
+        ORDER BY at DESC LIMIT 6`,
+      [agent, `%:${m[1]}:%`],
+    );
+    return attemptLines(r.rows.reverse());
+  } catch (e) {
+    console.error(`[intent-check] earlier attempts not read: ${e instanceof Error ? e.message : String(e)}`);
     return '';
   }
 }
@@ -670,7 +735,7 @@ export async function gate(agent: string, tool: string, rawArgs: Args): Promise<
     return { refusal: { ok: false, reason: resolved.reason, message: resolved.message, written: false }, args };
   }
   const ask = resolved.ask;
-  const v = await askModel(prompt(ask, action, tool, await recordsFor(action)));
+  const v = await askModel(prompt(ask, action, tool, await recordsFor(action), await attemptsFor(agent, ask)));
 
   if (v.match === null) {
     const id = await record({ agent, tool, ask_key: ask.key, ask_source: ask.source, ask_excerpt: ask.text, action, verdict: 'unchecked', reason: v.error, asked: null, provider: null, attempt: 0 });

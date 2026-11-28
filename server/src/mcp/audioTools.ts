@@ -126,7 +126,7 @@ async function viaModel(bytes: Buffer, format: string): Promise<({ ok: true; tex
 const done = new Map<string, Record<string, unknown>>();
 const DONE_MAX = 200;
 
-async function transcribe(urlArg: string, idArg: string): Promise<Record<string, unknown>> {
+export async function transcribe(urlArg: string, idArg: string): Promise<Record<string, unknown>> {
   if (!urlArg && !idArg) return { ok: false, reason: 'missing_file', message: 'Pass url (the file’s url_private) or file_id (F…).' };
   if (urlArg && !slack.isSlackFileUrl(urlArg)) return { ok: false, reason: 'not_a_slack_file_url', message: 'Only https://files.slack.com/ addresses are read. Pass the file’s url_private or url_private_download, or its file_id.' };
   if (idArg && !/^F[A-Z0-9]{6,}$/.test(idArg)) return { ok: false, reason: 'not_a_slack_file_id', message: 'file_id must be a Slack file id, e.g. F0ABC123DEF.' };

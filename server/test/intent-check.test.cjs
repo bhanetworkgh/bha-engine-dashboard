@@ -92,5 +92,16 @@ const ok = (m) => { n += 1; console.log('  ok  ' + m); };
   assert.match(ic.SYSTEM, /A fact that matches a listed record/); assert.match(ic.SYSTEM, /neither the thread nor a listed record shows is a miss/); ok('a fact from a listed record is supported; an invented one is still a miss');
   assert.match(ic.SYSTEM, /Work the message puts on a person/); assert.match(ic.SYSTEM, /even when every fact in it is right/); ok('work Jason put on a builder (a DK0O A/B/C map) is a miss when an agent posts it for them (INC-BAYS.AGENT-137)');
   assert.deepEqual('nudge LOOP-1793620799001-3NBE and loop-1793620799001-3nbe'.match(ic.LOOP_IN_ACTION), ['LOOP-1793620799001-3NBE']); ok('loop ids are read from the action');
+  // 28 Nov 2026, INC-BAYS.AGENT-142: Jason's voice-note ask was read as blank.
+  const voice = { user: 'U0A9V97949F', text: '', files: [{ id: 'F0VOICE1', mimetype: 'audio/webm', subtype: 'slack_audio' }], genie_transcript: 'Nudge Destiny and tell him what I tried and why it failed.' };
+  assert.equal(ic.said(voice), '[voice note, transcribed: "Nudge Destiny and tell him what I tried and why it failed."]'); ok('a voice note is read as its transcript, never as blank');
+  assert.match(ic.said({ text: '', files: [{ id: 'F1', mimetype: 'audio/mp4' }], genie_transcript_error: 'speech to text is not set up' }), /a voice note that could not be transcribed: speech to text/); ok('a voice note nobody could hear says so, not blank');
+  assert.equal(ic.said({ text: 'see <@U0AEW3TBYH1>', files: [{ id: 'F2', mimetype: 'application/pdf' }] }).startsWith('see @'), true); ok('a message with a document and no voice note is its text');
+  assert.equal(ic.audioFiles({ files: [{ id: 'F3', subtype: 'slack_audio' }, { id: 'F4', mimetype: 'image/png' }] }).length, 1); ok('only recordings count as voice notes');
+  assert.match(ic.SYSTEM, /A voice note is shown as its transcript/); assert.match(ic.SYSTEM, /"nudge him" means what the messages just before it make clear/); ok('the model is told a transcript is the person\'s words and a short reply leans on the messages before it');
+  const tried = ic.attemptLines([{ at: '2026-11-27 22:51:55.049+00', tool: 'post_channel_message', verdict: 'mismatch', reason: 'The message is blank.', action: 'Post a message in C0ASMPYQLG3.' }]);
+  assert.match(tried, /22:51 UTC post_channel_message: refused by the check \(The message is blank\.\)/); ok('the agent\'s earlier attempt is shown with its outcome and reason');
+  const withTried = ic.prompt({ key: 'slack:D0ADPRRQW5C:1', source: 'slack', text: 'x', context: '', asker: null }, 'y', 'send_nudge', '', tried);
+  assert.match(withTried, /What the assistant already tried in this conversation/); ok('a DM reporting what was tried and why it failed has those facts to stand on');
   console.log(`intent-check: ${n} passed`);
 })().catch((e) => { console.error(e); process.exit(1); });
