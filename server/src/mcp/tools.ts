@@ -62,6 +62,7 @@ import { LOGSTREAM_E2E_WRITE_TOOLS } from './logstreamE2eTools';
 import { SLACK_DELETE_WRITE_TOOLS } from './slackDeleteTools';
 import { BUYER_FLOW_READ_TOOLS } from './buyerFlowTools';
 import { ENTITLEMENT_READ_TOOLS, ENTITLEMENT_WRITE_TOOLS } from './entitlementTools';
+import { CONFIDENCE_READ_TOOLS } from './confidenceTools';
 import { CODEX_DELETE_WRITE_TOOLS } from './codexDeleteTools';
 import { COMP_SNAPSHOT_WRITE_TOOLS } from './compSnapshotTools';
 import { INVENTORY_WRITE_TOOLS } from './inventoryTools';
@@ -1141,6 +1142,8 @@ export const TOOLS: ToolDefinition[] = [
   ...BUYER_FLOW_READ_TOOLS,
   // 2026-10-31: a vFarm farm's entitlement, as vFarm reads it (Jason's contract, 30 Oct).
   ...ENTITLEMENT_READ_TOOLS,
+  // 2026-11-28: VFARM_CONFIDENCE_SCORING_V0, a card's score, band and gates (XHRR).
+  ...CONFIDENCE_READ_TOOLS,
   // 2026-10-22: the Media Twin post log (H58Q, Jason's SOURCE_TO_TARGET_LOG).
   ...MEDIA_POST_LOG_READ_TOOLS,
   ...MEDIA_POSTS_READ_TOOLS,

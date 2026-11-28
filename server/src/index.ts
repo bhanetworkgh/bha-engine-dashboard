@@ -36,6 +36,7 @@ import * as layer0Void from './layer0Void';
 import * as writeTools from './mcp/writeTools';
 import * as loops from './loops';
 import * as mirror from './mirror';
+import * as confidenceScore from './confidenceScore';
 import * as engineWrite from './engineWrite';
 import * as events from './events';
 import { shared } from './singleFlight';
@@ -896,6 +897,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
      * did not land. Safe to repeat: a second run straight after the first
      * reports every session unchanged.
      */
+    if (p === '/api/engine/confidence/backfill') {
+      if (method !== 'POST') throw new HttpError(405, 'POST to score every commercial card again under the confidence rule. It takes no body.');
+      const r = await runConfidenceBackfill('route');
+      return send(res, 200, { ok: true, version: confidenceScore.RULE.version, ...r });
+    }
     if (p === '/api/engine/pay/reconcile') {
       if (method !== 'POST') throw new HttpError(405, 'POST to bring the pay ledger into line with the session logs. It takes no body.');
       const r = await paySync.reconcile();
@@ -3589,6 +3595,16 @@ function serveStatic(req: IncomingMessage, res: ServerResponse, url: URL): void 
   return serveFile(res, path.join(DIST, 'index.html'), 'no-cache');
 }
 
+/** VFARM_CONFIDENCE_SCORING_V0: every commercial card's stored score brought in line (confidenceScore.ts). */
+async function runConfidenceBackfill(via: 'boot' | 'route') {
+  const r = await confidenceScore.backfill({
+    rows: async () => (await query<{ id: string; fields: Record<string, unknown> }>('SELECT id::text AS id, fields FROM engine_commercial_cards ORDER BY id')).rows,
+    patch: (id, patch) => mirror.patchFields('commercial', id, patch, 'engine'),
+  });
+  await mirror.logWrite({ endpoint: via === 'boot' ? 'boot' : '/api/engine/confidence/backfill', kind: 'commercial', method: 'CONFIDENCE', key_label: null, outcome: r.updated ? 'updated' : 'unchanged', detail: `${confidenceScore.RULE.version}: ${r.checked} checked, ${r.updated} updated, ${r.unchanged} unchanged; High ${r.bands.High}, Medium ${r.bands.Medium}, Low ${r.bands.Low}${r.failed.length ? `; ${r.failed.length} failed: ${r.failed.map((f) => `${f.id} (${f.error})`).join('; ').slice(0, 600)}` : ''}` });
+  return r;
+}
+
 /* ----------------------------------------------------------------- boot */
 
 const server = createServer((req, res) => {
@@ -3761,6 +3777,11 @@ async function boot(): Promise<void> {
       });
     })
     .catch((e: unknown) => console.error(`  pay:      boot reconcile failed: ${e instanceof Error ? e.message : String(e)}`));
+
+  // VFARM_CONFIDENCE_SCORING_V0 backfill once per boot (28 Nov 2026, confidenceScore.ts).
+  void runConfidenceBackfill('boot')
+    .then((r) => console.log(`  confidence: ${r.checked} card(s) scored at boot, ${r.updated} updated, ${r.unchanged} unchanged (High ${r.bands.High}, Medium ${r.bands.Medium}, Low ${r.bands.Low})${r.failed.length ? `, ${r.failed.length} FAILED` : ''}`))
+    .catch((e: unknown) => console.error(`  confidence: boot backfill failed: ${e instanceof Error ? e.message : String(e)}`));
 
   server.listen(PORT, () => {
     console.log(`BHA engine dashboard on http://localhost:${PORT}`);

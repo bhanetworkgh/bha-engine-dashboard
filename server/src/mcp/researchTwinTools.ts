@@ -36,6 +36,7 @@
  * `engine_mcp_writes`, opened before the first read and closed after the last
  * write.
  */
+import * as confidenceScore from '../confidenceScore';
 import * as mirror from '../mirror';
 import * as engineWrite from '../engineWrite';
 import * as bharag from '../bharag';
@@ -388,6 +389,13 @@ const computeLaneState: ToolDefinition = {
         return { outcome: 'refused', detail: 'no card', natural_id: cardId || null, answer: { ok: false, reason: 'card_not_found', error: 'No card found for card_id ' + (cardId || '(empty)') + ' -- no state was changed.' } };
       }
       const t = laneTransition(args.pilot_trigger, card.fields);
+      // VFARM_CONFIDENCE_SCORING_V0 (28 Nov 2026): a pilot starts only on a card that passes the pilot gate.
+      const starting = confidenceScore.gatedAction({ lane_state: t.laneState, pilot_state: t.pilotState });
+      const already = confidenceScore.gatedAction({ lane_state: card.fields.lane_state, pilot_state: card.fields.pilot_state });
+      if (starting && !already) {
+        const g = confidenceScore.gate(card.fields, starting);
+        if (!g.allowed) return { outcome: 'refused', detail: `confidence_gate: ${g.missing.join('; ')}`, record_id: card.id, natural_id: cardId, answer: { ok: false, reason: 'confidence_gate', card_id: cardId, band: g.band, score: g.score, missing: g.missing, error: `This card cannot start a pilot under ${confidenceScore.RULE.version}: ${g.missing.join('; ')}. No state was changed.` } };
+      }
       const answer = { ok: true, card_id: cardId, lane_state: t.laneState, pilot_state: t.pilotState, pilot_trigger: t.pilotTrigger };
       if (isDry(args)) return { outcome: 'dry_run', detail: t.pilotTrigger, record_id: card.id, natural_id: cardId, answer: { ...answer, dry_run: true, written: false } };
       const r = await engineWrite.patchRecord('commercial', String(card.id), { lane_state: t.laneState, pilot_state: t.pilotState }, ctxFor('compute_lane_state', deps));

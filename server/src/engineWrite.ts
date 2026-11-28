@@ -17,6 +17,7 @@ import * as reuseCheck from './reuseCheck';
 import * as layer0Notice from './layer0Notice';
 import * as codeReview from './codeReview';
 import * as paySuggest from './paySuggest';
+import * as confidenceScore from './confidenceScore';
 import { query } from './pg';
 import * as mirror from './mirror';
 import * as store from './store';
@@ -82,6 +83,33 @@ export async function reuseOnSubmission(fields: Record<string, unknown>): Promis
   return { ...fields, 'Reuse Check': JSON.stringify(stored) };
 }
 
+/**
+ * VFARM_CONFIDENCE_SCORING_V0 on every commercial write (28 Nov 2026, confidenceScore.ts):
+ * the card's score is worked out from the row as it will be after the write and stored on
+ * it, and a write that would start a pilot is refused unless the card passes the pilot gate.
+ * A card already in a pilot state is not re-gated by an unrelated edit.
+ */
+async function withConfidence(fields: Record<string, unknown>, current: Record<string, unknown> | null): Promise<Record<string, unknown>> {
+  const merged = { ...(current ?? {}), ...fields };
+  const action = confidenceScore.gatedAction(fields);
+  const already = current ? confidenceScore.gatedAction({ lane_state: current.lane_state, pilot_state: current.pilot_state }) : null;
+  if (action && !already) {
+    const g = confidenceScore.gate(merged, action);
+    if (!g.allowed) throw new mirror.MirrorError(`confidence_gate: this card cannot start a pilot under ${confidenceScore.RULE.version}: ${g.missing.join('; ')}`, 422);
+  }
+  const c = confidenceScore.score(merged);
+  return { ...fields, [confidenceScore.FIELD]: c, [confidenceScore.BAND_FIELD]: c.band };
+}
+
+async function currentCard(by: { rowId?: string; cardId?: string }): Promise<Record<string, unknown> | null> {
+  const r = by.rowId
+    ? await query<{ fields: Record<string, unknown> }>('SELECT fields FROM engine_commercial_cards WHERE id = $1', [by.rowId])
+    : by.cardId
+      ? await query<{ fields: Record<string, unknown> }>('SELECT fields FROM engine_commercial_cards WHERE natural_id = $1 ORDER BY updated_at DESC LIMIT 1', [by.cardId])
+      : { rows: [] as Array<{ fields: Record<string, unknown> }> };
+  return r.rows[0]?.fields ?? null;
+}
+
 export async function postRecord(kind: mirror.MirrorKind, body: mirror.MirrorInput, ctx: WriteCtx): Promise<PostResult> {
   try {
     // A rejected Codex log is closed to the engine (2026-10-15, codexReject.ts).
@@ -94,6 +122,10 @@ export async function postRecord(kind: mirror.MirrorKind, body: mirror.MirrorInp
     if (kind === 'codex' && body.fields && typeof body.fields === 'object') body = { ...body, fields: codeReview.annotate(body.fields as Record<string, unknown>) };
     // The reuse check at submission (19 Nov 2026, Genie rebuild 10.10): a flag for Jason's card, never a pay hold.
     if (kind === 'codex' && body.fields && typeof body.fields === 'object') body = { ...body, fields: await reuseOnSubmission(body.fields as Record<string, unknown>) };
+    if (kind === 'commercial' && body.fields && typeof body.fields === 'object') {
+      const f = body.fields as Record<string, unknown>;
+      body = { ...body, fields: await withConfidence(f, await currentCard({ cardId: typeof f.card_id === 'string' ? f.card_id : undefined })) };
+    }
     const result = await mirror.upsert(kind, body, 'engine');
     if (kind === 'layer0' && layer0Notice.becameComplete(body.fields as Record<string, unknown>, result.changed)) void layer0Notice.deleteOnComplete(String(result.id)).catch(() => undefined);
     // A log that went through retires any parked copy of the same recording (2026-10-25).
@@ -168,6 +200,7 @@ export async function patchRecord(
       const merged = await paySuggest.annotate({ ...cur, ...fields });
       fields = { ...fields, 'Pay Suggestion': merged['Pay Suggestion'] };
     }
+    if (kind === 'commercial' && !(confidenceScore.FIELD in fields)) fields = await withConfidence(fields, await currentCard({ rowId }));
     const r = await mirror.patchFields(kind, rowId, fields, 'engine');
     // Same as a POST: the row is stored, and this dates the status it was
     // left in. A patch that sets Status is exactly such a change.
