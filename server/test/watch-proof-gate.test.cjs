@@ -1,0 +1,20 @@
+// 28 Nov 2026: a proof-gated watch closes only by the person who set the gate (SOP 88f178e6). Pure; no database.
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const Module = require('node:module');
+const realResolve = Module._resolveFilename;
+Module._resolveFilename = function (request, ...rest) { if (request === 'pg') return require.resolve('./_pg-stub.cjs'); return realResolve.call(this, request, ...rest); };
+const dw = require(path.join(process.env.SERVER_DIST || path.join(__dirname, '../../server-dist'), 'server/src', 'decisionWatch.js'));
+let n = 0; const ok = (c, m) => { assert.ok(c, m); n++; };
+const JASON = 'U0A9V97949F', DESTINY = 'U0AEW3TBYH1', GENIE = 'U0ADKG2A18B';
+const gated = { watch_id: 'DW-X3UK', proof_gate: 'Freeze proof and the 938b24a7 review, both posted.', proof_gate_by: JASON };
+ok(dw.gateRefusal(gated, JASON) === null, 'the setter closes it');
+const r = dw.gateRefusal(gated, DESTINY);
+ok(r && r.reason === 'proof_gated', 'the owner asking is refused');
+ok(r.message.includes('88f178e6') && r.message.includes(JASON), 'the refusal names the SOP and who closes it');
+ok(dw.gateRefusal(gated, GENIE).reason === 'proof_gated', 'an agent is refused');
+ok(dw.gateRefusal({ ...gated, proof_gate: null }, DESTINY) === null, 'no gate, the old rule');
+const w = { watch_id: 'DW-X3UK', status: 'watching', owner_name: 'Destiny', owner_user_id: DESTINY, thread_ts: '1.1', thread_link: 'https://x', record_id: 'LOOP-1', record_kind: 'loops', proof_gate: gated.proof_gate, proof_gate_by: JASON, reminders_sent: 0, max_reminders: 3, snoozed_until: null };
+const t = dw.movesText(w, new Date(Date.now() + 3600e3));
+ok(/does not close with it/.test(t) && /only they close it/.test(t), 'how_it_moves says the gate and that the loop does not close it');
+console.log(`watch proof gate: ${n} checks passed`);

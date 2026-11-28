@@ -3142,6 +3142,7 @@ Star reference, and the wait. Its numbers are `RULE` there and nowhere else:
   `close_on_reply`. Nothing else on a watch can be changed. Each change is a
   line in its history and one `decision_watch_updated` event with the old and
   new value.
+- **A behaviour watch gated on proof is closed only by whoever set the gate** (28 Nov 2026, Destiny — Jason's SOP 88f178e6, approved in C0ACC6D82AX 1794345263.016989 after QW8M was cancelled on its owner's word while Jason had set what it closed on). `proof_gate`, `proof_gate_by`, `proof_gate_at` on `engine_decision_watches` (migration 165, which gated DW-1795758745258-X3UK as Jason set it). `update_decision_watch` with `proof_gate` sets it, Destiny or Jason only; once set only that person may change or lift it, and `close` refuses everyone else, the owner and every agent included, `proof_gated` naming the SOP (`gateRefusal`, pure). A gated watch does not close with its linked record, and its `how_it_moves` says who closes it. `npm run test:watch-proof-gate`.
 - **A linked loop or task can come off a watch** (3 Nov 2026, Jason on DW-1793619895309-KUQN: it must not
   close with LOOP-1791317275796-MPMD, and no tool could say so; the one-watch-per-decision rule also refused a
   replacement). `update_decision_watch` with `unlink_record: true` clears the record, so it stops restarting the

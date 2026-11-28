@@ -137,6 +137,14 @@ export interface WatchRow {
   snoozed_until: Date | null;
   snoozed_by: string | null;
   /**
+   * The proof a behaviour watch closes on, as the person who set it wrote it (28 Nov 2026, Jason's SOP
+   * 88f178e6: behaviour watches gated on proof are not cancelled silently; migration 165). While set, only
+   * proof_gate_by may close the watch, cancelled or answered, and a linked record closing does not move it.
+   */
+  proof_gate: string | null;
+  proof_gate_by: string | null;
+  proof_gate_at: Date | null;
+  /**
    * An owner message at or before this is not an answer. Set when a snooze is asked for: the
    * owner asking Bays "snooze this" in the thread is a message from the owner, and on a
    * single-part watch it would otherwise close the watch it asked to pause (18 Oct 2026).
@@ -390,8 +398,27 @@ export async function close(watchId: string, by: string, status: 'answered' | 'c
   if (w.status !== 'watching') return { ok: false, reason: 'already_closed', message: `${watchId} is already ${w.status}.` };
   const may = by === w.created_by || by === w.owner_user_id || (APPROVERS as readonly string[]).includes(by);
   if (!may) return { ok: false, reason: 'not_permitted', message: `${watchId} can be closed by the person who asked for it, by its owner <@${w.owner_user_id}>, or by Destiny or Jason.` };
+  const gated = gateRefusal(w, by);
+  if (gated) return gated;
   await settle(w, status, proof && !reason.includes(proof.trim()) ? `${reason} Proof: ${proof.trim()}` : reason, by, now);
   return { ok: true, watch_id: watchId, status };
+}
+
+/** SOP 88f178e6 (Jason, 27 Nov 2026): the SOP a proof-gated watch's refusals name. */
+export const PROOF_GATE_SOP = 'SOP -- Behaviour watches gated on proof are not cancelled silently (BHARAG 88f178e6-4a72-4de2-a7bc-f4d803702067)';
+
+/**
+ * A watch whose proof_gate is set closes only by the person who set the gate (28 Nov 2026). QW8M was
+ * cancelled as "no longer needed" on its owner's word while Jason had set what it closed on; the owner
+ * asking is not enough when someone else set the bar. Pure, so the rule is tested without a database.
+ */
+export function gateRefusal(w: Pick<WatchRow, 'watch_id' | 'proof_gate' | 'proof_gate_by'>, by: string): { ok: false; reason: string; message: string } | null {
+  if (!w.proof_gate || !w.proof_gate_by || by === w.proof_gate_by) return null;
+  return {
+    ok: false,
+    reason: 'proof_gated',
+    message: `${w.watch_id} is gated on proof set by <@${w.proof_gate_by}>, so only they can close it, on that proof: "${clip(w.proof_gate, 400)}". Post the proof in its thread and ask them to close it; it is not cancelled or closed on anyone else's word (${PROOF_GATE_SOP}).`,
+  };
 }
 
 /**
@@ -431,7 +458,7 @@ export async function reopen(watchId: string, by: string, reason: string, now = 
 export const UPDATABLE = ['sop_refs', 'ns_refs', 'next_step'] as const;
 export type Updatable = (typeof UPDATABLE)[number];
 export type UpdateResult =
-  | { ok: true; watch: WatchRow; changed: Array<{ field: Updatable; from: string | null; to: string | null }>; flipped?: boolean; unlinked?: string | null }
+  | { ok: true; watch: WatchRow; changed: Array<{ field: Updatable; from: string | null; to: string | null }>; flipped?: boolean; unlinked?: string | null; gate?: string | null }
   | { ok: false; reason: string; message: string };
 
 /**
@@ -450,7 +477,7 @@ export type UpdateResult =
  * closing the watch, so it then closes on proof alone. Refused on a watch with no
  * thread: the record would be the only thing it could read.
  */
-export async function update(watchId: string, by: string, changes: Partial<Record<Updatable, string | null>>, opts: { append?: boolean; replace?: boolean; closeOnReply?: boolean; unlinkRecord?: boolean } = {}, now = new Date()): Promise<UpdateResult> {
+export async function update(watchId: string, by: string, changes: Partial<Record<Updatable, string | null>>, opts: { append?: boolean; replace?: boolean; closeOnReply?: boolean; unlinkRecord?: boolean; proofGate?: string | null } = {}, now = new Date()): Promise<UpdateResult> {
   const found = await query<WatchRow>(`SELECT * FROM engine_decision_watches WHERE watch_id = $1`, [watchId]);
   const w = found.rows[0];
   if (!w) return { ok: false, reason: 'not_found', message: `No watch has the id "${watchId}". Use list_decision_watches to find it.` };
@@ -460,6 +487,15 @@ export async function update(watchId: string, by: string, changes: Partial<Recor
   if (opts.unlinkRecord && !(APPROVERS as readonly string[]).includes(by)) return { ok: false, reason: 'not_permitted', message: `Only Destiny or Jason can take the linked record off ${watchId}, because that removes a way it closes.` };
   if (opts.unlinkRecord && w.record_id && !w.thread_ts) return { ok: false, reason: 'no_thread', message: `${watchId} has no thread, so its linked ${w.record_id} is the only thing it can read. Open a watch on a thread instead.` };
   const unlinked = opts.unlinkRecord && w.record_id ? w.record_id : null;
+  // The proof gate (28 Nov 2026): set by Destiny or Jason; once set, changed or lifted only by whoever set it.
+  let gate: { to: string | null } | null = null;
+  if (opts.proofGate !== undefined) {
+    const to = typeof opts.proofGate === 'string' ? opts.proofGate.trim() || null : null;
+    if (!(APPROVERS as readonly string[]).includes(by)) return { ok: false, reason: 'not_permitted', message: `Only Destiny or Jason can set the proof a watch closes on.` };
+    if (w.proof_gate && w.proof_gate_by && w.proof_gate_by !== by) return { ok: false, reason: 'proof_gated', message: `${watchId}'s proof gate was set by <@${w.proof_gate_by}>; only they can change or lift it (${PROOF_GATE_SOP}).` };
+    if (to && to.length < 10) return { ok: false, reason: 'proof_gate_too_short', message: 'Say what proof the watch closes on, in a sentence.' };
+    if (to !== (w.proof_gate ?? null)) gate = { to };
+  }
   const changed: Array<{ field: Updatable; from: string | null; to: string | null }> = [];
   for (const field of UPDATABLE) {
     if (!(field in changes)) continue;
@@ -477,7 +513,7 @@ export async function update(watchId: string, by: string, changes: Partial<Recor
   }
   // close_on_reply is history since 26 Oct 2026: no reply closes a watch, so there is nothing to flip.
   const flip = false;
-  if (!changed.length && !flip && !unlinked) return { ok: true, watch: w, changed, flipped: false, unlinked: null };
+  if (!changed.length && !flip && !unlinked && !gate) return { ok: true, watch: w, changed, flipped: false, unlinked: null };
   const next = Object.fromEntries(changed.map((c) => [c.field, c.to])) as Partial<Record<Updatable, string | null>>;
   const lines = changed.map((c) =>
     c.from && c.to && c.to.startsWith(c.from)
@@ -485,6 +521,7 @@ export async function update(watchId: string, by: string, changes: Partial<Recor
       : `${c.field} ${c.from ? 'changed' : 'set'}${c.to ? ` to "${clip(c.to, 200)}"` : ' to nothing'}`,
   );
   if (flip) lines.push(opts.closeOnReply ? 'a reply from the owner now closes it' : 'more than one part: a reply from the owner no longer closes it');
+  if (gate) lines.push(gate.to ? `gated on proof: only ${by} closes it, on "${clip(gate.to, 300)}"` : 'proof gate lifted');
   if (unlinked) lines.push(`no longer linked to ${w.record_kind === 'loops' ? 'loop' : 'backlog task'} ${unlinked}: it closes on proof alone`);
   const line = lines.join('; ');
   const r = await query<WatchRow>(
@@ -496,15 +533,18 @@ export async function update(watchId: string, by: string, changes: Partial<Recor
             record_kind = CASE WHEN $11::boolean THEN NULL ELSE record_kind END,
             record_id = CASE WHEN $11::boolean THEN NULL ELSE record_id END,
             record_hash = CASE WHEN $11::boolean THEN NULL ELSE record_hash END,
+            proof_gate = CASE WHEN $12::boolean THEN $13 ELSE proof_gate END,
+            proof_gate_by = CASE WHEN $12::boolean THEN (CASE WHEN $13::text IS NULL THEN NULL ELSE $14 END) ELSE proof_gate_by END,
+            proof_gate_at = CASE WHEN $12::boolean THEN (CASE WHEN $13::text IS NULL THEN NULL ELSE $15::timestamptz END) ELSE proof_gate_at END,
             history = history || $8::jsonb
       WHERE watch_id = $1 AND status = 'watching'
       RETURNING *`,
-    [watchId, 'sop_refs' in next, next.sop_refs ?? null, 'ns_refs' in next, next.ns_refs ?? null, 'next_step' in next, next.next_step ?? null, JSON.stringify([{ at: now.toISOString(), what: `updated by ${by}: ${line}` }]), flip, opts.closeOnReply === true, Boolean(unlinked)],
+    [watchId, 'sop_refs' in next, next.sop_refs ?? null, 'ns_refs' in next, next.ns_refs ?? null, 'next_step' in next, next.next_step ?? null, JSON.stringify([{ at: now.toISOString(), what: `updated by ${by}: ${line}` }]), flip, opts.closeOnReply === true, Boolean(unlinked), Boolean(gate), gate?.to ?? null, by, now.toISOString()],
   );
   if (!r.rows[0]) return { ok: false, reason: 'already_closed', message: `${watchId} closed while it was being changed. Nothing was changed.` };
   // Not deduped: every change is its own event.
-  await event('decision_watch_updated', r.rows[0], `dw:${watchId}:updated:${now.getTime()}:${Math.random().toString(36).slice(2, 8)}`, { by, changes: changed, ...(flip ? { close_on_reply: opts.closeOnReply } : {}), ...(unlinked ? { unlinked_record: unlinked } : {}) });
-  return { ok: true, watch: r.rows[0], changed, flipped: flip, unlinked };
+  await event('decision_watch_updated', r.rows[0], `dw:${watchId}:updated:${now.getTime()}:${Math.random().toString(36).slice(2, 8)}`, { by, changes: changed, ...(flip ? { close_on_reply: opts.closeOnReply } : {}), ...(unlinked ? { unlinked_record: unlinked } : {}), ...(gate ? { proof_gate: gate.to, proof_gate_by: gate.to ? by : null } : {}) });
+  return { ok: true, watch: r.rows[0], changed, flipped: flip, unlinked, gate: gate ? gate.to : undefined };
 }
 
 /* ---------------------------------------------------------------- snooze */
@@ -1070,7 +1110,8 @@ export async function sweep(now = new Date(), opts: { dry?: boolean; only?: stri
       // 1. The linked record, from this database.
       if (w.record_kind && w.record_id) {
         const st = await recordState(w.record_kind, w.record_id);
-        if (!st.found || st.done) {
+        // A proof-gated watch does not close with its record (28 Nov 2026): only its gate's setter closes it.
+        if ((!st.found || st.done) && !w.proof_gate) {
           const why = st.found ? `the ${st.label} was closed` : `the ${st.label} is no longer held`;
           if (opts.dry) would(w, `close as moved: ${why}`);
           else (await settle(w, 'moved', why, null, now), out.closed.push(w.watch_id));
@@ -1255,7 +1296,8 @@ export function movesText(w: WatchRow, due: Date, now = new Date()): string {
   } else {
     parts.push(`This watch has no thread: reminders go to ${owner} by DM, and only a reply in a thread on one of those reminders counts (${ownerReply}).`);
   }
-  if (w.record_id) parts.push(`It also restarts when ${w.record_kind === 'loops' ? 'loop' : 'backlog task'} ${w.record_id} changes, and closes when it closes.`);
+  if (w.record_id) parts.push(w.proof_gate ? `It also restarts when ${w.record_kind === 'loops' ? 'loop' : 'backlog task'} ${w.record_id} changes, but does not close with it.` : `It also restarts when ${w.record_kind === 'loops' ? 'loop' : 'backlog task'} ${w.record_id} changes, and closes when it closes.`);
+  if (w.proof_gate) parts.push(`It is gated on proof set by <@${w.proof_gate_by}>: only they close it, on "${clip(w.proof_gate, 300)}". Nobody else's word closes or cancels it, the owner's included.`);
   if (snoozedAt(w, now)) parts.push(`Snoozed until ${dayWords(new Date(w.snoozed_until as Date))}: nothing is posted before then and the full wait starts again from that date, but a reply still counts.`);
   const next = w.reminders_sent >= w.max_reminders ? 'escalation to Jason and Destiny' : `reminder ${w.reminders_sent + 1} of ${w.max_reminders}`;
   parts.push(due.getTime() <= now.getTime() ? `If nothing moves, ${next} goes on the next pass (within five minutes).` : `If nothing moves, ${next} goes at ${lagosTime(due)}.`);
@@ -1310,6 +1352,9 @@ export function show(w: WatchRow, now = new Date()) {
     closes_on_owner_reply: false,
     snoozed_until: snoozed ? iso(w.snoozed_until) : null,
     snoozed_by: snoozed ? w.snoozed_by : null,
+    proof_gate: w.proof_gate ?? null,
+    proof_gate_by: w.proof_gate_by ?? null,
+    closes_only_by: w.proof_gate ? w.proof_gate_by : null,
     history: w.history ?? [],
   };
 }

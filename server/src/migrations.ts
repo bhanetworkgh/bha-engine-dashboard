@@ -5394,6 +5394,24 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
        ON CONFLICT (builder_slack_id, effective_from) DO NOTHING`,
     ],
   },
+  {
+    // 28 Nov 2026 (Destiny): Jason's SOP 88f178e6, "behaviour watches gated on proof are not cancelled silently",
+    // wired. A watch can name the proof it closes on and who set it; only that person closes it. X3UK is gated as
+    // Jason set it in #workflow-logs-kaiqi (C0ACC6D82AX 1794345263.016989), and only where no gate is held yet.
+    id: 165,
+    name: 'decision watches: the proof gate',
+    statements: [
+      `ALTER TABLE engine_decision_watches ADD COLUMN IF NOT EXISTS proof_gate text`,
+      `ALTER TABLE engine_decision_watches ADD COLUMN IF NOT EXISTS proof_gate_by text`,
+      `ALTER TABLE engine_decision_watches ADD COLUMN IF NOT EXISTS proof_gate_at timestamptz`,
+      `UPDATE engine_decision_watches
+          SET proof_gate = 'Both posted in the thread and linked to QW8M (DW-1794347893996-QW8M): (1) a fully logged Freeze reminders (24h) click on a sent-back log, with the reason text, where Jason and Bays see that reason, and evidence no further reminders fired in the 24 hours; (2) Destiny''s line-by-line review of request 938b24a7 with corrections or an explicit no-change ruling. Jason closes it.',
+              proof_gate_by = 'U0A9V97949F',
+              proof_gate_at = now(),
+              history = history || jsonb_build_array(jsonb_build_object('at', now(), 'what', 'gated on proof by U0A9V97949F (migration 165, SOP 88f178e6): only Jason closes it'))
+        WHERE watch_id = 'DW-1795758745258-X3UK' AND proof_gate IS NULL`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

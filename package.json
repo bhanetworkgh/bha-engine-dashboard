@@ -165,7 +165,8 @@
     "test:ask-genie": "npm run build:server --silent && node server/test/ask-genie.test.cjs",
     "test:held-pay": "npm run build:server --silent && node server/test/held-pay.test.cjs",
     "test:help-old-copies": "npm run build:server --silent && node server/test/help-old-copies.test.cjs",
-    "test:eod-report": "node server/test/eod-report.test.cjs"
+    "test:eod-report": "node server/test/eod-report.test.cjs",
+    "test:watch-proof-gate": "npm run build:server --silent && node server/test/watch-proof-gate.test.cjs"
   },
   "dependencies": {
     "pg": "^8.23.0",
