@@ -3252,7 +3252,7 @@ be posted, raises it, and writes `answer_check` on the event. `npm run test:engi
 before anything lands there). `server/src/helpPages.ts`, migration 98, `engine_help_pages` (the text as it stands)
 and `engine_help_page_history` (append-only). The Help pages tab on `/cs-twin` (`?tab=help`, one page at
 `&page=<id>`, `GET /api/help-pages`) shows each page with its stage and its open gaps by owner. Three stages:
-**draft**; **checked**, Hardik's pass bound to the sha256 of the text he checked, recorded only on his own Slack
+**draft**; **checked** (from 28 Nov 2026 Destiny's or Jason's own check, recorded as themselves with an optional link to their own Slack message, because Hardik has left; before that Hardik's), the pass bound to the sha256 of the text he checked, recorded only on his own Slack
 message (Slack must confirm he posted it; the table's CHECK holds `checked_by` to his id); **in_corpus**, only from
 checked, with the BHARAG doc id. **Any edit to a checked page's text puts it back to draft.** Tools:
 `read_help_pages` (read, both connections, in Bays', North Star's, Research Twin's and Genie's scopes; each page

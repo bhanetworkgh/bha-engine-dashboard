@@ -16502,3 +16502,10 @@ Files:      src/components/Layout.tsx, src/screens/CsTwin/index.tsx, src/screens
 Problem:    The sidebar, the page title, the Home tile and the tool descriptions agents read still named the old product.
 Fix:        Text only. The /cs-twin route, the cst_* tables, the CST lane tag, the cst-help-manuals workspaces and every field and webhook name are unchanged, because callers name them. migrations.ts keeps its migration names (they are history and keyed by name).
 Decision:   Identifiers stay; a rename of a route or table is its own change with its callers, not a label edit.
+
+## 2026-11-28 05:20 — Hardik's help-page check and lanes handed to Destiny
+Intent:     Destiny: Hardik is gone; record it, stop what still points at him, and the help pages' Honest Gate check is his call now.
+Files:      server/src/helpPages.ts, server/src/mcp/helpPageTools.ts, server/src/migrations.ts (162), server/src/writeGuards.ts, src/screens/CsTwin/HelpPages.tsx, server/test/help-pages.test.cjs, CLAUDE.md
+Problem:    Hardik was already on FORMER_BUILDERS (27 Nov), but a help page could only be checked on Hardik's own Slack message (in code and in the table's CHECK), so two pages edited for the vFarm Assist rename could never go live again. CAD_API and MEDIA still defaulted new loops to him.
+Fix:        The check is Destiny's or Jason's, recorded as the requester; evidence_link is optional and, when sent, must be the checker's own message. Migration 162 widens the CHECK to Destiny, Jason and Hardik (his history stays valid). CAD_API and MEDIA loops default to Destiny.
+Decision:   The charge gate's acceptance_pass is still Hardik's in code and in its CHECK: who records it is Jason's call, so it is left for him, not changed here.

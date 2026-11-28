@@ -31,7 +31,10 @@ export const HARDIK = 'U0BKT6MAW2Y';
 /** Who may write a page: the owner Jason named, and Jason. */
 export const EDITORS: ReadonlySet<string> = new Set([DESTINY, JASON]);
 /** Who may record a stage: the editors, and Hardik for his own check. */
-export const RECORDERS: ReadonlySet<string> = new Set([DESTINY, JASON, HARDIK]);
+export const RECORDERS: ReadonlySet<string> = new Set([DESTINY, JASON]);
+/** Who checks a page against Honest Gate (28 Nov 2026, Destiny: Hardik has left; the check is Destiny's call, Jason's too). */
+export const CHECKERS: ReadonlySet<string> = new Set([DESTINY, JASON]);
+const CHECKER_NAME: Record<string, string> = { [DESTINY]: 'Destiny', [JASON]: 'Jason', [HARDIK]: 'Hardik' };
 
 export const STAGES = ['draft', 'checked', 'in_corpus'] as const;
 export type Stage = (typeof STAGES)[number];
@@ -43,9 +46,9 @@ export const RULE = { title_max: 160, body_max: 40_000, gaps_max: 20, gap_note_m
 export const RULES = [
   'CST answers customers only from the cst-help-manuals workspace in BHARAG, never from these rows.',
   'A page at draft is unreviewed: never quote it to a customer or a pilot operator as BHA\'s answer. Say it is a draft.',
-  'A page at checked has passed Hardik\'s Honest Gate check for exactly this text. It is not in the help library until in_corpus.',
+  'A page at checked has passed the Honest Gate check (Destiny\'s or Jason\'s; Hardik\'s before 28 Nov 2026) for exactly this text. It is not in the help library until in_corpus.',
   'An open gap is a part of the page nobody has written yet. Never fill it in: say who owes it.',
-  'Any edit to a checked page puts it back to draft until Hardik checks it again.',
+  'Any edit to a checked page puts it back to draft until it is checked again.',
 ];
 
 export class HelpPageError extends Error {
@@ -122,7 +125,7 @@ function toPage(r: Record<string, unknown>): HelpPage {
 /** What the page and the read tool print for a stage. Draft with gaps reads "gaps open". */
 export function stageLabel(p: Pick<HelpPage, 'stage' | 'gaps'>): string {
   if (p.stage === 'in_corpus') return 'In cst-help-manuals';
-  if (p.stage === 'checked') return 'Checked by Hardik';
+  if (p.stage === 'checked') return `Checked by ${CHECKER_NAME[p.checked_by ?? ''] ?? 'the checker'}`;
   return p.gaps.length ? `Draft, ${p.gaps.length} gap${p.gaps.length === 1 ? '' : 's'} open` : 'Draft';
 }
 
@@ -228,7 +231,7 @@ export async function write(i: WriteInput, opts: { dry_run?: boolean } = {}): Pr
     const message = !before
       ? `Created ${page_id} as a draft${gaps.length ? ` with ${gaps.length} open gap(s)` : ''}.`
       : back
-        ? `Changed ${page_id}. It was ${stageLabel(before)}; the text changed, so it is a draft again until Hardik checks it.`
+        ? `Changed ${page_id}. It was ${stageLabel(before)}; the text changed, so it is a draft again until it is checked.`
         : `Changed ${page_id} (${textChanged ? 'text' : 'gaps or sources'}). Stage: ${stageLabel(next)}.`;
     if (opts.dry_run) return { ok: true as const, written: false, created: !before, page: next, message: `Dry run: ${message} Nothing was written.` };
     if (!before) {
@@ -268,7 +271,7 @@ export interface StageInput {
 /** Moves a page to checked, in_corpus, or back to draft. Every rule refuses by name and writes nothing. */
 export async function setStage(i: StageInput, opts: { dry_run?: boolean; checkMessage?: MessageCheck } = {}): Promise<{ ok: true; written: boolean; page: HelpPage; message: string }> {
   const who = (i.requester_user_id ?? '').trim();
-  if (!RECORDERS.has(who)) throw new HelpPageError('not_permitted', 'Only Destiny, Jason or Hardik may record a help page\'s stage.');
+  if (!RECORDERS.has(who)) throw new HelpPageError('not_permitted', 'Only Destiny or Jason may record a help page\'s stage.');
   const action = (i.action ?? '').trim() as Action;
   if (!(ACTIONS as readonly string[]).includes(action)) throw new HelpPageError('bad_action', `action is one of ${ACTIONS.join(', ')}.`);
   const page = await get((i.page_id ?? '').trim());
@@ -279,27 +282,32 @@ export async function setStage(i: StageInput, opts: { dry_run?: boolean; checkMe
   let link: ReturnType<typeof parseLink> = null;
   if (action === 'checked') {
     if (page.stage !== 'draft') throw new HelpPageError('wrong_stage', `${page.page_id} is ${stageLabel(page)}, not a draft.`);
-    if (who !== HARDIK && who !== DESTINY && who !== JASON) throw new HelpPageError('not_permitted', 'Only Hardik, or Destiny or Jason recording Hardik\'s check, may mark a page checked.');
-    evidence = (i.evidence_link ?? '').trim();
-    link = parseLink(evidence);
-    if (!link) throw new HelpPageError('evidence_required', 'A check needs evidence_link: the Slack link to Hardik\'s own message passing this page.');
+    if (!CHECKERS.has(who)) throw new HelpPageError('not_permitted', 'Only Destiny or Jason may mark a page checked.');
+    const sent = (i.evidence_link ?? '').trim();
+    if (sent) {
+      link = parseLink(sent);
+      if (!link) throw new HelpPageError('evidence_bad', 'evidence_link must be a Slack message link, or left out.');
+      evidence = sent;
+    } else {
+      evidence = `Checked by ${CHECKER_NAME[who]} (${who}) on the dashboard connector, ${new Date().toISOString().slice(0, 10)}`;
+    }
   } else if (action === 'in_corpus') {
-    if (page.stage !== 'checked') throw new HelpPageError('wrong_stage', `${page.page_id} is ${stageLabel(page)}. Only a page Hardik has checked goes into cst-help-manuals.`);
-    if (page.checked_sha256 !== page.body_sha256) throw new HelpPageError('text_changed', `${page.page_id}'s text is not the text Hardik checked.`);
+    if (page.stage !== 'checked') throw new HelpPageError('wrong_stage', `${page.page_id} is ${stageLabel(page)}. Only a page that has been has checked goes into cst-help-manuals.`);
+    if (page.checked_sha256 !== page.body_sha256) throw new HelpPageError('text_changed', `${page.page_id}'s text is not the text thardik checked.`);
     if (who !== DESTINY && who !== JASON) throw new HelpPageError('not_permitted', 'Only Destiny or Jason records a page as in cst-help-manuals.');
     evidence = (i.bharag_doc_id ?? '').trim();
     if (!evidence || evidence.length > 120) throw new HelpPageError('bharag_doc_id_required', 'in_corpus needs bharag_doc_id: the id of this page\'s document in cst-help-manuals.');
   } else {
     if (page.stage === 'draft') throw new HelpPageError('wrong_stage', `${page.page_id} is already a draft.`);
-    if (who !== DESTINY && who !== JASON && who !== HARDIK) throw new HelpPageError('not_permitted', 'Not permitted.');
+    if (who !== DESTINY && who !== JASON) throw new HelpPageError('not_permitted', 'Not permitted.');
     if (!(i.note ?? '').trim()) throw new HelpPageError('note_required', 'Say why it goes back to draft (note).');
   }
   const stage: Stage = action === 'back_to_draft' ? 'draft' : action;
-  const label = action === 'checked' ? 'checked by Hardik' : action === 'in_corpus' ? 'in cst-help-manuals' : 'back to draft';
+  const label = action === 'checked' ? `checked by ${CHECKER_NAME[who]}` : action === 'in_corpus' ? 'in cst-help-manuals' : 'back to draft';
   if (link && !opts.dry_run) {
     const seen = await (opts.checkMessage ?? slackAuthor)(link);
-    if (!seen.ok) throw new HelpPageError(seen.reason === 'not_found' ? 'evidence_not_found' : 'evidence_unchecked', `${seen.message} Nothing was recorded: a check counts only on a message Slack confirms is Hardik's.`);
-    if (seen.user !== HARDIK) throw new HelpPageError('evidence_not_hardiks', `That message was posted by ${seen.user ?? 'a bot or an unknown sender'}, not Hardik. Link Hardik's own message.`);
+    if (!seen.ok) throw new HelpPageError(seen.reason === 'not_found' ? 'evidence_not_found' : 'evidence_unchecked', `${seen.message} Nothing was recorded: a check counts only on a message Slack confirms is the checker's.`);
+    if (seen.user !== who) throw new HelpPageError('evidence_not_checkers', `That message was posted by ${seen.user ?? 'a bot or an unknown sender'}, not ${CHECKER_NAME[who]}. Link your own message, or leave evidence_link out.`);
   }
   if (opts.dry_run) return { ok: true, written: false, page: { ...page, stage }, message: `Dry run: ${page.page_id} would be ${label}.${link ? ' The Slack author is checked on the real call.' : ''} Nothing was written.` };
   return withTransaction(async (db) => {
@@ -309,7 +317,7 @@ export async function setStage(i: StageInput, opts: { dry_run?: boolean; checkMe
         : action === 'in_corpus'
           ? `UPDATE engine_help_pages SET stage='in_corpus', bharag_doc_id=$3, in_corpus_at=now(), updated_at=now(), updated_by=$4 WHERE page_id=$1 AND stage='checked' AND body_sha256=$5 AND $2::text IS NOT NULL`
           : `UPDATE engine_help_pages SET stage='draft', checked_by=NULL, checked_at=NULL, checked_sha256=NULL, check_evidence=NULL, bharag_doc_id=NULL, in_corpus_at=NULL, updated_at=now(), updated_by=$4 WHERE page_id=$1 AND stage<>'draft' AND body_sha256=$5 AND $2::text IS NOT NULL AND $3::text IS NULL`,
-      [page.page_id, HARDIK, action === 'back_to_draft' ? null : evidence, who, page.body_sha256],
+      [page.page_id, who, action === 'back_to_draft' ? null : evidence, who, page.body_sha256],
     );
     if (!r.rowCount) throw new HelpPageError('text_changed', `${page.page_id} changed while this was being recorded. Read it again.`);
     await logHistory(db, { page_id: page.page_id, action, actor: who, note: (i.note ?? '').trim().slice(0, 1000) || null, body_sha256: page.body_sha256, stage_before: page.stage, stage_after: stage, evidence });
@@ -340,7 +348,7 @@ export async function read(): Promise<{ pages: Array<HelpPage & { stage_label: s
  * in the BHARAG console for this workspace only.
  *
  * In order, and each step refuses by name and leaves the page as it was: the caller is Destiny or Jason; the
- * page is at checked and its text is still the text Hardik checked; the key is set. Then the exact checked text
+ * page is at checked and its text is still the checked text; the key is set. Then the exact checked text
  * is sent through the write guard, the document is read back from BHARAG by its id and compared word for word
  * (whitespace may differ, as BHARAG normalises it), and only then is the page recorded in_corpus with that
  * document's id, through setStage, which checks the stage and the text again. A document that landed but did
@@ -391,12 +399,12 @@ export async function publish(i: PublishInput, opts: { dry_run?: boolean; retire
   const sentSha = (i.body_sha256 ?? '').trim();
   if (sentSha && sentSha !== page.body_sha256) throw new HelpPageError('text_changed', `${page.page_id} has changed since you read it. Read it again.`);
   if (page.stage === 'in_corpus') throw new HelpPageError('already_in_corpus', `${page.page_id} is already in cst-help-manuals as ${page.bharag_doc_id}.`);
-  if (page.stage !== 'checked') throw new HelpPageError('wrong_stage', `${page.page_id} is ${stageLabel(page)}. Only a page Hardik has checked goes into cst-help-manuals.`);
-  if (page.checked_sha256 !== page.body_sha256) throw new HelpPageError('text_changed', `${page.page_id}'s text is not the text Hardik checked.`);
+  if (page.stage !== 'checked') throw new HelpPageError('wrong_stage', `${page.page_id} is ${stageLabel(page)}. Only a page that has been has checked goes into cst-help-manuals.`);
+  if (page.checked_sha256 !== page.body_sha256) throw new HelpPageError('text_changed', `${page.page_id}'s text is not the text thardik checked.`);
   const send = opts.send ?? ((d: bharag.IngestDocument) => bharag.ingestWithKey(HELP_KEY_VAR, d, `mcp:publish_help_page:${page.page_id}`, 'cst_help'));
   if (!opts.send && !process.env[HELP_KEY_VAR]?.trim()) throw new HelpPageError('not_configured', `${HELP_KEY_VAR} is not set on this server, so nothing can be sent to cst-help-manuals.`);
   const doc = helpDocument(page, who);
-  if (opts.dry_run) return { ok: true, written: false, page, message: `Dry run: ${page.page_id} (${doc.content.length} characters, the text Hardik checked) would be sent to cst-help-manuals, read back, and recorded in_corpus. Nothing was sent.` };
+  if (opts.dry_run) return { ok: true, written: false, page, message: `Dry run: ${page.page_id} (${doc.content.length} characters, the checked text) would be sent to cst-help-manuals, read back, and recorded in_corpus. Nothing was sent.` };
   const sent = await send(doc);
   if (!sent.ok || !sent.id) throw new HelpPageError('ingest_failed', `cst-help-manuals did not take ${page.page_id}: ${sent.detail}. The page stays checked.`);
   const readBack = opts.readBack ?? ((id: string) => bharag.getDocument('codex', id, HELP_KEY_VAR));
@@ -408,7 +416,7 @@ export async function publish(i: PublishInput, opts: { dry_run?: boolean; retire
   }
   if (!back) throw new HelpPageError('not_verified', `${page.page_id} was sent as ${sent.id}, but BHARAG has no such document on read-back. The page stays checked.`);
   const exact = (back.raw_content ?? '') === doc.content;
-  if (!exact && words(back.raw_content ?? '') !== words(doc.content)) throw new HelpPageError('not_verified', `${page.page_id} was sent as ${sent.id}, but the stored text differs from the text Hardik checked. The page stays checked; that document should be removed.`);
+  if (!exact && words(back.raw_content ?? '') !== words(doc.content)) throw new HelpPageError('not_verified', `${page.page_id} was sent as ${sent.id}, but the stored text differs from the checked text. The page stays checked; that document should be removed.`);
   const read_back = exact ? 'stored text matches exactly' : 'stored text matches word for word (BHARAG normalised some whitespace)';
   const r = await setStage({ page_id: page.page_id, action: 'in_corpus', requester_user_id: who, bharag_doc_id: sent.id, body_sha256: page.body_sha256, note: (i.note ?? '').trim() || `Sent to cst-help-manuals and read back: ${read_back}.` });
   const old_copies = await retireOldCopies(page.page_id, sent.id, who, opts.retire);

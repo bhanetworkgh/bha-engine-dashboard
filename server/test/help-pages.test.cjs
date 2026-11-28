@@ -17,7 +17,7 @@ const HARDIK = 'U0BKT6MAW2Y';
 const KAVIN = 'U0BNQGG020Y';
 const HARDIK_MSG = 'https://bayshorizonnetwork.slack.com/archives/C0ASMPYQLG3/p1792702326928939';
 const OTHER_MSG = 'https://bayshorizonnetwork.slack.com/archives/C0ASMPYQLG3/p1792702326928940';
-const slack = async (link) => ({ ok: true, user: link.ts === '1792702326.928939' ? HARDIK : KAVIN });
+const slack = async (link) => ({ ok: true, user: link.ts === '1792702326.928939' ? DESTINY : KAVIN });
 const reason = async (p, r) => assert.rejects(p, (x) => { assert.equal(x.reason, r, `expected ${r}, got ${x.reason}: ${x.message}`); return true; });
 
 (async () => {
@@ -76,19 +76,20 @@ const reason = async (p, r) => assert.rejects(p, (x) => { assert.equal(x.reason,
 
     // ---------------------------------------------------------------- the check
     await reason(h.setStage({ page_id: 'what-cst-can-do', action: 'in_corpus', bharag_doc_id: 'd1', requester_user_id: DESTINY }), 'wrong_stage');
-    await reason(h.setStage({ page_id: 'what-cst-can-do', action: 'checked', requester_user_id: DESTINY }, { checkMessage: slack }), 'evidence_required');
-    await reason(h.setStage({ page_id: 'what-cst-can-do', action: 'checked', evidence_link: OTHER_MSG, requester_user_id: DESTINY }, { checkMessage: slack }), 'evidence_not_hardiks');
+    await reason(h.setStage({ page_id: 'what-cst-can-do', action: 'checked', requester_user_id: HARDIK }, { checkMessage: slack }), 'not_permitted');
+    await reason(h.setStage({ page_id: 'what-cst-can-do', action: 'checked', evidence_link: OTHER_MSG, requester_user_id: DESTINY }, { checkMessage: slack }), 'evidence_not_checkers');
     await reason(h.setStage({ page_id: 'what-cst-can-do', action: 'checked', evidence_link: HARDIK_MSG, body_sha256: 'stale', requester_user_id: DESTINY }, { checkMessage: slack }), 'text_changed');
-    const dry = await h.setStage({ page_id: 'what-cst-can-do', action: 'checked', evidence_link: HARDIK_MSG, requester_user_id: DESTINY }, { dry_run: true, checkMessage: slack });
+    const dry = await h.setStage({ page_id: 'what-cst-can-do', action: 'checked', requester_user_id: DESTINY }, { dry_run: true, checkMessage: slack });
     assert.equal(dry.written, false);
     assert.equal((await h.get('what-cst-can-do')).stage, 'draft');
-    ok('in_corpus is refused before a check; a check needs Hardik\'s own message, on the text as it stands; a dry run writes nothing');
+    ok('in_corpus is refused before a check; only Destiny or Jason check (Hardik has left); a link must be the checker\'s own; a dry run writes nothing');
 
-    let s = await h.setStage({ page_id: 'what-cst-can-do', action: 'checked', evidence_link: HARDIK_MSG, body_sha256: before.body_sha256, requester_user_id: DESTINY }, { checkMessage: slack });
+    let s = await h.setStage({ page_id: 'what-cst-can-do', action: 'checked', body_sha256: before.body_sha256, requester_user_id: DESTINY }, { checkMessage: slack });
     assert.equal(s.page.stage, 'checked');
-    assert.equal(s.page.checked_by, HARDIK);
+    assert.equal(s.page.checked_by, DESTINY);
     assert.equal(s.page.checked_sha256, before.body_sha256);
-    ok('Hardik\'s check is recorded against the hash of the text he passed');
+    assert.match(s.page.check_evidence, /Checked by Destiny/);
+    ok('Destiny\'s check is recorded against the hash of the text he passed, with no link needed');
 
     // ---------------------------------------------------------------- an edit undoes it
     w = await h.write({ page_id: 'what-cst-can-do', body: before.body + '\n\nOne more line.', note: 'test edit', requester_user_id: DESTINY });
@@ -97,7 +98,7 @@ const reason = async (p, r) => assert.rejects(p, (x) => { assert.equal(x.reason,
     assert.match(w.message, /draft again/);
     ok('changing a checked page\'s text puts it back to draft');
 
-    s = await h.setStage({ page_id: 'what-cst-can-do', action: 'checked', evidence_link: HARDIK_MSG, requester_user_id: HARDIK }, { checkMessage: slack });
+    s = await h.setStage({ page_id: 'what-cst-can-do', action: 'checked', evidence_link: HARDIK_MSG, requester_user_id: DESTINY }, { checkMessage: slack });
     await reason(h.setStage({ page_id: 'what-cst-can-do', action: 'in_corpus', requester_user_id: DESTINY }), 'bharag_doc_id_required');
     await reason(h.setStage({ page_id: 'what-cst-can-do', action: 'in_corpus', bharag_doc_id: 'doc-1', requester_user_id: HARDIK }), 'not_permitted');
     s = await h.setStage({ page_id: 'what-cst-can-do', action: 'in_corpus', bharag_doc_id: 'doc-1', requester_user_id: DESTINY });

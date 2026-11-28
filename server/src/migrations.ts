@@ -5339,6 +5339,21 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
     ],
   },
   {
+    // 28 Nov 2026 (Destiny): Hardik has left BHA, and the help pages' check is Destiny's call now. checked_by may be
+    // Destiny or Jason; Hardik stays allowed so the history he checked still satisfies the rule.
+    id: 162,
+    name: 'help pages: the check is Destiny\'s or Jason\'s (Hardik has left)',
+    statements: [
+      `DO $$ DECLARE c text; BEGIN
+         FOR c IN SELECT conname FROM pg_constraint WHERE conrelid = 'engine_help_pages'::regclass AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%checked_by%' LOOP
+           EXECUTE format('ALTER TABLE engine_help_pages DROP CONSTRAINT %I', c);
+         END LOOP;
+       END $$`,
+      `ALTER TABLE engine_help_pages ADD CONSTRAINT engine_help_pages_check_recorded
+         CHECK (stage = 'draft' OR (checked_by IN ('U0AEW3TBYH1', 'U0A9V97949F', 'U0BKT6MAW2Y') AND checked_sha256 = body_sha256 AND check_evidence IS NOT NULL))`,
+    ],
+  },
+  {
     // 26 Nov 2026 (Destiny; Jason in C0ASMPYQLG3 1795696380.626199): a gate with no owner and no date is a fault, and
     // the board had nowhere to keep them. Append-only: newest row per gate wins, a moved date keeps the old row and its reason.
     id: 161,

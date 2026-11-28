@@ -4,7 +4,7 @@
  * The pages CST will answer vFarm pilot operators from, each at one address
  * (`/cs-twin?tab=help&page=<id>`) so the team can share it. Each page says its
  * stage in words: a draft with its open gaps named and who owes them, checked by
- * Hardik against Honest Gate, or in cst-help-manuals. Nothing here edits a page:
+ * Destiny or Jason against Honest Gate (Hardik before 28 Nov 2026), or in cst-help-manuals. Nothing here edits a page:
  * Destiny writes them over MCP, and Hardik's check is recorded on his own Slack
  * message. CST itself never reads these rows; it reads cst-help-manuals.
  */
@@ -94,7 +94,7 @@ function PageList({ data, onOpen }: { data: HelpPagesData; onOpen: (id: string) 
   return (
     <div className="flex flex-col gap-4">
       <p className="text-[12px] text-dim">
-        {data.pages.length} page{data.pages.length === 1 ? '' : 's'} · {c.draft} draft · {c.checked} checked by Hardik · {c.in_corpus} in cst-help-manuals ·{' '}
+        {data.pages.length} page{data.pages.length === 1 ? '' : 's'} · {c.draft} draft · {c.checked} checked · {c.in_corpus} in cst-help-manuals ·{' '}
         {c.gaps_open} gap{c.gaps_open === 1 ? '' : 's'} open. CST answers customers only from cst-help-manuals, never from this tab.
       </p>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -105,7 +105,7 @@ function PageList({ data, onOpen }: { data: HelpPagesData; onOpen: (id: string) 
             </div>
             <div><StagePill p={p} /></div>
             <span className="text-[12px] text-dim">
-              {p.gaps.length ? `Waiting on ${[...new Set(p.gaps.map((g) => g.owner))].join(', ')}` : p.stage === 'draft' ? 'Waiting on Hardik\'s check' : p.stage === 'checked' ? 'Ready for cst-help-manuals' : 'Live in the help library'}
+              {p.gaps.length ? `Waiting on ${[...new Set(p.gaps.map((g) => g.owner))].join(', ')}` : p.stage === 'draft' ? 'Waiting on Destiny\'s check' : p.stage === 'checked' ? 'Ready for cst-help-manuals' : 'Live in the help library'}
             </span>
             <span className="mt-auto text-[11.5px] text-faint">updated {relativeTime(p.updated_at) ?? day(p.updated_at)} by {nameOf(p.updated_by)}</span>
           </button>
@@ -130,7 +130,7 @@ function PageView({ p, data, onBack }: { p: HelpPage; data: HelpPagesData; onBac
           </div>
           {!p.customer_safe && (
             <p className="mt-3 rounded-md bg-accent-soft px-3 py-2 text-[12px] text-dim">
-              {p.stage === 'draft' ? 'Draft: not reviewed. Do not send this to a customer or pilot operator as BHA\'s answer.' : 'Checked by Hardik, not yet in cst-help-manuals: CST does not answer from it yet.'}
+              {p.stage === 'draft' ? 'Draft: not reviewed. Do not send this to a customer or pilot operator as BHA\'s answer.' : 'Checked, not yet in cst-help-manuals: vFarm Assist does not answer from it yet.'}
             </p>
           )}
           <div className="mt-4 border-t border-line pt-4">

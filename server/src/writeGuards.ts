@@ -53,8 +53,8 @@ export const LANE_OWNERS: Record<string, string> = {
   NS: 'U0AEW3TBYH1', // Destiny
   VFARM_HARDWARE: 'U0AF011R821', // Jegan
   KIOSK: 'U0BNQGG020Y', // Kavin
-  CAD_API: 'U0BKT6MAW2Y', // Hardik
-  MEDIA: 'U0BKT6MAW2Y', // Hardik -- owns Media Twin and the Canon Render visual lane
+  CAD_API: 'U0AEW3TBYH1', // Destiny (Hardik left BHA, 28 Nov 2026)
+  MEDIA: 'U0AEW3TBYH1', // Destiny (Hardik left BHA, 28 Nov 2026) -- Media Twin and the Canon Render visual lane
   GENIE: 'U0AEW3TBYH1', // Destiny, from 12 Nov 2026 (was Kaiqi, who has left BHA)
   CST: 'U0AC6RFNP3P', // Ahad
   BAYS: 'U0AEW3TBYH1', // Destiny

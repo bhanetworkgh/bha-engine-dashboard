@@ -6,7 +6,7 @@
  *   `write_help_page`        — write connection, no agent's scope, refused on any agent token.
  *                              Destiny or Jason writes the text, the gaps and the sources.
  *   `set_help_page_stage`    — write connection, no agent's scope, refused on any agent token.
- *                              checked (on Hardik's own Slack message), in_corpus (with the BHARAG doc id),
+ *                              checked (by Destiny or Jason), in_corpus (with the BHARAG doc id),
  *                              or back_to_draft.
  *   `publish_help_page`      — write connection, no agent's scope. Sends a checked page to cst-help-manuals,
  *                              reads it back, then records in_corpus (16 Nov 2026).
@@ -25,7 +25,7 @@ export const pageUrl = (id: string): string => `${PUBLIC}/cs-twin?tab=help&page=
 export const readHelpPages: ToolDefinition = {
   name: 'read_help_pages',
   description:
-    "vFarm Assist's help pages for vFarm pilot operators (the cst-help-manuals corpus Destiny owns): the operator quick start, rack and reservoir care, and what the assistant can and cannot do. Each page comes with its stage: draft (unreviewed; open gaps named with who owes them), checked (Hardik passed this exact text against Honest Gate) or in_corpus (in BHARAG's cst-help-manuals, the only thing CST answers customers from). customer_safe is true only at in_corpus. Rules travel with the answer: never quote a draft to a customer or pilot operator as BHA's answer, and never fill a gap in. page_id returns one page whole; without it, every page. Each page carries url, the dashboard link to share with the team. Read only.",
+    "vFarm Assist's help pages for vFarm pilot operators (the cst-help-manuals corpus Destiny owns): the operator quick start, rack and reservoir care, and what the assistant can and cannot do. Each page comes with its stage: draft (unreviewed; open gaps named with who owes them), checked (Destiny or Jason passed this exact text against Honest Gate) or in_corpus (in BHARAG's cst-help-manuals, the only thing CST answers customers from). customer_safe is true only at in_corpus. Rules travel with the answer: never quote a draft to a customer or pilot operator as BHA's answer, and never fill a gap in. page_id returns one page whole; without it, every page. Each page carries url, the dashboard link to share with the team. Read only.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -61,7 +61,7 @@ async function guarded<T extends Record<string, unknown>>(
   const dry = args.dry_run === true;
   const audit = await auditOpen({ tool, args, access: deps.access, kind: 'help_pages', requester, dry_run: dry });
   if (deps.agent) {
-    const message = `An agent (${deps.agent}) may not change a help page: Destiny owns them, and Hardik's check is his own.`;
+    const message = `An agent (${deps.agent}) may not change a help page: Destiny owns them, and the check is Destiny's or Jason's.`;
     await auditClose(audit, { outcome: 'refused', detail: `agent_not_permitted: ${message}`, guard_result: { reason: 'agent_not_permitted' } });
     return { ok: false, written: false, reason: 'agent_not_permitted', message: `${message} Nothing was changed.`, audit_id: audit };
   }
@@ -82,7 +82,7 @@ async function guarded<T extends Record<string, unknown>>(
 
 export const writeHelpPage: ToolDefinition = {
   name: 'write_help_page',
-  description: `Create or change one CST help page: its title, its text (markdown: ## headings, - bullets, 1. steps, - [ ] checks, **bold**), its open gaps ([{id, owner, note}]: a part nobody has written yet and who owes it) and its sources. HELD HERE: only Destiny or Jason (requester_user_id). The stage is not set here: a new page is a draft, and changing the text of a checked or in_corpus page puts it back to draft, because Hardik checked other words. Leaving a field out keeps it; gaps: [] clears them. dry_run writes nothing. Refused on any agent token. Audited on engine_mcp_writes.`,
+  description: `Create or change one CST help page: its title, its text (markdown: ## headings, - bullets, 1. steps, - [ ] checks, **bold**), its open gaps ([{id, owner, note}]: a part nobody has written yet and who owes it) and its sources. HELD HERE: only Destiny or Jason (requester_user_id). The stage is not set here: a new page is a draft, and changing the text of a checked or in_corpus page puts it back to draft, because the check was on other words. Leaving a field out keeps it; gaps: [] clears them. dry_run writes nothing. Refused on any agent token. Audited on engine_mcp_writes.`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -118,13 +118,13 @@ export const writeHelpPage: ToolDefinition = {
 
 export const setHelpPageStage: ToolDefinition = {
   name: 'set_help_page_stage',
-  description: `Move a CST help page along: checked (Hardik passed this exact text against Honest Gate; evidence_link must be Hardik's own Slack message and Slack must confirm he posted it), in_corpus (the checked text is in BHARAG's cst-help-manuals; bharag_doc_id required, and only from checked), or back_to_draft (with a note). HELD HERE: Destiny, Jason or Hardik only; in_corpus by Destiny or Jason. Pass body_sha256 from read_help_pages so a check is never recorded against text that changed since. Nothing here writes to BHARAG: publish_help_page does, and records in_corpus itself. dry_run writes nothing. Refused on any agent token. Audited on engine_mcp_writes.`,
+  description: `Move a CST help page along: checked (Destiny or Jason passed this exact text against Honest Gate, recorded as themselves; evidence_link is optional and, when given, must be the checker's own Slack message), in_corpus (the checked text is in BHARAG's cst-help-manuals; bharag_doc_id required, and only from checked), or back_to_draft (with a note). HELD HERE: Destiny or Jason only (Hardik has left BHA, 28 Nov 2026). Pass body_sha256 from read_help_pages so a check is never recorded against text that changed since. Nothing here writes to BHARAG: publish_help_page does, and records in_corpus itself. dry_run writes nothing. Refused on any agent token. Audited on engine_mcp_writes.`,
   inputSchema: {
     type: 'object',
     properties: {
       page_id: { type: 'string' },
       action: { type: 'string', enum: [...help.ACTIONS] },
-      evidence_link: { type: 'string', description: 'checked: the Slack link to Hardik\'s message passing the page.' },
+      evidence_link: { type: 'string', description: 'checked, optional: the Slack link to the checker\'s own message passing the page.' },
       bharag_doc_id: { type: 'string', description: 'in_corpus: the document id in cst-help-manuals.' },
       body_sha256: { type: 'string', description: 'The body_sha256 you read. Optional, recommended.' },
       note: { type: 'string' },
@@ -154,7 +154,7 @@ export const setHelpPageStage: ToolDefinition = {
 
 export const publishHelpPage: ToolDefinition = {
   name: 'publish_help_page',
-  description: `Put one checked CST help page into BHARAG's cst-help-manuals, the library CST answers customers from, and record it in_corpus. Only a page at checked whose text is still the text Hardik checked. The exact text is sent through the write guard with ${help.HELP_KEY_VAR}, read back from BHARAG by its document id and compared word for word, and only then is the page marked in_corpus with that id; then every older copy of the page in the workspace is removed and read again to prove it gone (remove_old_copies: true does only that, for a page already in_corpus). Any refusal leaves the page at checked. HELD HERE: Destiny or Jason only (requester_user_id). Pass body_sha256 from read_help_pages. dry_run sends nothing. Refused on any agent token. Audited on engine_mcp_writes.`,
+  description: `Put one checked CST help page into BHARAG's cst-help-manuals, the library CST answers customers from, and record it in_corpus. Only a page at checked whose text is still the checked text. The exact text is sent through the write guard with ${help.HELP_KEY_VAR}, read back from BHARAG by its document id and compared word for word, and only then is the page marked in_corpus with that id; then every older copy of the page in the workspace is removed and read again to prove it gone (remove_old_copies: true does only that, for a page already in_corpus). Any refusal leaves the page at checked. HELD HERE: Destiny or Jason only (requester_user_id). Pass body_sha256 from read_help_pages. dry_run sends nothing. Refused on any agent token. Audited on engine_mcp_writes.`,
   inputSchema: {
     type: 'object',
     properties: {
