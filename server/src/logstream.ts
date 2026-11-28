@@ -123,7 +123,7 @@ const LOCK = 8134207619;
 const SWEEP_MS = 5 * 60_000;
 const ISO = `'YYYY-MM-DD"T"HH24:MI:SS"Z"'`;
 
-export type Excluded = 'test' | 'simulator' | 'refused_ask' | 'refused_click' | 'doctrine' | null;
+export type Excluded = 'test' | 'simulator' | 'refused_ask' | 'refused_click' | 'doctrine' | 'hard_block' | null;
 
 /** A fault signature: the workflow plus the step that failed. */
 export const signatureOf = (workflow: string | null, node: string | null): string => `${(workflow ?? '').trim() || '(no workflow)'} :: ${(node ?? '').trim() || '(no step)'}`;
@@ -139,6 +139,9 @@ export function excludedReason(i: { workflow: string | null; node: string | null
   // "not allowed" pop-up, changes nothing, and throws on purpose so it is recorded
   // (Bays — Submit Actions, Raise Refused Click). A guard doing its job, never a fault.
   if (/refused click/i.test(i.node ?? '')) return 'refused_click';
+  // A builder's hard block (28 Nov 2026, SOP 8996e4da): a person's power cut or outage, recorded as an incident
+  // so an excused session can rest on it. Never an engine fault, so never counted as one.
+  if (/^Excused session: hard block$/i.test(wf) || tags.includes('hard_block')) return 'hard_block';
   return null;
 }
 

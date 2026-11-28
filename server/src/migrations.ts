@@ -5412,6 +5412,45 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
         WHERE watch_id = 'DW-1795758745258-X3UK' AND proof_gate IS NULL`,
     ],
   },
+  {
+    // 28 Nov 2026 (Destiny): Jason's SOP 8996e4da, excused sessions for hard-block days. One row per builder
+    // per UTC day, tied to its hard-block incident. Only Destiny or Jason decides (the CHECK holds it), and a row
+    // is never deleted: a test is withdrawn, a wrong one declined.
+    id: 166,
+    name: 'excused sessions: hard-block days',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS engine_excused_sessions (
+        session_id TEXT PRIMARY KEY,
+        builder_user_id TEXT NOT NULL,
+        builder_name TEXT,
+        day DATE NOT NULL,
+        incident_id TEXT NOT NULL,
+        block_type TEXT NOT NULL CHECK (block_type IN ('power_outage','internet_outage','access_blocked','medical_emergency')),
+        block_start TIMESTAMPTZ NOT NULL,
+        block_end TIMESTAMPTZ NOT NULL CHECK (block_end > block_start),
+        evidence JSONB NOT NULL,
+        note TEXT,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','declined','withdrawn')),
+        suppress_penalty BOOLEAN NOT NULL DEFAULT false,
+        over_limit BOOLEAN NOT NULL DEFAULT false,
+        test BOOLEAN NOT NULL DEFAULT false,
+        drafted_by TEXT NOT NULL,
+        drafted_via TEXT,
+        drafted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        decided_by TEXT,
+        decided_at TIMESTAMPTZ,
+        decision_reason TEXT,
+        CHECK (status = 'pending' OR decided_by IN ('U0AEW3TBYH1','U0A9V97949F')),
+        CHECK (NOT suppress_penalty OR status = 'approved')
+      )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS engine_excused_sessions_one_per_day ON engine_excused_sessions (builder_user_id, day) WHERE status IN ('pending','approved')`,
+      `CREATE INDEX IF NOT EXISTS engine_excused_sessions_incident ON engine_excused_sessions (incident_id)`,
+      `CREATE OR REPLACE FUNCTION engine_excused_sessions_no_delete() RETURNS trigger LANGUAGE plpgsql AS $$
+         BEGIN RAISE EXCEPTION 'engine_excused_sessions rows are never deleted: decline or withdraw instead'; END $$`,
+      `DROP TRIGGER IF EXISTS engine_excused_sessions_no_delete ON engine_excused_sessions`,
+      `CREATE TRIGGER engine_excused_sessions_no_delete BEFORE DELETE ON engine_excused_sessions FOR EACH ROW EXECUTE FUNCTION engine_excused_sessions_no_delete()`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

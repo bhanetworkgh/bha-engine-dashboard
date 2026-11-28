@@ -205,6 +205,9 @@ const BAYS_TOOLS: ReadonlySet<string> = new Set([
         // #bha-log-reviews 1792899253.224039). Its dry run lists the Codex logs for the same recording,
         // which is what Bays checks before saying there is no newer submission.
         'void_parked_log',
+        // 2026-11-28 (Destiny, SOP 8996e4da): draft an excused session for a builder's hard-block day and read
+        // them. Deciding one stays with Destiny or Jason on the connector.
+        'draft_excused_session', 'read_excused_sessions',
         // 2026-10-27: the CST help pages with their stage (draft, checked by Hardik, in cst-help-manuals),
         // so a draft is never quoted to a customer as final. Writing them stays with Destiny on the connector.
         'read_help_pages',

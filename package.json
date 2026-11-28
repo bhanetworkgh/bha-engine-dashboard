@@ -166,7 +166,8 @@
     "test:held-pay": "npm run build:server --silent && node server/test/held-pay.test.cjs",
     "test:help-old-copies": "npm run build:server --silent && node server/test/help-old-copies.test.cjs",
     "test:eod-report": "node server/test/eod-report.test.cjs",
-    "test:watch-proof-gate": "npm run build:server --silent && node server/test/watch-proof-gate.test.cjs"
+    "test:watch-proof-gate": "npm run build:server --silent && node server/test/watch-proof-gate.test.cjs",
+    "test:excused-sessions": "npm run build:server --silent && node server/test/excused-sessions.test.cjs"
   },
   "dependencies": {
     "pg": "^8.23.0",

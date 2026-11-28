@@ -282,6 +282,11 @@ export async function judge(watchId: string, escalatedAt: Date): Promise<{ outco
   if (!on || escalatedAt < on) { await checked(watchId, at, 'before_switch_on', {}, w.lane); return { outcome: 'before_switch_on' }; }
   const lane = await laneOf(w);
   if (!inScopeLane(lane)) { await checked(watchId, at, 'out_of_scope', { lane }, lane); return { outcome: 'out_of_scope', detail: lane ?? 'no lane' }; }
+  // An approved excused session that day, with the penalty suppressed by its approver (28 Nov 2026, SOP 8996e4da).
+  // That day only: a penalty recorded on an earlier day stays.
+  const { suppressingOn } = await import('./excusedSessions');
+  const excused = await suppressingOn(w.owner_user_id, escalatedAt);
+  if (excused) { await checked(watchId, at, 'excused', { session_id: excused.session_id, incident_id: excused.incident_id }, lane); return { outcome: 'excused', detail: excused.session_id }; }
   const msgs = await ownerMessages(w, escalatedAt);
   if (!msgs.ok) return { outcome: 'thread_unread', detail: msgs.error }; // tried again on the next pass
   const s = silence(msgs.messages, new Date(w.created_at), escalatedAt);

@@ -39,6 +39,8 @@ export interface Builder {
   name: string | null;
   days_logged: number;
   last_log_at: string;
+  /** The end of the latest approved excused day after the newest log (SOP 8996e4da), if any. */
+  excused_until?: string | null;
 }
 
 export interface Gap extends Builder {
@@ -52,7 +54,12 @@ export function findGaps(builders: Builder[], now: Date): Gap[] {
     .filter((b) => !RULE.never_flag.includes(b.user_id as (typeof RULE.never_flag)[number]))
     .filter((b) => !isFormerBuilder(b.user_id))
     .filter((b) => b.days_logged >= RULE.regular_days)
-    .map((b) => ({ ...b, hours_since: (now.getTime() - new Date(b.last_log_at).getTime()) / 3_600_000, dedupe_key: `codex_gap:${b.user_id}:${new Date(b.last_log_at).toISOString()}` }))
+    // An approved excused day is not a missed log (28 Nov 2026, SOP 8996e4da): the gap is counted from the
+    // later of the newest log and the end of the latest excused day after it.
+    .map((b) => {
+      const from = Math.max(new Date(b.last_log_at).getTime(), b.excused_until ? new Date(b.excused_until).getTime() : 0);
+      return { ...b, hours_since: (now.getTime() - from) / 3_600_000, dedupe_key: `codex_gap:${b.user_id}:${new Date(b.last_log_at).toISOString()}` };
+    })
     .filter((g) => g.hours_since >= RULE.gap_hours)
     .sort((a, b) => b.hours_since - a.hours_since);
 }
@@ -89,7 +96,14 @@ export async function builders(now = new Date()): Promise<Builder[]> {
      HAVING max(at) > $1::timestamptz - make_interval(days => $2)`,
     [now.toISOString(), RULE.lookback_days],
   );
-  return r.rows.map((x) => ({ user_id: x.user_id, name: x.name, days_logged: Number(x.days_logged), last_log_at: new Date(x.last_log_at).toISOString() }));
+  const out = r.rows.map((x) => ({ user_id: x.user_id, name: x.name, days_logged: Number(x.days_logged), last_log_at: new Date(x.last_log_at).toISOString(), excused_until: null as string | null }));
+  const { approvedFor, coveredUntil } = await import('./excusedSessions');
+  for (const b of out) {
+    const rows = await approvedFor(b.user_id, new Date(b.last_log_at)).catch(() => []);
+    const until = coveredUntil(rows, new Date(b.last_log_at));
+    b.excused_until = until ? until.toISOString() : null;
+  }
+  return out;
 }
 
 export interface CheckResult {

@@ -250,6 +250,8 @@ export async function describe(tool: string, args: Args): Promise<string | null>
       return `Log a new ${/^Spec\s+--/i.test(str(args.title)) ? 'spec' : 'SOP'} in BHARAG titled "${clip(args.title, 300)}"${Array.isArray(args.tags) && args.tags.length ? `, tagged ${args.tags.join(', ')}` : ''}. Its text: "${shown(args.content, 6000)}".`;
     case 'edit_sop':
       return `Edit SOP ${str(args.id) || str(args.title) || '(not named)'}. ${args.content !== undefined ? `Its text becomes: "${shown(args.content, 6000)}"` : `Replacements: ${clip(args.replacements, 1200)}`}. Reason given: "${clip(args.reason, 400)}".`;
+    case 'draft_excused_session':
+      return `Draft an excused session (0% pay, protects against a missed-log penalty) for ${named(`<@${str(args.builder_user_id)}>`)}: ${str(args.block_type)} from ${str(args.block_start)} to ${str(args.block_end)}${Array.isArray(args.days) ? ` for ${args.days.join(', ')}` : ''}. Evidence: ${clip(args.evidence, 600)}. Note: "${clip(args.note, 300)}".`;
     default:
       return null;
   }
@@ -265,6 +267,8 @@ export const CHECKED: ReadonlyArray<string> = [
   'post_channel_message', 'edit_doc',
   // 20 Nov 2026: the Production-Income Board.
   'set_income_board_item',
+  // 28 Nov 2026: an excused session drafted for a builder's hard-block day.
+  'draft_excused_session',
 ];
 
 /* ------------------------------------------------------------------ the ask */
