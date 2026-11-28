@@ -23,6 +23,7 @@
     "test:gate": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/write-gate.test.cjs",
     "test:lookup": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/lookup-shape.test.cjs",
     "test:pay-suggest": "node server/test/pay-suggest.test.cjs",
+    "test:pay-determinism": "npm run build:server --silent && node server/test/pay-determinism.test.cjs",
     "test:log-precheck": "node server/test/log-precheck.test.cjs",
     "test:pay-card": "npm run build:server --silent && node server/test/pay-card.test.cjs",
     "test:shared-memory": "npm run build:server --silent && node server/test/shared-memory.test.cjs",

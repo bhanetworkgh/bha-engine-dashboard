@@ -179,6 +179,16 @@ export function suggest(fields: Obj, relog: RelogCheck | null = null, now = new 
   const relogDelta = str(fields['Relog Delta'], 600) || null;
   const parts = parseParts(fields['Work Parts']);
   const flags: string[] = [];
+  // Old or new is the engine's call when its check ran (28 Nov 2026); a disagreement with the review is said.
+  let engineDecided = false;
+  for (const p of parts) {
+    const age = engineAge(p, relog);
+    if (!age) continue;
+    engineDecided = true;
+    if (age.old === !p.new_this_session) continue;
+    flags.push(`${p.what}: the review called this ${p.new_this_session ? 'new' : 'old'} work, but it ${age.why}, so it is counted as ${age.old ? 'old' : 'new'}.`);
+    p.new_this_session = !age.old;
+  }
 
   const strong = (relog?.matches ?? []).filter((m) => m.strength === 'strong');
   if (relog?.unread) flags.push(`The earlier-work check could not run (${relog.unread}), so a re-log was not looked for.`);
@@ -221,7 +231,8 @@ export function suggest(fields: Obj, relog: RelogCheck | null = null, now = new 
   });
 
   // A re-log whose builder named no delta: nothing in it can be counted as new.
-  if (logClass === 'RELOG_OLD_WORK' && !relogDelta) {
+  // When the engine decided each part's age, the review's class cannot overrule it: which parts are old is settled.
+  if (logClass === 'RELOG_OLD_WORK' && !relogDelta && !engineDecided) {
     for (const p of scored) if (p.status !== 'already_paid') Object.assign(p, { score: 0, status: 'already_paid', missing: [], tag: 'RELOG_OLD_WORK' });
     flags.push('Classified as a re-log, but the log does not say what is new this session, so nothing in it is counted as new.');
   }
@@ -546,6 +557,59 @@ export interface RelogCheck {
   matches: RelogMatch[];
   looks_like_relog: boolean;
   unread?: string;
+  /**
+   * Every artefact id (artefactIds) in the builder's approved logs (28 Nov 2026). When present, the
+   * engine, not the review, decides whether each work part is old (see `engineAge`).
+   */
+  known_ids?: string[];
+}
+
+/**
+ * The ids in a piece of text that name a real artefact another person can open (28 Nov 2026, Destiny;
+ * Jason's ask on DW-1794338142516-6JY9: the same log scores the same way every time). A commit sha
+ * (7 to 40 hex characters with at least one digit and one letter), a Render deploy id, a pull request,
+ * an n8n execution, run or audit id, and the engine's own record ids. Loop ids are left out on
+ * purpose: a loop is a piece of work that many logs move, not something a log produced. Pure.
+ */
+export function artefactIds(text: string): string[] {
+  const t = String(text ?? '');
+  const out = new Set<string>();
+  for (const m of t.matchAll(/\b[0-9a-f]{7,40}\b/gi)) {
+    const v = m[0].toLowerCase();
+    if (/[0-9]/.test(v) && /[a-f]/.test(v)) out.add(`sha:${v.slice(0, 7)}`);
+  }
+  for (const m of t.matchAll(/\bdep-[a-z0-9]{12,}\b/gi)) out.add(m[0].toLowerCase());
+  for (const m of t.matchAll(/\b(?:PR|pull request|pull)\s*(?:#|\/)?\s*(\d{1,5})\b/gi)) out.add(`pr:${m[1]}`);
+  for (const m of t.matchAll(/\b(?:[\w.-]+)?#(\d{1,5})\b/g)) out.add(`pr:${m[1]}`);
+  for (const m of t.matchAll(/\b(execution|run|audit)s?\s*(?:id\s*)?#?\s*(\d{4,7})\b/gi)) out.add(`${m[1].toLowerCase()}:${m[2]}`);
+  for (const m of t.matchAll(/\b(?:EV|INC|REP|MTP|DRAFT|EVAL|APR|TASK)-[A-Za-z0-9.-]{4,}\b/g)) out.add(m[0].toUpperCase());
+  return [...out];
+}
+
+/**
+ * Whether a work part is old, decided by the engine from the records, never by the review's own call
+ * (28 Nov 2026). The review's new_this_session flipped between two runs on the same log (Ahad's 9YQU log,
+ * 10 Nov: 25% one run, a full day the next), so on its own it cannot decide pay. Pure:
+ *   - A part that names artefacts is old only when every one of them is already in an approved log of
+ *     this builder's (re-narration of paid work, docked); one new artefact makes it new.
+ *   - A part that names none is old only where the earlier-work check found a strong match (the same
+ *     recording, or an earlier log named by id) and the review also called it old; otherwise it is new.
+ * Returns null when the check did not run, so the review's call stands and the card says so.
+ */
+export function engineAge(part: { what: string; evidence: string; new_this_session: boolean }, relog: RelogCheck | null): { old: boolean; why: string } | null {
+  if (!relog || relog.unread || !Array.isArray(relog.known_ids)) return null;
+  const known = new Set(relog.known_ids);
+  const ids = artefactIds(`${part.what} ${part.evidence}`);
+  if (ids.length) {
+    const fresh = ids.filter((i) => !known.has(i));
+    return fresh.length
+      ? { old: false, why: `names ${fresh.length} artefact${fresh.length === 1 ? '' : 's'} no approved log of theirs carries (${fresh.slice(0, 3).join(', ')})` }
+      : { old: true, why: `every artefact it names is already in an approved log of theirs (${ids.slice(0, 3).join(', ')})` };
+  }
+  const strong = relog.matches.some((m) => m.strength === 'strong');
+  return strong && !part.new_this_session
+    ? { old: true, why: 'names no artefact, and the engine found this log repeats an earlier approved one' }
+    : { old: false, why: 'names no artefact, and the engine found no earlier approved log it repeats' };
 }
 
 const LOOP_RE = /LOOP-\d{10,}-[A-Z0-9]{4}/g;
@@ -562,6 +626,9 @@ export async function relogCheck(b: Obj, db: Queryable = { query } as Queryable)
   const self = str(b.submission_id, 200);
   const url = str(b.session_url, 1000);
   const text = typeof b.transcript === 'string' ? b.transcript.slice(0, 400_000) : '';
+  // Only logs submitted before this one count as earlier work: a rescore of an old log must not find its own
+  // artefacts in a later log that re-narrated it, and dock the original.
+  const beforeMs = Date.parse(str(b.before, 60));
   if (!builder) return { matches: [], looks_like_relog: false, unread: 'no builder_user_id was given' };
   const r = await db.query<{ fields: Obj; updated_at: string }>(
     `SELECT fields, updated_at FROM engine_codex_submissions
@@ -574,8 +641,12 @@ export async function relogCheck(b: Obj, db: Queryable = { query } as Queryable)
   const named = new Set((text.match(CODEX_RE) ?? []).map((x) => x.toLowerCase()));
   const cutoff = Date.now() - 14 * 86_400_000;
   const matches: RelogMatch[] = [];
+  const known = new Set<string>();
   for (const row of r.rows) {
     const f = row.fields;
+    const theirAt = Date.parse(str(f.Timestamp, 60));
+    if (Number.isFinite(beforeMs) && Number.isFinite(theirAt) && theirAt >= beforeMs) continue;
+    for (const id of artefactIds(`${String(f.Transcript ?? '').slice(0, 200_000)} ${String(f.Summary ?? '').slice(0, 20_000)}`)) known.add(id);
     const sub = str(f['Submission ID'], 200);
     const cid = str(f['Codex Entry ID'], 200) || null;
     const why: string[] = [];
@@ -603,7 +674,7 @@ export async function relogCheck(b: Obj, db: Queryable = { query } as Queryable)
     }
   }
   matches.sort((a, b) => (a.strength === b.strength ? 0 : a.strength === 'strong' ? -1 : 1));
-  return { matches: matches.slice(0, 8), looks_like_relog: matches.length > 0 };
+  return { matches: matches.slice(0, 8), looks_like_relog: matches.length > 0, known_ids: [...known] };
 }
 
 /**
@@ -659,7 +730,7 @@ export async function annotate(fields: Obj, db: Queryable = { query } as Queryab
   }
   let relog: RelogCheck | null = null;
   try {
-    relog = await relogCheck({ builder_user_id: fields['Builder User ID'], submission_id: fields['Submission ID'], session_url: fields['Session Url'], transcript: fields.Transcript }, db);
+    relog = await relogCheck({ builder_user_id: fields['Builder User ID'], submission_id: fields['Submission ID'], session_url: fields['Session Url'], transcript: fields.Transcript, before: fields.Timestamp }, db);
   } catch (e) {
     relog = { matches: [], looks_like_relog: false, unread: e instanceof Error ? e.message : String(e) };
   }

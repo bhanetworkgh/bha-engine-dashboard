@@ -176,6 +176,20 @@ const VIA = ['slack_approve', 'dashboard_approve', 'mcp', 'engine'] as const;
  * is a correction, needs correction_note, and may not raise credited + held above what the log had
  * (a dock stays docked). Released shares are never touched here: a release is its own act.
  */
+/**
+ * The no-double-pay guard on a correction (28 Nov 2026, named for Jason's ask on DW-1794338142516-6JY9). Pure, and
+ * the only place the rule lives: a pay note decided at Approve is the record, so a rescore, a re-run review or a
+ * completed log can never raise what a decided log pays. A share already released cannot be re-decided at all, and
+ * credited + held can never go above what the first decision left, so a docked share (a re-log of paid work) is
+ * never paid later. Throws PayNoteError; returns nothing when the correction may go ahead.
+ */
+export function correctionGuard(prior: { released_share: number; credited_share: number; held_share: number; docked_share: number; decided_by: string; decided_by_name?: string | null }, credited: number, held: number): void {
+  if (prior.released_share > 0) throw new PayNoteError('already_released', 'A held share on this log was already released and paid. It cannot be re-decided; correct forward on a new log.');
+  if (round3(credited + held) > round3(prior.credited_share + prior.held_share)) {
+    throw new PayNoteError('dock_stays_docked', `This log was docked ${pct(prior.docked_share)} of a day by ${prior.decided_by_name ?? prior.decided_by}. A dock stays docked: credited + held cannot go above ${pct(prior.credited_share + prior.held_share)}.`);
+  }
+}
+
 export async function set(b: Obj, opts: { dry_run?: boolean } = {}): Promise<{ written: boolean; dry_run: boolean; action: 'set' | 'correct' | 'unchanged'; note: PayNote; message: string; releases?: Awaited<ReturnType<typeof releaseFromLog>> }> {
   const by = s(b.decided_by, 40);
   if (!DECIDERS[by]) throw new PayNoteError('not_permitted', `Only Destiny or Jason set a pay note (decided_by is their Slack id); ${by || 'nobody'} was given.`, 403);
@@ -259,10 +273,7 @@ export async function set(b: Obj, opts: { dry_run?: boolean } = {}): Promise<{ w
       const same = prior.pay_recommendation === recommendation && prior.credited_share === credited && prior.held_share === held && prior.reason_tag === tag && prior.reason_note === note && prior.release_condition === condition;
       if (same) return { action: 'unchanged' as const, note: prior };
       if (!correction || correction.length < 8) throw new PayNoteError('correction_needs_note', `${log.codex_entry_id ?? log.submission_id} already has a pay note (${prior.pay_recommendation}, ${prior.credited_share} credited, ${prior.held_share} held, decided by ${prior.decided_by_name ?? prior.decided_by} ${prior.decided_at}). Changing it is a correction: give correction_note saying why.`);
-      if (prior.released_share > 0) throw new PayNoteError('already_released', 'A held share on this log was already released and paid. It cannot be re-decided; correct forward on a new log.');
-      if (round3(credited + held) > round3(prior.credited_share + prior.held_share)) {
-        throw new PayNoteError('dock_stays_docked', `This log was docked ${pct(prior.docked_share)} of a day by ${prior.decided_by_name ?? prior.decided_by}. A dock stays docked: credited + held cannot go above ${pct(prior.credited_share + prior.held_share)}.`);
-      }
+      correctionGuard(prior, credited, held);
     }
     await db.query(
       `INSERT INTO engine_pay_notes (submission_id, codex_entry_id, builder_slack_id, builder, session_month, pay_recommendation, credited_share, held_share,
