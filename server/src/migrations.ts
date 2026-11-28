@@ -5383,6 +5383,17 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
     name: 'vfarm leads: the signed agreement',
     statements: [`ALTER TABLE engine_vfarm_leads ADD COLUMN IF NOT EXISTS agreement jsonb`],
   },
+  {
+    // 28 Nov 2026 (Destiny): Jason's decision in DM D0AF0DG8ZPY 1795790677.675689: $410 through 30 Nov, $350 from 1 Dec.
+    // Rates are never edited; the new rate is a new row from its start date.
+    id: 164,
+    name: 'pay rates: Destiny $350 from 1 Dec 2026',
+    statements: [
+      `INSERT INTO engine_pay_rates (builder_slack_id, builder, day_rate_usd, effective_from, set_by, note) VALUES
+        ('U0AEW3TBYH1', 'Destiny Arupi', 350, '2026-12-01', 'U0AEW3TBYH1', 'Jason''s decision: $410 through 30 Nov, $350 from 1 Dec as primary coordinator across CST, Genie and P1 reliability (DM 1795790677.675689)')
+       ON CONFLICT (builder_slack_id, effective_from) DO NOTHING`,
+    ],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

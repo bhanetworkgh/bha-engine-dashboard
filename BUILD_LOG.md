@@ -16558,3 +16558,10 @@ Files:      n8n only: Media Twin — Weekly Readiness (eBEn9Y0GWWxJ5cf2), Media 
 Problem:    Daily Draft, Rewrite Draft and Front Door already fall back to Media Twin (OpenRouter backup) oqahGbB45yxiTXcA (6 Nov, LOOP-8KGQ). Two places did not: the weekly readiness agent call, and Rewrite Draft's note-check retry, which only ever called the main agent.
 Fix:        Weekly Readiness: Ask Media Twin Agent now sends its error output to Note Primary Failed, which passes the same message to Ask Media Twin Backup (oqahGbB45yxiTXcA). Build The Report reads the backup's answer, and Record Backup Used writes one ai_provider_fallback event. Published as dea85281; restore point 000066c9. Test Run 121947: the primary failed on Anthropic credit, the backup answered, event 228108 was written, and the report posted in the sandbox. Rewrite Draft: the retry's agent id is an expression that picks the backup when the first answer came from it. Published as f5598fc5; restore point 6acabfa9. Pinned test 121951: the retry session's agentId was oqahGbB45yxiTXcA.
 Decision:   The backup is in step with the main agent: same instructions sha256 (1ed0138e…) in engine_agent_inventory, same model route, skills and tools. A duplicate backup I made first (kjj4cf1wYANoNBVk) was archived once the existing one was found. Test event 228084 names it. The production re-run of today's report is left for Destiny.
+
+## 2026-11-28 14:10 — Destiny's day rate is $350 from 1 Dec
+Intent:     Jason's decision in DM D0AF0DG8ZPY 1795790677.675689: $410/day through 30 Nov, $350/day from 1 Dec, as primary coordinator across CST, Genie and P1 reliability.
+Files:      server/src/migrations.ts (164)
+Problem:    engine_pay_rates held $410 from 12 Nov and nothing after, so pay cards would keep pricing December days at $410.
+Fix:        Migration 164 adds one row, $350 effective 2026-12-01. Rates are frozen by trigger, so the change is a new row, not an edit; payCard.rateFor already takes the newest row on or before the session date, so November days stay at $410.
+Decision:   No code change beyond the row: the rate table was built for exactly this.
