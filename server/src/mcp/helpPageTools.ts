@@ -118,7 +118,7 @@ export const writeHelpPage: ToolDefinition = {
 
 export const setHelpPageStage: ToolDefinition = {
   name: 'set_help_page_stage',
-  description: `Move a CST help page along: checked (Destiny or Jason passed this exact text against Honest Gate, recorded as themselves; evidence_link is optional and, when given, must be the checker's own Slack message), in_corpus (the checked text is in BHARAG's cst-help-manuals; bharag_doc_id required, and only from checked), or back_to_draft (with a note). HELD HERE: Destiny or Jason only (Hardik has left BHA, 28 Nov 2026). Pass body_sha256 from read_help_pages so a check is never recorded against text that changed since. Nothing here writes to BHARAG: publish_help_page does, and records in_corpus itself. dry_run writes nothing. Refused on any agent token. Audited on engine_mcp_writes.`,
+  description: `Move a CST help page along: checked (Destiny or Jason passed this exact text against Honest Gate, recorded as themselves; evidence_link is optional and, when given, must be the checker's own Slack message), in_corpus (the checked text is in BHARAG's cst-help-manuals; bharag_doc_id required, and only from checked), or back_to_draft (with a note; a page that was in cst-help-manuals is also removed from it, each copy read again to prove it gone). HELD HERE: Destiny or Jason only (Hardik has left BHA, 28 Nov 2026). Pass body_sha256 from read_help_pages so a check is never recorded against text that changed since. Only publish_help_page adds to BHARAG, and records in_corpus itself. dry_run writes nothing. Refused on any agent token. Audited on engine_mcp_writes.`,
   inputSchema: {
     type: 'object',
     properties: {

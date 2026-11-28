@@ -16509,3 +16509,10 @@ Files:      server/src/helpPages.ts, server/src/mcp/helpPageTools.ts, server/src
 Problem:    Hardik was already on FORMER_BUILDERS (27 Nov), but a help page could only be checked on Hardik's own Slack message (in code and in the table's CHECK), so two pages edited for the vFarm Assist rename could never go live again. CAD_API and MEDIA still defaulted new loops to him.
 Fix:        The check is Destiny's or Jason's, recorded as the requester; evidence_link is optional and, when sent, must be the checker's own message. Migration 162 widens the CHECK to Destiny, Jason and Hardik (his history stays valid). CAD_API and MEDIA loops default to Destiny.
 Decision:   The charge gate's acceptance_pass is still Hardik's in code and in its CHECK: who records it is Jason's call, so it is left for him, not changed here.
+
+## 2026-11-28 05:15 — Back to draft takes a page out of the library
+Intent:     rack-care was published to cst-help-manuals by mistake while Jegan's two gaps are open (Jason, 13 Nov: rack care stays out until they are logged).
+Files:      server/src/helpPages.ts, server/src/mcp/helpPageTools.ts, server/test/help-pages.test.cjs
+Problem:    back_to_draft changed the page's stage but left its document in cst-help-manuals, where the old assistant still reads it.
+Fix:        back_to_draft on an in_corpus page runs retireOldCopies with nothing kept: every copy is deleted and read again, and the answer names what was removed or what is still there.
+Decision:   rack-care is taken back to draft with this path once it deploys (BHARAG doc 4b5d3a9e-f0cb-4a10-940c-d0c929196426).

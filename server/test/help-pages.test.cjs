@@ -108,7 +108,8 @@ const reason = async (p, r) => assert.rejects(p, (x) => { assert.equal(x.reason,
     ok('in_corpus only from checked, by Destiny or Jason, with the BHARAG doc id; only then is a page customer-safe');
 
     await reason(h.setStage({ page_id: 'what-cst-can-do', action: 'back_to_draft', requester_user_id: DESTINY }), 'note_required');
-    s = await h.setStage({ page_id: 'what-cst-can-do', action: 'back_to_draft', note: 'test', requester_user_id: DESTINY });
+    s = await h.setStage({ page_id: 'what-cst-can-do', action: 'back_to_draft', note: 'test', requester_user_id: DESTINY }, { retire: { find: async () => ({ ids: ['doc-1'], complete: true }), remove: async () => ({ ok: true, detail: 'ok' }), exists: async () => false } });
+    assert.deepEqual(s.removed_from_library.removed, ['doc-1']);
     assert.equal(s.page.stage, 'draft');
     assert.equal(s.page.bharag_doc_id, null);
     const hist = await h.history('what-cst-can-do');

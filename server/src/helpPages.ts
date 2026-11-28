@@ -269,7 +269,7 @@ export interface StageInput {
 }
 
 /** Moves a page to checked, in_corpus, or back to draft. Every rule refuses by name and writes nothing. */
-export async function setStage(i: StageInput, opts: { dry_run?: boolean; checkMessage?: MessageCheck } = {}): Promise<{ ok: true; written: boolean; page: HelpPage; message: string }> {
+export async function setStage(i: StageInput, opts: { dry_run?: boolean; checkMessage?: MessageCheck; retire?: RetireDeps } = {}): Promise<{ ok: true; written: boolean; page: HelpPage; message: string; removed_from_library?: Awaited<ReturnType<typeof retireOldCopies>> }> {
   const who = (i.requester_user_id ?? '').trim();
   if (!RECORDERS.has(who)) throw new HelpPageError('not_permitted', 'Only Destiny or Jason may record a help page\'s stage.');
   const action = (i.action ?? '').trim() as Action;
@@ -310,7 +310,7 @@ export async function setStage(i: StageInput, opts: { dry_run?: boolean; checkMe
     if (seen.user !== who) throw new HelpPageError('evidence_not_checkers', `That message was posted by ${seen.user ?? 'a bot or an unknown sender'}, not ${CHECKER_NAME[who]}. Link your own message, or leave evidence_link out.`);
   }
   if (opts.dry_run) return { ok: true, written: false, page: { ...page, stage }, message: `Dry run: ${page.page_id} would be ${label}.${link ? ' The Slack author is checked on the real call.' : ''} Nothing was written.` };
-  return withTransaction(async (db) => {
+  const res = await withTransaction(async (db) => {
     const r = await db.query(
       action === 'checked'
         ? `UPDATE engine_help_pages SET stage='checked', checked_by=$2, checked_at=now(), checked_sha256=body_sha256, check_evidence=$3, updated_at=now(), updated_by=$4 WHERE page_id=$1 AND stage='draft' AND body_sha256=$5`
@@ -326,6 +326,14 @@ export async function setStage(i: StageInput, opts: { dry_run?: boolean; checkMe
     const after = (await get(page.page_id, db))!;
     return { ok: true as const, written: true, page: after, message: `${page.page_id} is now ${label}.` };
   });
+  // 28 Nov 2026 (Destiny): a page taken back from the library must leave it, or the old assistant still
+  // answers from it. Every copy in cst-help-manuals is removed and read again; a failure is said, never hidden.
+  if (action === 'back_to_draft' && page.stage === 'in_corpus') {
+    const out = await retireOldCopies(page.page_id, '', who, opts.retire);
+    const line = out.ok ? ` Removed from cst-help-manuals: ${out.removed.join(', ') || 'no copy found'}.` : ` NOT fully removed from cst-help-manuals (${out.detail}); still there: ${out.failed.map((f) => f.id).join(', ') || 'unknown'}.`;
+    return { ...res, message: res.message + line, removed_from_library: out };
+  }
+  return res;
 }
 
 /** The page's route and the read tool's answer. */
