@@ -173,13 +173,14 @@ export const INTAKE2_WRITE_TOOLS: ToolDefinition[] = [testSubmitIntake2Tool];
  */
 import * as earlyAccess from '../earlyAccess';
 import * as proposalMod from '../proposal';
+import * as agreementMod from '../agreement';
 
-type FlowStep = 'status' | 'move' | 'propose' | 'buyer_open' | 'buyer_accept' | 'buyer_question' | 'buyer_call';
-const FLOW_STEPS: FlowStep[] = ['status', 'move', 'propose', 'buyer_open', 'buyer_accept', 'buyer_question', 'buyer_call'];
+type FlowStep = 'status' | 'move' | 'propose' | 'buyer_open' | 'buyer_accept' | 'buyer_question' | 'buyer_call' | 'agree' | 'buyer_open_agreement' | 'buyer_sign';
+const FLOW_STEPS: FlowStep[] = ['status', 'move', 'propose', 'buyer_open', 'buyer_accept', 'buyer_question', 'buyer_call', 'agree', 'buyer_open_agreement', 'buyer_sign'];
 
 async function flowState(id: string): Promise<Record<string, unknown>> {
-  const r = await query<{ stage: number; closed_at: Date | null; form2: boolean; proposal: proposalMod.Proposal | null; pay: Record<string, unknown> | null; history: unknown }>(
-    `SELECT stage, closed_at, intake_2 IS NOT NULL AS form2, proposal, stripe_payment AS pay, stage_history AS history FROM engine_vfarm_leads WHERE id::text = $1`,
+  const r = await query<{ stage: number; closed_at: Date | null; form2: boolean; proposal: proposalMod.Proposal | null; agreement: agreementMod.Agreement | null; pay: Record<string, unknown> | null; history: unknown }>(
+    `SELECT stage, closed_at, intake_2 IS NOT NULL AS form2, proposal, agreement, stripe_payment AS pay, stage_history AS history FROM engine_vfarm_leads WHERE id::text = $1`,
     [id],
   );
   const row = r.rows[0];
@@ -190,6 +191,7 @@ async function flowState(id: string): Promise<Record<string, unknown>> {
     closed: !!row.closed_at,
     form_2_in: row.form2,
     proposal: p ? { proposal_id: p.proposal_id, test: p.test, setup_name: p.setup_name, price_amount: p.price_amount, currency: p.currency, opened_at: p.opened_at, accepted_at: p.accepted_at, actions: p.actions.map((a) => ({ kind: a.kind, at: a.at, text: a.text, posted: !!a.notified?.ts, post_error: a.notified?.error ?? null })) } : null,
+    agreement: row.agreement ? { agreement_id: row.agreement.agreement_id, version: row.agreement.version, test: row.agreement.test, text_sha256: row.agreement.text_sha256, deposit_cents: row.agreement.deposit_cents, opened_at: row.agreement.opened_at, signed: row.agreement.signed, posted: !!row.agreement.notified?.ts, post_error: row.agreement.notified?.error ?? null } : null,
     stripe_payment: row.pay ? { state: row.pay.state, mode: row.pay.mode, amount: row.pay.amount, currency: row.pay.currency } : null,
     last_moves: Array.isArray(row.history) ? (row.history as unknown[]).slice(-3) : [],
   };
@@ -198,7 +200,7 @@ async function flowState(id: string): Promise<Record<string, unknown>> {
 export const testBuyerFlowTool: ToolDefinition = {
   name: 'test_buyer_flow',
   description:
-    'Walk a TEST lead through vFarm buyer flow v2, one step per call, through the real functions: move (to stage 1-5, with the dashboard\'s own gates: 3 needs Form 2, 4 an accepted proposal, 5 a paid payment), propose (make or replace the Stage 3 proposal, always a test), buyer_open (open the buyer\'s proposal page as they would), buyer_accept, buyer_question (needs text), buyer_call (text optional) — the buyer\'s own page actions on their own link — and status. Only Destiny or Jason; only a lead whose email is @bhanetwork.org. Every step but status needs confirm exactly "TEST FLOW <buyer_intake_id>". dry_run says what would run and changes nothing. Audited on engine_mcp_writes.',
+    'Walk a TEST lead through vFarm buyer flow v2, one step per call, through the real functions: move (to stage 1-5, with the dashboard\'s own gates: 3 needs Form 2, 4 an accepted proposal, 5 a signed agreement and a paid payment), propose (make or replace the Stage 3 proposal, always a test), buyer_open (open the buyer\'s proposal page as they would), buyer_accept, buyer_question (needs text), buyer_call (text optional) — the buyer\'s own page actions on their own link — agree (make the Stage 4 agreement, a test on a team lead), buyer_open_agreement, buyer_sign (signature: {name, title, organisation}; the buyer\'s own agreement page), and status. 5 needs a signed agreement and a paid payment. Only Destiny or Jason; only a lead whose email is @bhanetwork.org. Every step but status needs confirm exactly "TEST FLOW <buyer_intake_id>". dry_run says what would run and changes nothing. Audited on engine_mcp_writes.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -221,6 +223,7 @@ export const testBuyerFlowTool: ToolDefinition = {
         },
       },
       text: { type: 'string', description: 'buyer_question / buyer_call: what the buyer writes.' },
+      signature: { type: 'object', description: 'buyer_sign: what the buyer types, {name, title, organisation}. name defaults to "TEST Signer".' },
       dry_run: { type: 'boolean' },
     },
     required: ['lead', 'step', 'requester_user_id'],
@@ -262,6 +265,23 @@ export const testBuyerFlowTool: ToolDefinition = {
       } else if (step === 'propose') {
         const made = await proposalMod.create(lead.id, (args.proposal ?? {}) as proposalMod.ProposalInput, who);
         detail = { proposal_id: made.proposal?.proposal_id, replaced: made.replaced, link_made: !!made.proposal?.link && made.proposal.link.startsWith('http') };
+      } else if (step === 'agree') {
+        const made = await agreementMod.create(lead.id, who);
+        detail = { agreement_id: made.agreement?.agreement_id, replaced: made.replaced, test: made.agreement?.test, link_made: !!made.agreement?.link && made.agreement.link.startsWith('http') };
+      } else if (step === 'buyer_open_agreement' || step === 'buyer_sign') {
+        const ag = before.agreement as { agreement_id: string } | null;
+        if (!ag) return refuse('no_agreement', 'This lead has no agreement yet. Run step agree first.');
+        const token = agreementMod.tokenFor(ag.agreement_id);
+        if (step === 'buyer_open_agreement') {
+          const html = await agreementMod.page(token);
+          if (!html) return refuse('link_opens_nothing', 'The agreement link opened nothing (closed lead or replaced agreement).');
+          detail = { page_opened: true, says_test: html.includes('Test agreement'), shows_payment: /stripe|checkout/i.test(html), bytes: html.length };
+        } else {
+          const sig = (args.signature ?? {}) as Record<string, unknown>;
+          const out = await agreementMod.sign(token, { name: sig.name ?? 'TEST Signer', title: sig.title ?? null, organisation: sig.organisation ?? null, agree: 'yes' });
+          if (!out) return refuse('link_opens_nothing', 'The agreement link opened nothing.');
+          detail = { buyer_saw: out.flash, signed: out.signed };
+        }
       } else {
         const st = before.proposal as { proposal_id: string } | null;
         if (!st) return refuse('no_proposal', 'This lead has no proposal yet. Run step propose first.');

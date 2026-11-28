@@ -8,7 +8,7 @@
  *   - a wrong link and a replaced link open nothing;
  *   - Accept moves the lead to Stage 4 once; a second Accept changes nothing;
  *   - a question needs text and is recorded;
- *   - the stage gates: 3 needs Form 2, 4 needs an accepted proposal, 5 a paid payment.
+ *   - the stage gates: 3 needs Form 2, 4 needs an accepted proposal, 5 a signed agreement and a paid payment, which writes one pending subscriber event.
  *
  * Run with:  npm run test:proposal   (needs a LOCAL DATABASE_URL)
  */
@@ -88,6 +88,9 @@ const ok = (name) => (passed++, console.log(`  ok  ${name}`));
   assert.equal(qev.backstop, 'U0A9V97949F');
   ok('a question is recorded with a named owner (Destiny, Jason backstop) and the buyer is told it is manual; Accept moves the lead to Stage 4 once, and a second changes nothing');
 
+  // Stage 5 needs a signed agreement first (28 Nov 2026, 08KI).
+  await assert.rejects(ea.moveStage({ id }, 5, 'Destiny', null, 'page'), /No signed agreement/);
+  await query(`UPDATE engine_vfarm_leads SET agreement = '{"agreement_id":"VFAGR-PROPTEST-1","test":false,"signed":{"name":"Ada","title":null,"organisation":null,"at":"2026-11-28T00:00:00.000Z"}}'::jsonb WHERE id::text = $1`, [id]);
   await assert.rejects(ea.moveStage({ id }, 5, 'Destiny', null, 'page'), /paid/);
   await query(`UPDATE engine_vfarm_leads SET stripe_payment = '{"state":"paid","mode":"test"}'::jsonb WHERE id::text = $1`, [id]);
   // A real buyer's address: a test-mode payment never makes them a customer (SOP c14e9e54).
@@ -104,6 +107,8 @@ const ok = (name) => (passed++, console.log(`  ok  ${name}`));
   let moved5 = await ea.moveStage({ id }, 5, 'Destiny', 'agreement and payment in', 'page');
   await query(`DELETE FROM engine_charge_gate WHERE gate_id LIKE 'CG-PROPTEST-%'`);
   assert.equal(moved5.stage, 5);
+  const subs = (await query(`SELECT subject_id, detail FROM engine_events WHERE event_type = 'VFARM_SUBSCRIBER_STATE_CHANGED' AND detail->>'agreement_id' = 'VFAGR-PROPTEST-1'`)).rows;
+  assert.equal(subs.length, 1); assert.equal(subs[0].detail.new_state, 'pending'); assert.ok(subs[0].subject_id.startsWith('VFSUB-'));
   await ea.moveStage({ id }, 4, 'Destiny', 'back for the team-test case', 'page');
   // A team test lead may move on a test-mode payment, and the move says it grants nothing.
   await query(`UPDATE engine_vfarm_leads SET email = 'ada@bhanetwork.org', stripe_payment = '{"state":"paid","mode":"test"}'::jsonb WHERE id::text = $1`, [id]);
@@ -173,6 +178,7 @@ const ok = (name) => (passed++, console.log(`  ok  ${name}`));
   } finally {
     await query(`DELETE FROM engine_charge_gate WHERE gate_id IN ($1, $2)`, [GW, GA]);
     await query(`DELETE FROM engine_events WHERE subject_id = $1`, [RB]);
+    await query(`DELETE FROM engine_events WHERE event_type = 'VFARM_SUBSCRIBER_STATE_CHANGED' AND detail->>'agreement_id' = 'VFAGR-PROPTEST-1'`);
   }
 
   await clean();

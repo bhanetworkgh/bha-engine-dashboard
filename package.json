@@ -52,6 +52,7 @@
     "test:code-checks": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/code-checks.test.cjs",
     "test:un9d": "node --no-warnings=ExperimentalWarning server/test/un9d.test.cjs",
     "test:stress-test": "node --no-warnings=ExperimentalWarning server/test/stress-test.test.cjs",
+    "test:agreement": "node --no-warnings=ExperimentalWarning server/test/agreement.test.cjs",
     "test:confidence-score": "node --no-warnings=ExperimentalWarning server/test/confidence-score.test.cjs",
     "test:vfarm-evidence": "node --no-warnings=ExperimentalWarning server/test/vfarm-evidence.test.cjs",
     "test:hero-bay": "npm run build:server --silent && node --no-warnings=ExperimentalWarning server/test/hero-bay.test.cjs",

@@ -175,6 +175,17 @@ async function post(text: string): Promise<{ ts: string | null; error: string | 
 
 const money = (cents: number, cur: string) => `${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${cur.toUpperCase()}`;
 
+/** The newest real offer approval with its conditions, for the agreement (28 Nov 2026). */
+export async function currentOfferFull(): Promise<{ offer: { verdict: string; offer_id: string | null; conditions: unknown } | null; unread: boolean }> {
+  try {
+    const s = await chargeGate.status();
+    return { offer: s.offer_approval ? { verdict: s.offer_approval.verdict, offer_id: s.offer_approval.offer_id, conditions: s.offer_approval.conditions ?? null } : null, unread: false };
+  } catch (e) {
+    console.error(`[proposal] charge gate not read: ${e instanceof Error ? e.message : String(e)}`);
+    return { offer: null, unread: true };
+  }
+}
+
 /** Make (or replace) the proposal for a lead in Stage 3. */
 export async function create(leadId: string, input: ProposalInput, by: string): Promise<{ proposal: ReturnType<typeof forPage>; replaced: string | null }> {
   const who = clean(by, 120) || 'the dashboard login';
@@ -317,7 +328,7 @@ export async function act(token: string, actionRaw: unknown, textRaw: unknown): 
     `*Buyer:* ${f.buyer ?? 'unknown'} · ${p.proposal_id}`,
     '',
     kind === 'accepted'
-      ? 'Next is Stage 4: the agreement and their own Stripe link. No payment has been taken.'
+      ? 'Next is Stage 4: make their agreement from the lead panel and send them its link. No payment has been taken.'
       : kind === 'question'
         ? `*Owner:* <@${QUESTION_OWNER.slack_id}> answers by email, <@${QUESTION_OWNER.backstop_slack_id}> as backstop. The buyer was told this is manual and not instant.`
         : 'Answer them by email. vFarm Assist is not wired to proposals yet.',

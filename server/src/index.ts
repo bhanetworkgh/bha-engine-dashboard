@@ -78,6 +78,7 @@ import * as earlyAccess from './earlyAccess';
 import * as stripeLedger from './stripeLedger';
 import * as vfarmEntitlement from './vfarmEntitlement';
 import * as proposal from './proposal';
+import * as agreement from './agreement';
 import * as intake2 from './intake2';
 import * as intake2Page from './intake2Page';
 import * as systemFeeds from './systemFeeds';
@@ -2905,6 +2906,18 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, internal
       throw e;
     }
   }
+  /** Stage 4's agreement (28 Nov 2026, 08KI): make it, or replace an unsigned one, for a lead in Stage 4. Behind the cookie. */
+  const agr = p.match(/^\/api\/vfarm\/leads\/([^/]+)\/agreement$/);
+  if (agr && method === 'POST') {
+    const body = await readJson(req);
+    try {
+      const r = await agreement.create(decodeURIComponent(agr[1]), typeof body.by === 'string' ? body.by : 'the dashboard login');
+      return send(res, 200, { ok: true, ...r });
+    } catch (e) {
+      if (e instanceof agreement.AgreementError) return send(res, e.status, { ok: false, reason: e.reason, message: e.message });
+      throw e;
+    }
+  }
   const crm = p.match(/^\/api\/vfarm\/leads\/([^/]+)\/(note|next-step|close|reopen)$/);
   if (crm && method === 'POST') {
     const body = await readJson(req);
@@ -3692,6 +3705,35 @@ const server = createServer((req, res) => {
     run().catch((e: unknown) => {
       console.error('[proposal] page', e);
       html(500, proposal.notValid());
+    });
+    return;
+  }
+  /** The buyer's Stage 4 agreement page (28 Nov 2026). Public by necessity, like the proposal: the link is the lock. */
+  const agrPage = url.pathname.match(/^\/agreement\/([A-Za-z0-9_-]{1,80})\/?$/);
+  if (agrPage) {
+    const html = (status: number, body: string) => {
+      res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': Buffer.byteLength(body), 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Robots-Tag': 'noindex' });
+      res.end(req.method === 'HEAD' ? undefined : body);
+    };
+    const token = agrPage[1];
+    const run = async () => {
+      if (req.method === 'POST') {
+        const form = new URLSearchParams((await readRaw(req, 16 * 1024)).toString('utf8'));
+        const r = await agreement.sign(token, { name: form.get('name'), title: form.get('title'), organisation: form.get('organisation'), agree: form.get('agree') }).catch((e: unknown) => {
+          if (e instanceof agreement.AgreementError) return { flash: e.message, signed: false };
+          throw e;
+        });
+        if (!r) return html(404, agreement.notValid());
+        const pg = await agreement.page(token, r.flash);
+        return pg ? html(200, pg) : html(404, agreement.notValid());
+      }
+      if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, { ok: false, message: 'Method not allowed.' });
+      const pg = await agreement.page(token);
+      return pg ? html(200, pg) : html(404, agreement.notValid());
+    };
+    run().catch((e: unknown) => {
+      console.error('[agreement] page', e);
+      html(500, agreement.notValid());
     });
     return;
   }

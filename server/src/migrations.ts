@@ -5377,6 +5377,12 @@ A leak, a burning smell, sparks or anything that feels unsafe is urgent. Keep aw
          FOR EACH ROW EXECUTE FUNCTION engine_income_board_gate_sets_frozen()`,
     ],
   },
+  {
+    // 28 Nov 2026 (Destiny — LOOP-1792401352885-08KI): Stage 4's signed agreement, held on the lead like the proposal.
+    id: 163,
+    name: 'vfarm leads: the signed agreement',
+    statements: [`ALTER TABLE engine_vfarm_leads ADD COLUMN IF NOT EXISTS agreement jsonb`],
+  },
 ];
 
 /** Postgres advisory-lock key. Arbitrary, constant, this application's own. */

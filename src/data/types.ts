@@ -3259,8 +3259,37 @@ export interface VfarmLead {
   proposal?: VfarmProposal | null;
   /** Whether this lead's proposal is a test or a real one, and whether a real one can be made now. */
   proposal_rule?: VfarmProposalRule;
+  /** Stage 4's agreement (2026-11-28, 08KI). Never its text or its link's hash. */
+  agreement?: VfarmAgreement | null;
+  agreement_rule?: VfarmAgreementRule;
   /** What Stripe said about this lead's payment (2026-10-17). */
   stripe_payment?: VfarmStripePayment | null;
+}
+
+export interface VfarmAgreement {
+  agreement_id: string;
+  version: string;
+  test: boolean;
+  offer_id: string | null;
+  proposal_id: string;
+  text_sha256: string;
+  text_chars: number;
+  deposit_cents: number;
+  currency: string;
+  created_at: string;
+  created_by: string;
+  opened_at: string | null;
+  signed: { name: string; title: string | null; organisation: string | null; at: string } | null;
+  notified: { ts: string | null; error: string | null } | null;
+  link: string;
+}
+
+export interface VfarmAgreementRule {
+  team_test: boolean;
+  can_make_real: boolean;
+  offer_id: string | null;
+  monthly_cents: number | null;
+  reason: string;
 }
 
 export interface VfarmProposalRule {

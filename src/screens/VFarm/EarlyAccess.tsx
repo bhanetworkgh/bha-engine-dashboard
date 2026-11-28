@@ -4,6 +4,7 @@ import {
   addVfarmLeadNote,
   clearIntake2Unresponsive,
   createVfarmProposal,
+  createVfarmAgreement,
   closeVfarmLead,
   moveVfarmLeadStage,
   reopenVfarmLead,
@@ -549,12 +550,11 @@ function NextUp({ lead, onUpdated, onToast }: { lead: VfarmLead; onUpdated: (l: 
       <Section title="Stage 4 · Agreement & deposit">
         <p className="text-[13px] text-ink">They accepted {lead.proposal?.proposal_id ?? 'their proposal'}{lead.proposal?.accepted_at ? ` on ${day(lead.proposal.accepted_at)}` : ''}.</p>
         <ul className="mt-1 space-y-0.5 text-[12.5px] text-dim">
-          <li>Agreement: Jason&rsquo;s templates, not written yet. Nothing is sent from here until they are.</li>
           <li>Their own Stripe link: made for this lead only. Payment: {pay?.state === 'failed' ? <span className="text-failing">{payLine}</span> : payLine}</li>
         </ul>
-        <p className="mt-2 text-[12px] text-faint">Stage 4 stays future-state for real buyers until Stripe acceptance, one real Form 2 lead and Canon Lock are proven.</p>
+        <AgreementPanel lead={lead} onUpdated={onUpdated} onToast={onToast} />
         <div className="mt-3 flex flex-wrap gap-2">
-          <Button variant="primary" size="sm" disabled={pay?.state !== 'paid'} loading={busy === 'fwd'} onClick={() => run('fwd', () => moveVfarmLeadStage(lead.id, 5, 'Agreement and payment in'), 'Moved to Stage 5.')}>
+          <Button variant="primary" size="sm" disabled={pay?.state !== 'paid' || !lead.agreement?.signed} loading={busy === 'fwd'} onClick={() => run('fwd', () => moveVfarmLeadStage(lead.id, 5, 'Agreement and payment in'), 'Moved to Stage 5.')}>
             Agreement and payment in: move to Stage 5
           </Button>
           <Button size="sm" variant="ghost" loading={busy === 'back'} onClick={() => run('back', () => moveVfarmLeadStage(lead.id, 3, null), 'Back to Stage 3.')}>
@@ -579,6 +579,65 @@ function NextUp({ lead, onUpdated, onToast }: { lead: VfarmLead; onUpdated: (l: 
       </div>
       {closeControl}
     </Section>
+  );
+}
+
+/** Stage 4: make the agreement, copy its link, see whether it was opened and signed (28 Nov 2026). */
+function AgreementPanel({ lead, onUpdated, onToast }: { lead: VfarmLead; onUpdated: (l: VfarmLead) => void; onToast: (t: string, tone: 'ok' | 'failing') => void }) {
+  const a = lead.agreement ?? null;
+  const rule = lead.agreement_rule;
+  const [busy, setBusy] = useState(false);
+  const money = (c: number, k: string) => `${(c / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })} ${k.toUpperCase()}`;
+  const canMake = !a?.signed && (rule?.team_test || rule?.can_make_real);
+  async function make() {
+    setBusy(true);
+    try {
+      const r = await createVfarmAgreement(lead.id);
+      onUpdated({ ...lead, agreement: r.agreement });
+      onToast(r.replaced ? `Agreement replaced. ${r.replaced}'s link no longer works.` : 'Agreement made. Copy their link and send it to them.', 'ok');
+    } catch (e) {
+      onToast(e instanceof Error ? e.message : 'That did not save.', 'failing');
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="mt-3 text-[12.5px]">
+      <p className="rounded-[10px] bg-hover px-3 py-2 text-ink">{rule?.reason ?? 'The agreement is signed on its own page. Signing takes no payment.'}</p>
+      {a && (
+        <div className="mt-2 space-y-1">
+          <div className="font-semibold text-ink">
+            {a.agreement_id} · {a.version}
+            {a.test ? ' · test' : ''}
+          </div>
+          <p className="text-dim">Deposit {money(a.deposit_cents, a.currency)} · made {day(a.created_at)} by {a.created_by} · {a.opened_at ? `opened ${day(a.opened_at)}` : 'not opened yet'}</p>
+          <p className={a.signed ? 'text-ink' : 'text-dim'}>
+            {a.signed ? `Signed by ${a.signed.name}${a.signed.title ? `, ${a.signed.title}` : ''} on ${day(a.signed.at)}` : 'Not signed yet'}
+            {a.notified?.error ? <span className="text-failing"> · not posted in Slack: {a.notified.error}</span> : null}
+          </p>
+          <p className="text-faint">Fingerprint {a.text_sha256.slice(0, 16)}</p>
+        </div>
+      )}
+      <div className="mt-2 flex flex-wrap gap-2">
+        {a && !a.signed && (
+          <Button
+            size="sm"
+            variant="primary"
+            onClick={async () => {
+              const ok = await copy(a.link);
+              onToast(ok ? 'Their agreement link is copied. It is theirs alone: do not share it.' : 'Could not copy the link.', ok ? 'ok' : 'failing');
+            }}
+          >
+            Copy their agreement link
+          </Button>
+        )}
+        {canMake && (
+          <Button size="sm" variant={a ? 'ghost' : 'primary'} loading={busy} onClick={make}>
+            {a ? 'Replace the agreement' : rule?.team_test ? 'Make the test agreement' : 'Make the agreement'}
+          </Button>
+        )}
+      </div>
+    </div>
   );
 }
 

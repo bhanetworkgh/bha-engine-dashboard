@@ -173,8 +173,11 @@ export async function catalog(opts: { subscriber_id?: string | null; campaign?: 
   const subs = new Map<string, { subscriber_id: string; state: string; since: string; subscription_lane: string | null; buyer_intake_id: string | null; source_campaign: string | null; farm_id: string | null; cabinet_id: string | null; config_hash: string | null; cad_revision: string | null; levelled_up_at: string | null; upgrades: number; last_received: { delivered: unknown; channel: unknown; at: string } | null }>();
   const s = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
   let newestHash: { config_hash: string; cad_revision: string | null; at: string } | null = null;
+  // A team test lead's subscriber (28 Nov 2026, agreement.ts) is counted apart, never as a customer.
+  const testSubs = new Set(rows.filter((r) => r.event_type.startsWith('VFARM_SUBSCRIBER_') && r.detail.test === true).map((r) => r.subject_id));
   for (const r of rows) {
     if (!r.event_type.startsWith('VFARM_SUBSCRIBER_')) continue;
+    if (testSubs.has(r.subject_id)) continue;
     const d = r.detail;
     const cur = subs.get(r.subject_id) ?? { subscriber_id: r.subject_id, state: 'unknown', since: r.at, subscription_lane: null, buyer_intake_id: null, source_campaign: null, farm_id: null, cabinet_id: null, config_hash: null, cad_revision: null, levelled_up_at: null, upgrades: 0, last_received: null };
     if (r.event_type === 'VFARM_SUBSCRIBER_STATE_CHANGED') {
@@ -217,6 +220,7 @@ export async function catalog(opts: { subscriber_id?: string | null; campaign?: 
     flagship_campaign: FLAGSHIP_CAMPAIGN,
     leads: { total: leads.length, by_campaign: tally(leads.map((r) => String(r.detail.source_campaign))), by_surface: tally(leads.map((r) => String(r.detail.source_surface))), newest_at: leads.length ? leads[leads.length - 1].at : null },
     buyers: { total: buyerNow.size, by_state: tally([...buyerNow.values()].map((r) => String(r.detail.new_state))) },
+    test_subscribers_left_out: testSubs.size,
     subscribers: { total: list.length, by_state: tally(list.map((x) => x.state)), by_lane: tally(list.map((x) => x.subscription_lane ?? '(no lane)')), rows: list.slice(-limit).reverse() },
     newest_config: newestHash,
     events_held: tally(rows.map((r) => r.event_type)),

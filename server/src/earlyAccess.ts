@@ -38,6 +38,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { query, withTransaction } from './pg';
 import * as leadFlow from './leadFlow';
+import * as engineEvents from './engineEvents';
 import * as events from './events';
 import * as vfarmCustomerEvents from './vfarmCustomerEvents';
 import { offersByLead } from './vfarmGates';
@@ -46,6 +47,7 @@ import type { Intake2Invite, Intake2Stored } from '../../src/data/intake2';
 import * as intake2 from './intake2';
 import * as chargeGate from './chargeGate';
 import * as proposalMod from './proposal';
+import * as agreementMod from './agreement';
 import { CLOSE_REASONS, type LeadActivity } from '../../src/data/leadPipeline';
 
 /* ------------------------------------------------------------------ config */
@@ -474,6 +476,10 @@ export interface Lead {
   proposal: ReturnType<typeof proposalMod.forPage>;
   /** Test or real, and whether a real proposal can be made now (29 Oct 2026). */
   proposal_rule: proposalMod.ProposalRule;
+  /** Stage 4's agreement (28 Nov 2026), never its text or its link's hash. */
+  agreement: ReturnType<typeof agreementMod.forPage>;
+  /** Test or real, and whether a real agreement can be made now. */
+  agreement_rule: agreementMod.AgreementRule;
   /** What Stripe said about this lead's payment (17 Oct 2026, stripeLedger). */
   stripe_payment: Record<string, unknown> | null;
   /** The CRM (15 Oct 2026): what happens next and by when, a close with a reason, and the timeline. */
@@ -526,13 +532,13 @@ export interface LeadsData {
  * up somewhere it should not be.
  */
 export async function leads(): Promise<LeadsData> {
-  const r = await query<Omit<Lead, 'stage_changed_at' | 'pilot_offers' | 'intake_2_completed_at' | 'intake_2_invite' | 'closed_at' | 'next_step_due' | 'proposal'> & { proposal: proposalMod.Proposal | null; closed_at: Date | null; next_step_due: string | Date | null; created_at: Date; notified_at: Date | null; submitted_at: Date | null; stage_changed_at: Date | null; intake_2_completed_at: Date | null; intake_2_invite: Omit<Intake2Invite, 'link'> | null; seq: string }>(
+  const r = await query<Omit<Lead, 'stage_changed_at' | 'pilot_offers' | 'intake_2_completed_at' | 'intake_2_invite' | 'closed_at' | 'next_step_due' | 'proposal' | 'agreement'> & { proposal: proposalMod.Proposal | null; agreement: agreementMod.Agreement | null; closed_at: Date | null; next_step_due: string | Date | null; created_at: Date; notified_at: Date | null; submitted_at: Date | null; stage_changed_at: Date | null; intake_2_completed_at: Date | null; intake_2_invite: Omit<Intake2Invite, 'link'> | null; seq: string }>(
     `SELECT id, full_name, email, organization_name, source_surface, source_page, source_campaign,
             page_contract_version, mechanics_contract_version, claim_state, status, notes,
             notified_at, submitted_at, created_at, user_agent,
             utm_source, utm_medium, utm_campaign, asset_id, source_channel,
             landing_variant, contract_version, form_a, stage, stage_changed_at, stage_history,
-            intake_2, intake_2_completed_at, intake_2_invite, proposal, stripe_payment,
+            intake_2, intake_2_completed_at, intake_2_invite, proposal, agreement, stripe_payment,
             next_step, to_char(next_step_due, 'YYYY-MM-DD') AS next_step_due, closed_at, closed_reason, closed_note, activity,
             row_number() OVER (PARTITION BY email ORDER BY created_at, id) AS seq
        FROM engine_vfarm_leads
@@ -542,6 +548,7 @@ export async function leads(): Promise<LeadsData> {
   const iso = (d: Date | string | null): string | null => (d ? new Date(d).toISOString() : null);
   const tied = await offersByLead();
   const gate = await proposalMod.currentOffer();
+  const gateFull = await proposalMod.currentOfferFull();
   const rows: Lead[] = r.rows.map((row) => ({
     ...row,
     pilot_offers: tied.get(String(row.id)) ?? [],
@@ -554,6 +561,8 @@ export async function leads(): Promise<LeadsData> {
     intake_2_invite: intake2.forPage(row.intake_2_invite),
     proposal: proposalMod.forPage(row.proposal),
     proposal_rule: proposalMod.rule(row.email, gate.offer, gate.unread),
+    agreement: agreementMod.forPage(row.agreement),
+    agreement_rule: agreementMod.rule(row.email, gateFull.offer, gateFull.unread),
     next_step_due: row.next_step_due ? String(row.next_step_due) : null,
     closed_at: iso(row.closed_at),
     activity: Array.isArray(row.activity) ? row.activity : [],
@@ -613,8 +622,8 @@ export async function moveStage(
   const where = key.id ? `id = $1` : `form_a->>'buyer_intake_id' = $1`;
   const val = key.id ?? key.buyer_intake_id;
   if (!val) throw new SubmissionError(422, 'Name the lead by id or buyer_intake_id.');
-  const cur = await query<{ id: string; buyer: string | null; stage: number; intake_2_completed_at: Date | null; closed_at: Date | null; accepted: string | null; paid: string | null; pay_mode: string | null; team_test: boolean }>(
-    `SELECT id, form_a->>'buyer_intake_id' AS buyer, stage, intake_2_completed_at, closed_at, proposal->>'accepted_at' AS accepted, stripe_payment->>'state' AS paid,
+  const cur = await query<{ id: string; buyer: string | null; stage: number; intake_2_completed_at: Date | null; closed_at: Date | null; accepted: string | null; paid: string | null; pay_mode: string | null; team_test: boolean; agreement: agreementMod.Agreement | null; campaign: string | null }>(
+    `SELECT id, form_a->>'buyer_intake_id' AS buyer, stage, intake_2_completed_at, closed_at, proposal->>'accepted_at' AS accepted, stripe_payment->>'state' AS paid, agreement, source_campaign AS campaign,
             stripe_payment->>'mode' AS pay_mode, ${TEAM_TEST_SQL} AS team_test
        FROM engine_vfarm_leads WHERE ${where}`,
     [val],
@@ -627,10 +636,14 @@ export async function moveStage(
   // The gates of buyer flow v2 (17 Oct 2026). Moving back is always allowed; moving on needs
   // what the stage is for. 3 is the proposal: Form 2 in, and a person moves it once the five
   // checks clear. 4 only by an accepted proposal (the buyer's Accept moves it itself). 5 only
-  // with a paid Stripe payment on the lead; the signed agreement is not built yet.
+  // with a signed agreement (28 Nov 2026, agreement.ts) and a paid Stripe payment on the lead.
   if (to > row.stage) {
     if (to >= 3 && !row.intake_2_completed_at) throw new SubmissionError(409, 'Stage 3 is the proposal, for a buyer whose site specification (Form 2) is in and whose five checks have cleared. This lead has not sent Form 2 yet.');
     if (to >= 4 && !row.accepted) throw new SubmissionError(409, 'Stage 4 is for a buyer who accepted their proposal. This lead has not accepted one.');
+    if (to >= 5) {
+      const signed = agreementMod.stage5Agreement(row.agreement, row.team_test === true);
+      if (!signed.ok) throw new SubmissionError(409, signed.message);
+    }
     if (to >= 5 && row.paid !== 'paid') throw new SubmissionError(409, 'Stage 5 is a customer: the agreement and the payment both in. No paid Stripe payment is recorded on this lead.');
     let canCharge = false;
     if (to >= 5 && row.pay_mode === 'live') {
@@ -657,6 +670,20 @@ export async function moveStage(
       [row.id, to, JSON.stringify([move])],
     );
     await leadFlow.recordStageMove(db, { lead_id: String(row.id), buyer_intake_id: row.buyer, from: row.stage, to, at: move.at, by: who, via, reason: move.reason, test_payment: testPayment });
+    // Reaching Stage 5 makes the buyer a subscriber (28 Nov 2026, 08KI): one VFARM_SUBSCRIBER_STATE_CHANGED,
+    // pending, because active needs the hardware's config_hash and cad_revision, which only commissioning gives.
+    if (to === 5 && row.stage < 5) {
+      const subId = agreementMod.subscriberIdFor(row.buyer ?? String(row.id));
+      await engineEvents.record(
+        {
+          event_type: 'VFARM_SUBSCRIBER_STATE_CHANGED', at: move.at, subject_id: subId, lane: 'CAPITAL', actor: who,
+          source_ref: `https://dashboard.bhanetwork.org/vfarm?tab=early-access&lead=${row.id}`,
+          detail: { subscriber_id: subId, new_state: 'pending', subscription_lane: 'vfarm_pilot_site', buyer_intake_id: row.buyer, source_campaign: row.campaign ?? null, reason: 'Reached Stage 5: agreement signed and deposit paid. Active once commissioned.', changed_by: who, agreement_id: row.agreement?.agreement_id ?? null, test: row.team_test === true },
+          dedupe_key: `VFARM_SUBSCRIBER_STATE_CHANGED:${subId}:pending`,
+        },
+        db,
+      );
+    }
   });
   events.changed('vfarm_leads', row.id);
   // Stage 2 is Intake-2's trigger (Hardik's contract, 13 Oct). The invite never undoes the move:

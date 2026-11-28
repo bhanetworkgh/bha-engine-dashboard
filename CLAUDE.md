@@ -1568,8 +1568,8 @@ is non-transactional). `server/src/proposal.ts`, migration 81.
 - **Five stages**, `LEAD_STAGES` and `PIPELINE`: 1 Interest, 2 Site specification (Invited /
   Spec received), 3 Proposal (was the "paying" placeholder, which no lead was in), 4 Agreement
   & deposit, 5 Customer. **Moving on is gated, moving back is not**: 3 needs Form 2 in (a
-  person moves it once the five checks clear), 4 needs an accepted proposal, 5 a paid
-  `stripe_payment`. The signed agreement is not built, so 5 says so.
+  person moves it once the five checks clear), 4 needs an accepted proposal, 5 a signed
+  agreement and a paid `stripe_payment` (the agreement from 28 Nov 2026, below).
 - **The proposal page** is `/proposal/<token>`, built like Form 2: public, no login, the token
   an HMAC of the proposal id under `INTAKE2_LINK_SECRET` (no new secret), only its sha256
   stored, a link that opens nothing gets the "not valid" page. Made from the lead panel
@@ -1605,6 +1605,14 @@ is non-transactional). `server/src/proposal.ts`, migration 81.
   `buyer_question`, `buyer_call` (proposal.page and proposal.act on the lead's own link), and
   `status`. Destiny or Jason only, **only an @bhanetwork.org lead**, confirm
   `TEST FLOW <buyer_intake_id>`. Audited on `engine_mcp_writes`.
+
+**Stage 4, the signed agreement** (28 Nov 2026, Destiny — LOOP-1792401352885-08KI; the templates moved here from NJJU in Jason's approved consolidation, #bha-coordination 1792426037.993449; DocuSign cancelled the same day). `server/src/agreement.ts`, migration 163 (`engine_vfarm_leads.agreement`).
+- **One private page per lead**, `/agreement/<token>`, built like the proposal page: no login, an HMAC of the agreement id under `INTAKE2_LINK_SECRET`, only its sha256 stored, the same "not valid" page for any link that opens nothing. Made from the lead panel's Stage 4 card (`POST /api/vfarm/leads/:id/agreement`) for a lead in Stage 4 with an accepted proposal; a new one replaces an unsigned one, and a signed one is final.
+- **The text is versioned and frozen**: `termsFor` writes `VFARM-PILOT-AGREEMENT-v1` from the accepted proposal (setup, price; half as deposit at signing, half at commissioning) and the approved offer (monthly price), with the Pilot 1 offer spec's term and four refund and exit rules. The whole text and its sha256 are stored; a signature is refused if the stored text no longer hashes to it. Changing a word is a new version.
+- **A real buyer's agreement waits on Jason**: his newest real offer approval must be `approved` and its `conditions` must carry `agreement_version` equal to `AGREEMENT_VERSION` and `monthly_price_cents`. That is his yes to this exact text; nothing here names it for him. A team test lead gets a test agreement, marked on every view.
+- **Signing** records the typed name, title and organisation, the time, the version and the text's sha256, with one `vfarm_agreement_signed` event in the same transaction and one post in #vfarm-early-access. It moves no stage and takes no payment.
+- **Stage 5 needs a signed agreement and a paid deposit** (`stage5Agreement` before `stage5Payment`); a test agreement counts only for a team test lead. Reaching Stage 5 writes one `VFARM_SUBSCRIBER_STATE_CHANGED` (`pending`, subscriber `VFSUB-<buyer suffix>`, lane `vfarm_pilot_site`), in the same transaction as the move: active needs the hardware's `config_hash` and `cad_revision`, which only commissioning gives. A team test lead's subscriber carries `test: true` and the catalog leaves it out (`test_subscribers_left_out`).
+- `test_buyer_flow` walks it: `agree`, `buyer_open_agreement`, `buyer_sign`. `npm run test:agreement` pins the pure parts; `test:proposal` the Stage 5 gate.
 
 **The Engine Surfaces Contract for the buyer flow** (2026-10-18, Destiny — Jason in
 #bha-coordination, 1792267743.990519). `docs/contracts/engine-surfaces-buyer-flow.md` is the

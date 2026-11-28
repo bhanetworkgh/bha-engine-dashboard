@@ -84,6 +84,7 @@ import type {
   SignInResult,
   VfarmLead,
   VfarmProposal,
+  VfarmAgreement,
   VfarmLeadStatus,
   VfarmLeadsData,
   VfarmGatesData,
@@ -849,6 +850,10 @@ export const getMediaDrafts = () => api<TwinDraftsData>('/api/media-posts');
 export function editVfarmLead(id: string, changes: { status?: VfarmLeadStatus; notes?: string | null }): Promise<VfarmLead> {
   return api<VfarmLead>(`/api/vfarm/leads/${encodeURIComponent(id)}`, { method: 'PATCH', body: changes });
 }
+
+/** Stage 4's agreement (28 Nov 2026): make it, or replace an unsigned one. */
+export const createVfarmAgreement = (id: string) =>
+  api<{ ok: boolean; agreement: VfarmAgreement; replaced: string | null }>(`/api/vfarm/leads/${encodeURIComponent(id)}/agreement`, { method: 'POST', body: {} });
 
 /** Make or replace a lead's Stage 3 proposal (2026-10-17). Price in cents. */
 export const createVfarmProposal = (id: string, body: { setup_name: string; summary: string; inclusions: string[]; price_amount: number; currency: string; timeline: string | null }) =>
