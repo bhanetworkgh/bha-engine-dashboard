@@ -16495,3 +16495,10 @@ Files:     server/src/layer0Void.ts (retireOnApproval: when Jason Status becomes
 
 Effect:    Once Jason approves, the builder is not asked again and no button-less card follows. The
            approval and the pay decided with it stand. Proof waits on the next early approval.
+
+## 2026-11-28 05:00 — Customer Service Twin is vFarm Assist on screen
+Intent:     Destiny's rebrand (vFarm Assist doctrine, SOP 6436bf63): every place a person reads "Customer Service Twin" now reads "vFarm Assist".
+Files:      src/components/Layout.tsx, src/screens/CsTwin/index.tsx, src/screens/CsTwin/HelpPages.tsx, src/screens/MonitoringTwin.tsx, src/data/index.ts, src/data/types.ts, server/src/engine.ts, server/src/proposal.ts, server/src/monitoringCst.ts, server/src/dataGovernance.ts, server/src/helpPages.ts, server/src/cstHelp.ts, server/src/systemFeeds.ts, server/src/serviceBalances.ts, server/src/mcp/{balanceTools,helpPageTools,serviceTools}.ts, docs/contracts/cst-events.md
+Problem:    The sidebar, the page title, the Home tile and the tool descriptions agents read still named the old product.
+Fix:        Text only. The /cs-twin route, the cst_* tables, the CST lane tag, the cst-help-manuals workspaces and every field and webhook name are unchanged, because callers name them. migrations.ts keeps its migration names (they are history and keyed by name).
+Decision:   Identifiers stay; a rename of a route or table is its own change with its callers, not a label edit.

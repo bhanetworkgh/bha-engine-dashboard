@@ -2,7 +2,7 @@
  * CST help pages (27 Oct 2026, Destiny — Jason in #bha-coordination 1792702326.928939: Destiny owns
  * cst-help-manuals; Hardik's Honest Gate check is mandatory before anything lands there).
  *
- * The pages the Customer Service Twin will answer pilot operators from, held here so the team can
+ * The pages vFarm Assist will answer pilot operators from, held here so the team can
  * share one link to each and the agents can read them. Migration 98, `engine_help_pages` (one row
  * per page, the text as it stands now) and `engine_help_page_history` (append-only, every change).
  *

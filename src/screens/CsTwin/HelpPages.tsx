@@ -1,5 +1,5 @@
 /**
- * The Help pages tab on the Customer Service Twin (27 Oct 2026, Destiny).
+ * The Help pages tab on vFarm Assist (27 Oct 2026, Destiny).
  *
  * The pages CST will answer vFarm pilot operators from, each at one address
  * (`/cs-twin?tab=help&page=<id>`) so the team can share it. Each page says its

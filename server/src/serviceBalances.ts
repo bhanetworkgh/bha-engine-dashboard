@@ -1,6 +1,6 @@
 /**
  * The two balances the engine pays to keep running, read now (28 Oct 2026, Destiny): OpenRouter
- * (every agent's model) and Twilio (the Customer Service Twin's calls and texts). Bays asks for it
+ * (every agent's model) and Twilio (vFarm Assist's calls and texts). Bays asks for it
  * with `check_service_balances` when somebody asks in Slack.
  *
  * This server holds no OpenRouter or Twilio credential for this. n8n's `Engine — Service Balances`

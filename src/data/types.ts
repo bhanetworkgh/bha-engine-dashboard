@@ -3999,7 +3999,7 @@ export interface VfarmLiveData {
 }
 
 /* ------------------------------------------------------------------------
- * Customer Service Twin, pushed as it happens (2026-09-29, Destiny).
+ * vFarm Assist, pushed as it happens (2026-09-29, Destiny).
  * The server's own shapes, from server/src/systemFeeds.ts (cstData).
  * --------------------------------------------------------------------- */
 

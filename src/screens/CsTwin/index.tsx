@@ -28,7 +28,7 @@ import {
 } from '../../components/ui';
 
 /**
- * Customer Service Twin (2026-09-29, Destiny). A placeholder from 22 Sep until
+ * vFarm Assist (2026-09-29, Destiny). A placeholder from 22 Sep until
  * then: nothing CST did reached this dashboard. Now CST posts two events per
  * customer turn to `POST /api/engine/cst-events` — the turn itself (the message
  * in, CST's reply, the intent and the status CST already computes) and, from
@@ -87,7 +87,7 @@ export default function CsTwin() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader
-        title="Customer Service Twin"
+        title="vFarm Assist"
         subtitle="Every customer text, call and web message, and what CST did with it"
         below={<Tabs tabs={TABS} value={tab} onChange={setTab} counts={{ Turns: data?.summary.turns ? { n: data.summary.turns } : undefined, 'Help pages': help.data ? { n: help.data.pages.length } : undefined }} />}
       />
@@ -110,7 +110,7 @@ export default function CsTwin() {
       ) : data.meta.rows === 0 ? (
         <div className="px-6 pb-8 md:px-8">
           <EmptyState>
-            No Customer Service Twin event has arrived yet. CST posts each customer turn, and what became of its reply, to{' '}
+            No vFarm Assist event has arrived yet. CST posts each customer turn, and what became of its reply, to{' '}
             <code>/api/engine/cst-events</code> once Ahad wires it (the contract is docs/contracts/cst-events.md in this repo). The first one appears
             here the moment it lands — there is nothing to press.
           </EmptyState>
@@ -175,7 +175,7 @@ function Turns({ data }: { data: CstData }) {
             </span>
           }
         />
-        <TableFrame flat grow={false} label="Customer Service Twin turns">
+        <TableFrame flat grow={false} label="vFarm Assist turns">
           <thead>
             <tr>
               <Th>when (UTC)</Th>

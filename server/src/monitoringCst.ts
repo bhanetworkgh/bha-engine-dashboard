@@ -1,11 +1,11 @@
 /**
- * The Customer Service Twin on the Monitoring Twin (6 Nov 2026, Destiny; Jason's Engine-first list on
+ * vFarm Assist on the Monitoring Twin (6 Nov 2026, Destiny; Jason's Engine-first list on
  * the 5 Nov log: CST wired into the Monitoring Twin). CST sends its calls and texts here through
  * `POST /api/engine/cst-events`; this says what arrived, by channel. CST sends nothing to Research
  * Twin and reads no farm data, so a sensor fault is never in these rows.
  *
  * It carries no message, reply, number or name: this read reaches Genie's and the twins' tokens, and
- * the whole record stays on the Customer Service Twin page. Test traffic is counted in nothing.
+ * the whole record stays on vFarm Assist page. Test traffic is counted in nothing.
  * A quiet line is not a fault, so an empty window is said as empty and opens no incident.
  */
 import type { Queryable } from './pg';
@@ -54,7 +54,7 @@ export function summarise(rows: TurnRow[], newest: Map<string, string>, now: num
     ended_7d: endedTally(rows),
     recent: rows.slice(0, WATCH.recent).map((r) => ({ ...r, failed: isFailed(r) })),
     note: rows.length
-      ? 'Real calls and texts only; test traffic is left out. The words and numbers are on the Customer Service Twin page.'
+      ? 'Real calls and texts only; test traffic is left out. The words and numbers are on vFarm Assist page.'
       : `No real call or text has arrived in ${WATCH.window_days} days. A quiet line is not a fault, and this says nothing about whether CST tried to send one.`,
   };
 }

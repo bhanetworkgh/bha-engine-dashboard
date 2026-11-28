@@ -257,7 +257,7 @@ function FarmCard({ f }: { f: MonitoringFarm }) {
   );
 }
 
-/** CST's calls and texts: counts and outcomes only. The words are on the Customer Service Twin page. */
+/** CST's calls and texts: counts and outcomes only. The words are on vFarm Assist page. */
 function CustomerService({ data }: { data: MonitoringTwinData }) {
   const c = data.customer_service;
   if (!c?.ok) return <EmptyState>{c?.note ?? 'The CST rows could not be read.'}</EmptyState>;

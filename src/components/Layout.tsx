@@ -26,7 +26,7 @@ const GROUPS: { group: string | null; items: { to: string; label: string; icon: 
       { to: '/media-twin', label: 'Media Twin', icon: 'tag' },
       { to: '/genie', label: 'Genie', icon: 'sparkle' },
       // A placeholder too (2026-09-22, Destiny), for the same reason.
-      { to: '/cs-twin', label: 'Customer Service Twin', icon: 'mic' },
+      { to: '/cs-twin', label: 'vFarm Assist', icon: 'mic' },
       { to: '/vfarm', label: 'vFarm', icon: 'leaf' },
       // The layer on top of vFarm's feed that judges it (2026-10-01, Destiny).
       { to: '/monitoring-twin', label: 'Monitoring Twin', icon: 'shield' },

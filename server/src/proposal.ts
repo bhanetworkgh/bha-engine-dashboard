@@ -2,7 +2,7 @@
  * Stage 3, the proposal (17 Oct 2026, Destiny — Jason in #bha-coordination, 17 Oct:
  * "Stage 3 is us answering back with 'this is the setup that fits your site' (Canon-Locked
  * setups only) and 'this is its price'. From there they can accept and move to Stage 4, ask
- * the Customer Service Twin questions, or request a call as an optional branch. Stage 3 is
+ * vFarm Assist questions, or request a call as an optional branch. Stage 3 is
  * non-transactional." SOP 66570ea2; the flow is SOP 09cb58a7).
  *
  * - **One private page per lead**, `/proposal/<token>`, built like Form 2: no login, the link is
@@ -320,7 +320,7 @@ export async function act(token: string, actionRaw: unknown, textRaw: unknown): 
       ? 'Next is Stage 4: the agreement and their own Stripe link. No payment has been taken.'
       : kind === 'question'
         ? `*Owner:* <@${QUESTION_OWNER.slack_id}> answers by email, <@${QUESTION_OWNER.backstop_slack_id}> as backstop. The buyer was told this is manual and not instant.`
-        : 'Answer them by email. The Customer Service Twin is not wired to proposals yet.',
+        : 'Answer them by email. vFarm Assist is not wired to proposals yet.',
     `Record: ${base()}/vfarm?tab=early-access&lead=${f.id}`,
   ].join('\n');
   const notified = await post(text2);

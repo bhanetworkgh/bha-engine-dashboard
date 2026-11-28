@@ -146,7 +146,7 @@ export async function getOverview(_q: Query): Promise<OverviewData> {
   ).rows[0];
   const leads = { n: Number(leadRow?.n ?? 0), week: Number(leadRow?.week ?? 0), newest: leadRow?.newest ?? null };
   /**
-   * Genie and the Customer Service Twin push their own rows from 2026-09-29, so
+   * Genie and vFarm Assist push their own rows from 2026-09-29, so
    * their tiles count them. Before the first push each still says "Not
    * connected yet" and draws no number, because until then that is the truth.
    */
@@ -328,7 +328,7 @@ export async function getOverview(_q: Query): Promise<OverviewData> {
       pushed?.cst
         ? {
             key: 'cs-twin',
-            label: 'Customer Service Twin',
+            label: 'vFarm Assist',
             to: '/cs-twin',
             headline: String(pushed.cst),
             sublabel: pushed.cst === 1 ? 'customer turn' : 'customer turns',
@@ -338,7 +338,7 @@ export async function getOverview(_q: Query): Promise<OverviewData> {
               : `${pushed.cst_week} in the last 7 days; ${pushed.cst_escalated} sent to a person.`,
             health: (pushed.cst_lost ? 'degraded' : 'ok') as OverviewTile['health'],
           }
-        : { key: 'cs-twin', label: 'Customer Service Twin', to: '/cs-twin', headline: '—', sublabel: 'Not connected yet', signal: 'CST has not posted a customer turn here yet.', health: 'ok', muted: true },
+        : { key: 'cs-twin', label: 'vFarm Assist', to: '/cs-twin', headline: '—', sublabel: 'Not connected yet', signal: 'CST has not posted a customer turn here yet.', health: 'ok', muted: true },
       {
         key: 'vfarm',
         label: 'vFarm',

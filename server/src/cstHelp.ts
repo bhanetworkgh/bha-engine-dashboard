@@ -1,5 +1,5 @@
 /**
- * The help pages, as the Customer Service Twin's voice agent reads them (30 Oct 2026, Destiny: the
+ * The help pages, as vFarm Assist's voice agent reads them (30 Oct 2026, Destiny: the
  * three help pages are CST's knowledge base, kept as pages on this dashboard, and the voice agent is
  * pointed at them rather than given copies).
  *

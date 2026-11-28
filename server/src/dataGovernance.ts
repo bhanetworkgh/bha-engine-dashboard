@@ -56,7 +56,7 @@ const askDated = asTime(`coalesce(nullif(fields->>'Asked At', ''), created_time)
  */
 export const RETENTION: RetentionRule[] = [
   {
-    store: 'Customer Service Twin turns',
+    store: 'vFarm Assist turns',
     table: 'engine_cst_turns',
     days: 180,
     clears: "the customer's message, CST's reply, the phone number and the name",

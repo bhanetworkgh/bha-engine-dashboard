@@ -24,7 +24,7 @@
  *   POST /api/engine/vfarm-alerts     one vfarm.alert.v1 envelope
  *   POST /api/engine/vfarm-snapshot   one vfarm.snapshot.v1
  *   POST /api/engine/cst-events       one cst.event.v1, or { events: [...] } (≤200)
- *                                     — the Customer Service Twin, added the same day
+ *                                     — vFarm Assist, added the same day
  */
 import { query, withTransaction } from './pg';
 import * as events from './events';
@@ -1017,10 +1017,10 @@ export async function vfarmData() {
   };
 }
 
-/* ------------------------------------------------- Customer Service Twin */
+/* ------------------------------------------------- vFarm Assist */
 
 /**
- * The Customer Service Twin, pushed as it happens (2026-09-29, Destiny).
+ * vFarm Assist, pushed as it happens (2026-09-29, Destiny).
  * `POST /api/engine/cst-events`, one `cst.event.v1` event or `{ events: [...] }`
  * (≤200). Two event types, both keyed on CST's own `turn_id` — the
  * `correlation_id` its MessageEnvelope already carries:

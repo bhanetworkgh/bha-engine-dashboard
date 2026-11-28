@@ -25,7 +25,7 @@ export const pageUrl = (id: string): string => `${PUBLIC}/cs-twin?tab=help&page=
 export const readHelpPages: ToolDefinition = {
   name: 'read_help_pages',
   description:
-    "The Customer Service Twin's help pages for vFarm pilot operators (the cst-help-manuals corpus Destiny owns): the operator quick start, rack and reservoir care, and what the assistant can and cannot do. Each page comes with its stage: draft (unreviewed; open gaps named with who owes them), checked (Hardik passed this exact text against Honest Gate) or in_corpus (in BHARAG's cst-help-manuals, the only thing CST answers customers from). customer_safe is true only at in_corpus. Rules travel with the answer: never quote a draft to a customer or pilot operator as BHA's answer, and never fill a gap in. page_id returns one page whole; without it, every page. Each page carries url, the dashboard link to share with the team. Read only.",
+    "vFarm Assist's help pages for vFarm pilot operators (the cst-help-manuals corpus Destiny owns): the operator quick start, rack and reservoir care, and what the assistant can and cannot do. Each page comes with its stage: draft (unreviewed; open gaps named with who owes them), checked (Hardik passed this exact text against Honest Gate) or in_corpus (in BHARAG's cst-help-manuals, the only thing CST answers customers from). customer_safe is true only at in_corpus. Rules travel with the answer: never quote a draft to a customer or pilot operator as BHA's answer, and never fill a gap in. page_id returns one page whole; without it, every page. Each page carries url, the dashboard link to share with the team. Read only.",
   inputSchema: {
     type: 'object',
     properties: {

@@ -1,10 +1,10 @@
-# Customer Service Twin → BHA Engine Dashboard: every customer turn, as it happens
+# vFarm Assist → BHA Engine Dashboard: every customer turn, as it happens
 
 **For:** Ahad (CST). **From:** Destiny, 29 Sep 2026. **Status:** the dashboard side is live; this is the CST side.
 
 ## Why
 
-CST keeps a full record in its own Postgres: conversations, messages in and out, delivery status, the security log. None of it reaches BHA's engine dashboard, so the **Customer Service Twin** page there (dashboard.bhanetwork.org/cs-twin) has been a placeholder.
+CST keeps a full record in its own Postgres: conversations, messages in and out, delivery status, the security log. None of it reaches BHA's engine dashboard, so the **vFarm Assist** page there (dashboard.bhanetwork.org/cs-twin) has been a placeholder.
 
 The fix is a push. After every customer turn, CST posts what happened, and the page shows it the moment it lands, with the same live refresh the other pages have. The page has two tabs:
 
@@ -125,4 +125,4 @@ A BHARAG incident-read key for `CUSTOMER_TWIN`. CST already files its escalation
 
 ## When it works
 
-The first turn appears under **Turns** within a second, with its outcome, time and delivery, and the Home page's Customer Service Twin tile starts counting.
+The first turn appears under **Turns** within a second, with its outcome, time and delivery, and the Home page's vFarm Assist tile starts counting.
