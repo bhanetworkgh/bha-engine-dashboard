@@ -1118,7 +1118,9 @@ export async function monitoringData(db: Queryable = { query }) {
         window_h: UPTIME_WINDOW_H,
         observed_s: Math.max(0, Math.round(observed / 1000)),
         offline_s: Math.round(down / 1000),
-        pct: observed > 0 ? Math.round((1 - Math.min(down, observed) / observed) * 1000) / 10 : null,
+        // No devices on the farm: nothing could be offline, so 100% would be a claim about
+        // nothing (28 Nov 2026, DW-1794181771227-53O8). Unknown, never 100.
+        pct: observed > 0 && devs.length > 0 ? Math.round((1 - Math.min(down, observed) / observed) * 1000) / 10 : null,
         note: `Share of the observed time (the last ${UPTIME_WINDOW_H} h, or since the twin started watching this farm if later, less any time the feed was silent) with no device OFFLINE.`,
       },
       state_counts: counts,

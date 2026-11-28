@@ -16516,3 +16516,10 @@ Files:      server/src/helpPages.ts, server/src/mcp/helpPageTools.ts, server/tes
 Problem:    back_to_draft changed the page's stage but left its document in cst-help-manuals, where the old assistant still reads it.
 Fix:        back_to_draft on an in_corpus page runs retireOldCopies with nothing kept: every copy is deleted and read again, and the answer names what was removed or what is still there.
 Decision:   rack-care is taken back to draft with this path once it deploys (BHARAG doc 4b5d3a9e-f0cb-4a10-940c-d0c929196426).
+
+## 2026-11-28 06:10 — An empty farm no longer reads live
+Intent:     DW-1794181771227-53O8 (the Monitoring Twin checklist). Genie had flagged that Test 001 reads "live" while reporting on 0 devices; confirmed on the live read at 05:58 UTC: evidence_status live, "Every device is LIVE", "Test 001 is reporting on all 0 devices", uptime 100%.
+Files:      server/src/vfarmEvidence.ts, server/src/monitoringTwin.ts, server/test/vfarm-evidence.test.cjs
+Problem:    evidenceStatus fell through every branch for a farm whose feed arrives with no devices (notLive empty) and returned live; uptime divided observed time by no offline time and printed 100.
+Fix:        A farm with no devices is absent, not reportable, and says vFarm lists no devices on it. Its uptime pct is null, not 100. One new check in test:vfarm-evidence (10 pass).
+Decision:   Absent rather than degraded: there is nothing on the farm to be degraded, and absent is the state the twins already treat as "say nothing about it".

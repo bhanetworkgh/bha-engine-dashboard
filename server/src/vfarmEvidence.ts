@@ -81,6 +81,16 @@ export function evidenceStatus(f: FarmLike): EvidenceStatus {
       fallback: `${label}'s feed has been silent since ${f.feed.last_snapshot_at}, so I don't have current readings for it.`,
     };
   }
+  if (!f.devices.length) {
+    // 28 Nov 2026 (Destiny, DW-1794181771227-53O8): a farm whose snapshots arrive with no
+    // devices in them read "live", "reporting on all 0 devices", so an empty farm looked green.
+    return {
+      state: 'absent', degraded: true, reportable: false, reportable_devices: [], not_reportable_devices: [],
+      reasons: ['The feed is arriving, but vFarm lists no devices on this farm.'], incidents,
+      instruction: 'There is nothing on this farm to read. Do not report any reading, state, health or uptime for it, and do not call it healthy, live or empty; say vFarm lists no devices on it.',
+      fallback: `${label}'s feed is arriving, but vFarm lists no devices on it, so there is nothing to report.`,
+    };
+  }
   if (notLive.length) {
     return {
       state: 'degraded', degraded: true, reportable: live.length > 0, reportable_devices: live, not_reportable_devices: notLive,

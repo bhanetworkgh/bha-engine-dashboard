@@ -37,6 +37,11 @@ s = ev.evidenceStatus(farm({ devices: [{ device_id: 'a', state: 'OFFLINE' }, { d
 assert.equal(s.state, 'degraded'); assert.equal(s.reportable, false); assert.match(s.fallback, /none of its 2 devices is reporting/);
 ok('a feed arriving with every device down is degraded and says no current readings');
 
+s = ev.evidenceStatus(farm({ devices: [] }));
+assert.equal(s.state, 'absent'); assert.equal(s.reportable, false); assert.deepEqual(s.reportable_devices, []);
+assert.match(s.fallback, /lists no devices/); assert.doesNotMatch(s.fallback, /reporting on all/);
+ok('a feed arriving with no devices on the farm is absent, never live (an empty farm never looks green)');
+
 s = ev.noRealFarm();
 assert.equal(s.state, 'absent'); assert.equal(s.degraded, true);
 ok('no real farm held is absent, never "no problems"');
